@@ -1,67 +1,66 @@
-/*
- * Kamen Fight — live combat playback adapter
- * File: js/combat_engine.js
- * Version: live-ui-2
+/* js/combat_engine.js
+ * Sequential combat playback, including periodic status events.
  *
- * CombatCore remains the only combat-rules implementation.
- * This file displays its events and advances the live match.
+ * Compatibility: live-ui-2
+ * Patch: complete-status-playback-3-hit-reaction-fix
+ *
+ * CombatCore.resolve() remains the sole combat authority.
+ * This file never calculates damage, recovery or status duration.
  */
-
 (function (g) {
   "use strict";
 
   const VERSION = "live-ui-2";
+  const PATCH = "complete-status-playback-3-hit-reaction-fix";
+
   const SLOTS = ["p1", "p2"];
   const C = g.CombatCore;
   const K = g.KF;
 
   function assertReady() {
-    if (!C || typeof C.resolve !== "function") {
-      throw new Error("Load combat_core.js before combat_engine.js.");
-    }
+    const requirements = [
+      [
+        typeof C?.resolve === "function",
+        "Load combat_core.js before combat_engine.js."
+      ],
+      [
+        K?.VERSION === "shared-core-1",
+        "Combat playback requires common.js shared-core-1."
+      ],
+      [
+        typeof g.KF_AI?.remember === "function",
+        "The AI history module is missing."
+      ],
+      [
+        typeof g.UI?.showBattleBanner === "function" &&
+        typeof g.UI?.showDamagePopup === "function" &&
+        typeof g.UI?.showActionBanner === "function",
+        "The battle UI module is missing."
+      ],
+      [
+        typeof g.GameView?.paint === "function" &&
+        typeof g.GameView?.finish === "function",
+        "The game view is missing."
+      ],
+      [
+        g.KFMedia?.VERSION === "sequential-media-1" &&
+        typeof g.KFMedia.freezeSides === "function" &&
+        typeof g.playCenterVideo === "function" &&
+        typeof g.playReactionVideo === "function",
+        "Sequential media.js is missing or incompatible."
+      ],
+      [
+        typeof g.MatchManager?.begin === "function",
+        "The match manager is missing."
+      ]
+    ];
 
-    if (!K || K.VERSION !== "shared-core-1") {
-      throw new Error(
-        "This playback adapter requires common.js shared-core-1."
-      );
-    }
-
-    if (
-      !g.KF_AI ||
-      typeof g.KF_AI.remember !== "function"
-    ) {
-      throw new Error("The AI history module is not loaded.");
-    }
-
-    if (
-      !g.UI ||
-      typeof g.UI.showBattleBanner !== "function" ||
-      typeof g.UI.showDamagePopup !== "function"
-    ) {
-      throw new Error("The battle UI module is not loaded.");
-    }
-
-    if (
-      !g.GameView ||
-      typeof g.GameView.paint !== "function" ||
-      typeof g.GameView.finish !== "function"
-    ) {
-      throw new Error("The game view is not loaded.");
-    }
-
-    if (typeof g.playCenterVideo !== "function") {
-      throw new Error("Load media.js before starting a live match.");
-    }
-
-    if (
-      !g.MatchManager ||
-      typeof g.MatchManager.begin !== "function"
-    ) {
-      throw new Error("The match manager is not loaded.");
+    for (const [ready, message] of requirements) {
+      if (!ready) throw new Error(message);
     }
   }
 
-  function isCurrent(gs, token) {
+  function ownsTurn(gs, token) {
     return (
       g.gameState === gs &&
       gs.roundToken === token &&
@@ -77,254 +76,659 @@
     g.GameView.paint();
   }
 
-  function showSideMedia(slot, state) {
-    if (typeof g.updateCharacterMedia !== "function") return;
+  function popup(slot, text, type = "scratch") {
+    g.UI.showDamagePopup(
+      `${slot}-box`,
+      text,
+      type
+    );
+  }
+
+  function nameForStatus(id) {
+    return typeof g.UI.statusName === "function"
+      ? g.UI.statusName(id)
+      : String(id || "Status");
+  }
+
+  function resolveMoveData(gs, slot, event) {
+    const key = event?.key;
+    const coreMove = gs?.core?.moves?.[slot]?.[key];
+    const slotMove = gs?.[slot]?.moves?.[key];
+    const eventMove = event?.move;
+
+    const riderId = String(
+      gs?.[slot]?.id ||
+      gs?.core?.[slot]?.id ||
+      (slot === "p1" ? "ichigo" : "nigo")
+    ).toLowerCase();
+
+    const rosterMove =
+      g.ROSTER?.[riderId]?.moves?.[key] ||
+      g.RIDERS?.[riderId]?.moves?.[key] ||
+      g.CHARACTERS?.[riderId]?.moves?.[key] ||
+      g.MOVES?.[riderId]?.[key] ||
+      g.MOVES?.[slot]?.[key] ||
+      g.MOVES?.[key] ||
+      null;
+
+    const merged = Object.assign(
+      {},
+      C.IDLE || {},
+      rosterMove || {},
+      slotMove || {},
+      coreMove || {},
+      eventMove || {}
+    );
+
+    const videoFile =
+      merged.video ||
+      merged.videoFile ||
+      merged.clip ||
+      merged.src ||
+      rosterMove?.video ||
+      slotMove?.video ||
+      coreMove?.video ||
+      null;
+
+    if (videoFile) {
+      merged.video = videoFile;
+    }
+
+    if (!merged.key && key) {
+      merged.key = key;
+    }
+
+    return merged;
+  }
+
+  function cancellationLines(gs, cancellations) {
+    const grouped = new Map();
+
+    for (const event of cancellations) {
+      if (!SLOTS.includes(event.slot)) continue;
+
+      if (!grouped.has(event.slot)) {
+        grouped.set(event.slot, new Set());
+      }
+
+      const ids = grouped.get(event.slot);
+
+      for (const id of event.statuses || []) {
+        ids.add(id);
+      }
+    }
+
+    return [...grouped.entries()].map(([slot, ids]) => (
+      `${gs[slot].name}: cancelled ` +
+      [...ids].map(nameForStatus).join(", ") +
+      " — LP damage"
+    ));
+  }
+
+  function appliedStatusLines(gs, before, after) {
+    const lines = [];
+
+    for (const slot of SLOTS) {
+      const previous = new Map(
+        (before[slot]?.activeBuffs || [])
+          .filter(buff => buff.roundsLeft > 0)
+          .map(buff => [buff.id, buff])
+      );
+
+      for (const buff of after[slot]?.activeBuffs || []) {
+        if (!(buff.roundsLeft > 0)) continue;
+
+        const old = previous.get(buff.id);
+
+        const newlyApplied = !old;
+        const refreshed =
+          old &&
+          buff.appliedRound !== old.appliedRound;
+
+        if (!newlyApplied && !refreshed) continue;
+
+        lines.push(
+          `${gs[slot].name}: ` +
+          `${refreshed ? "refreshed" : "gained"} ` +
+          `${nameForStatus(buff.id)} ` +
+          `(${buff.roundsLeft}t)`
+        );
+      }
+    }
+
+    return lines;
+  }
+
+  function setBanner(base, extraLines = []) {
+    g.UI.showBattleBanner(
+      [base, ...extraLines]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  function outcomeLabel(event) {
+    const damage = Math.max(
+      0,
+      Number(event.damage) || 0
+    );
+
+    const chiGain = Math.max(
+      0,
+      Number(event.guardReward) || 0
+    );
+
+    const chiSuffix = chiGain > 0
+      ? ` (+${chiGain} CHI)`
+      : "";
+
+    const labels = {
+      miss: "MISS",
+      block:
+        (damage > 0 ? `BLOCK: -${damage}` : "BLOCK") +
+        chiSuffix,
+      partialBlock:
+        `PARTIAL BLOCK: -${damage}${chiSuffix}`,
+      guardFail: `GUARD FAILED: -${damage}`,
+      glancing: `SCRATCH: -${damage}`
+    };
+
+    return labels[event.outcome] ||
+      `-${damage}${chiSuffix}`;
+  }
+
+  function reactionFor(gs, event) {
+    if (event.outcome === "miss") return "DODGE";
+
+    if (
+      event.outcome === "block" ||
+      event.outcome === "partialBlock" ||
+      (
+        event.guarded &&
+        event.outcome !== "guardFail"
+      )
+    ) {
+      return "GUARD";
+    }
+
+    return "HIT";
+  }
+
+  function videoOptions(context) {
+    return {
+      signal: context.controller.signal,
+      isCurrent: context.current
+    };
+  }
+
+  async function readableDelay(context, ms = 450) {
+    if (!context.current()) return false;
+
+    await K.wait(ms);
+    return context.current();
+  }
+
+  async function awaitClip(context, startClip) {
+    if (!context.current()) return false;
 
     try {
-      g.updateCharacterMedia(slot, state);
+      const result = await startClip();
+
+      if (!context.current()) {
+        context.controller.abort();
+        return false;
+      }
+
+      if (result?.status !== "ended") {
+        console.warn(
+          "[CombatPlayback] Clip did not finish normally:",
+          result
+        );
+
+        await readableDelay(context, 250);
+      }
     } catch (error) {
-      // A presentation error must not recalculate combat.
-      console.warn("Side media warning:", error);
+      if (!context.current()) {
+        context.controller.abort();
+        return false;
+      }
+
+      console.warn(
+        "[CombatPlayback] Media warning:",
+        error
+      );
+
+      await readableDelay(context, 250);
     }
+
+    return context.current();
   }
 
-  function popup(slot, text, type = "scratch") {
-    g.UI.showDamagePopup(`${slot}-box`, text, type);
-  }
+  async function playAction(context, slot, move) {
+    if (!move?.video) {
+      console.warn(
+        "[CombatPlayback] Move has no video configured:",
+        slot,
+        move
+      );
+      return context.current();
+    }
 
-  async function playMoveVideo(gs, token, slot, move) {
-    if (!isCurrent(gs, token) || !move.video) return;
-
-    const timeout = Math.max(
+    const stallTimeout = Math.max(
       1000,
       Number(g.GAME_CONFIG?.VIDEO_TIMEOUT_MS) || 8000
     );
 
-    try {
-      // Existing media.js handles missing clips and a bounded timeout.
-      await g.playCenterVideo(
+    return awaitClip(context, () =>
+      g.playCenterVideo(
         slot,
         move.video,
         move.name || move.key || "",
-        timeout,
-        move
-      );
-    } catch (error) {
-      console.warn("Action video warning:", error);
-
-      if (isCurrent(gs, token)) {
-        g.UI.showBattleBanner(
-          "VIDEO UNAVAILABLE — continuing the resolved turn."
-        );
-        await K.wait(400);
-      }
-    }
+        stallTimeout,
+        move,
+        videoOptions(context)
+      )
+    );
   }
 
-  function attackLabel(event) {
-    const damage = Math.max(0, Number(event.damage) || 0);
-
-    switch (event.outcome) {
-      case "miss":
-        return "MISS";
-
-      case "block":
-        return damage > 0 ? `BLOCK: -${damage}` : "BLOCK";
-
-      case "partialBlock":
-        return `PARTIAL BLOCK: -${damage}`;
-
-      case "guardFail":
-        return `GUARD FAILED: -${damage}`;
-
-      case "glancing":
-        return `SCRATCH: -${damage}`;
-
-      default:
-        return `-${damage}`;
-    }
+  async function playReaction(context, slot, state) {
+    return awaitClip(context, () =>
+      g.playReactionVideo(
+        slot,
+        state,
+        videoOptions(context)
+      )
+    );
   }
 
-  async function presentEvent(gs, token, event) {
-    if (!isCurrent(gs, token) || event.type === "end") return;
-
+  async function presentPeriodic(
+    context,
+    event,
+    cancellations
+  ) {
+    const gs = context.gs;
     const slot = event.slot;
-    const move = gs.core.moves[slot]?.[event.key] || C.IDLE;
+
+    paintSnapshot(gs, event);
+
+    const notes = cancellationLines(
+      gs,
+      cancellations
+    );
+
+    if (event.type === "recovery") {
+      const recovery = Math.max(
+        0,
+        Number(event.recovery) || 0
+      );
+
+      popup(
+        slot,
+        recovery > 0
+          ? `+${recovery} LP`
+          : "LP FULL",
+        "heal"
+      );
+
+      setBanner(
+        `${gs[slot].name}: periodic recovery ` +
+        `+${recovery} LP`,
+        notes
+      );
+
+      await readableDelay(context);
+      return;
+    }
+
+    const damage = Math.max(
+      0,
+      Number(event.damage) || 0
+    );
+
+    popup(
+      slot,
+      `BLEEDING\n-${damage} LP`,
+      "damage"
+    );
+
+    setBanner(
+      `${gs[slot].name}: bleeding -${damage} LP`,
+      notes
+    );
+
+    if (damage > 0) {
+      await playReaction(context, slot, "HIT");
+    } else {
+      await readableDelay(context);
+    }
+  }
+
+  async function presentEvent(
+    context,
+    event,
+    cancellations = []
+  ) {
+    if (!context.current()) return;
+
+    const gs = context.gs;
+    const slot = event.slot;
+
+    if (
+      event.type === "bleeding" ||
+      event.type === "recovery"
+    ) {
+      await presentPeriodic(
+        context,
+        event,
+        cancellations
+      );
+
+      return;
+    }
+
+    const move = resolveMoveData(gs, slot, event);
 
     if (event.type === "interrupted") {
       paintSnapshot(gs, event);
 
-      g.UI.showBattleBanner(
-        `${gs[slot].name}: ${move.name || event.key} interrupted.`
+      popup(slot, "INTERRUPTED");
+
+      setBanner(
+        `${gs[slot].name}: ` +
+        `${move.name || event.key} interrupted.`,
+        cancellationLines(gs, cancellations)
       );
 
-      popup(slot, "INTERRUPTED");
-      await K.wait(450);
+      await readableDelay(context);
       return;
     }
 
     if (
-      event.type !== "guardReady" &&
-      event.type !== "utility" &&
-      event.type !== "attack"
+      !["guardReady", "utility", "attack"]
+        .includes(event.type)
     ) {
-      throw new Error(`Unsupported combat event: ${event.type}`);
+      throw new Error(
+        `Unsupported combat event: ${event.type}`
+      );
     }
 
-    const previousLp = gs[slot].lp;
     const actorName = gs[slot].name;
 
-    g.UI.showBattleBanner(
-      `[${slot.toUpperCase()}] ${actorName}: ${move.name || event.key}`
+    const displayedBefore = {
+      p1: C.copyFighter(gs.p1),
+      p2: C.copyFighter(gs.p2)
+    };
+
+    setBanner(
+      `[${slot.toUpperCase()}] ${actorName}: ` +
+      `${move.name || event.key}`
     );
 
-    await playMoveVideo(gs, token, slot, move);
+    if (!await playAction(context, slot, move)) {
+      return;
+    }
 
-    if (!isCurrent(gs, token)) return;
+    if (!context.current()) return;
 
-    // These snapshots come from CombatCore; no damage is recalculated.
     paintSnapshot(gs, event);
 
+    const notes = [
+      ...cancellationLines(gs, cancellations),
+      ...appliedStatusLines(
+        gs,
+        displayedBefore,
+        event
+      )
+    ];
+
     if (event.type === "guardReady") {
-      showSideMedia(slot, "GUARD");
       popup(slot, "GUARD READY");
-      await K.wait(300);
+
+      setBanner(
+        `${actorName}: ${move.name || event.key} ready`,
+        notes
+      );
+
+      await readableDelay(context);
       return;
     }
 
     if (event.type === "utility") {
-      const recovered = Math.max(0, gs[slot].lp - previousLp);
+      const recoveredLp = Math.max(
+        0,
+        gs[slot].lp - displayedBefore[slot].lp
+      );
+
+      const recoveredFaint = Math.max(
+        0,
+        displayedBefore[slot].faintMeter -
+        gs[slot].faintMeter
+      );
+
+      const changes = [];
+
+      if (recoveredLp > 0) {
+        changes.push(`+${recoveredLp} LP`);
+      }
+
+      if (recoveredFaint > 0) {
+        changes.push(`-${recoveredFaint} FAINT`);
+      }
 
       popup(
         slot,
-        recovered > 0 ? `+${recovered} LP` : (move.name || "UTILITY")
+        changes.length
+          ? changes.join("\n")
+          : move.name || "UTILITY",
+        recoveredLp > 0 ? "heal" : "scratch"
       );
 
-      showSideMedia(slot, "IDLE");
-      await K.wait(450);
+      setBanner(
+        `${actorName}: ${move.name || event.key}` +
+        (
+          changes.length
+            ? ` — ${changes.join(", ")}`
+            : ""
+        ),
+        notes
+      );
+
+      await readableDelay(context);
       return;
     }
 
     const target = event.target;
-    const label = attackLabel(event);
+    const label = outcomeLabel(event);
 
-    popup(
-      target,
-      label,
-      Number(event.damage) > 0 ? "damage" : "scratch"
-    );
+    const popupType = event.outcome === "miss"
+      ? "miss"
+      : Number(event.damage) > 0
+        ? "damage"
+        : "block";
 
-    g.UI.showBattleBanner(
+    popup(target, label, popupType);
+
+    setBanner(
       `${actorName}: ${move.name || event.key}\n` +
-      `${gs[target].name}: ${label}`
+      `${gs[target].name}: ${label}`,
+      notes
     );
 
-    if (gs[target].lp <= 0) {
-      showSideMedia(target, "KO");
-    } else if (gs[target].isFainted) {
-      showSideMedia(target, "FAINT");
-    } else if (event.outcome === "miss") {
-      showSideMedia(target, "DODGE");
-    } else if (event.guarded) {
-      showSideMedia(target, "GUARD");
-    } else {
-      showSideMedia(target, "HIT");
-    }
-
-    await K.wait(650);
+    await playReaction(
+      context,
+      target,
+      reactionFor(gs, event)
+    );
   }
 
   async function playTurn(gs, token) {
     assertReady();
 
-    if (!isCurrent(gs, token)) return false;
+    if (!ownsTurn(gs, token)) return false;
 
-    // Prevent two callers from resolving the same turn twice.
     if (gs.playbackToken === token) return false;
 
     if (!gs.actions?.p1 || !gs.actions?.p2) {
-      throw new Error("Cannot resolve until both actions are locked.");
+      throw new Error(
+        "Both actions must be locked before resolution."
+      );
     }
 
     if (typeof gs.combatRng !== "function") {
-      throw new Error("The live match is missing its combat RNG.");
+      throw new Error(
+        "The live match is missing its combat RNG."
+      );
     }
 
     gs.playbackToken = token;
 
-    const before = C.copyState(gs.core);
+    const controller = new AbortController();
 
-    // Resolve exactly once, with tracing enabled for presentation.
-    const result = C.resolve(
-      before,
-      gs.actions.p1,
-      gs.actions.p2,
-      gs.combatRng,
-      true
-    );
+    const context = {
+      gs,
+      token,
+      controller,
+      current: () => (
+        !controller.signal.aborted &&
+        ownsTurn(gs, token)
+      )
+    };
 
-    const nextHistory = g.KF_AI.remember(
-      gs.history || [],
-      before,
-      result.actions
-    );
+    const ownershipTimer = setInterval(() => {
+      if (!ownsTurn(gs, token)) {
+        controller.abort();
+      }
+    }, 100);
 
-    const timer = document.getElementById("turn-timer");
-    if (timer) timer.textContent = "RESOLVING…";
+    try {
+      g.KFMedia.freezeSides();
 
-    for (const event of result.events) {
-      if (!isCurrent(gs, token)) return false;
+      const before = C.copyState(gs.core);
+      gs.presentationRound = before.round;
 
-      await presentEvent(gs, token, event);
-    }
+      const result = C.resolve(
+        before,
+        gs.actions.p1,
+        gs.actions.p2,
+        gs.combatRng,
+        true
+      );
 
-    if (!isCurrent(gs, token)) return false;
+      const nextHistory = g.KF_AI.remember(
+        gs.history || [],
+        before,
+        result.actions
+      );
 
-    // Keep a live replay in the existing simulator's replay format.
-    if (!gs.liveReplay) {
-      gs.liveReplay = {
-        seed: gs.seed,
-        initial: C.copyState(before),
-        turns: [],
-        final: null
-      };
-    }
+      const timer = document.getElementById(
+        "turn-timer"
+      );
 
-    gs.liveReplay.turns.push({
-      p1: { ...result.actions.p1 },
-      p2: { ...result.actions.p2 }
-    });
+      if (timer) {
+        timer.textContent = "RESOLVING…";
+      }
 
-    gs.liveReplay.final = C.copyState(result.state);
+      let pendingCancellations = [];
 
-    // Commit the already-resolved final state once.
-    gs.core = result.state;
-    gs.actions = result.actions;
-    gs.history = nextHistory;
-    gs.roundCounter = gs.core.round;
+      for (const event of result.events) {
+        if (!context.current()) return false;
 
-    paintSnapshot(gs, gs.core);
-    g.UI.showActionBanner("");
+        if (event.type === "statusCancelled") {
+          pendingCancellations.push(event);
+          continue;
+        }
 
-    if (gs.core.winner) {
-      g.GameView.finish(gs.core.winner);
+        if (event.type === "end") {
+          continue;
+        }
+
+        const cancellations = pendingCancellations;
+        pendingCancellations = [];
+
+        await presentEvent(
+          context,
+          event,
+          cancellations
+        );
+
+        if (!context.current()) return false;
+      }
+
+      if (!context.current()) return false;
+
+      if (!gs.liveReplay) {
+        gs.liveReplay = {
+          seed: gs.seed,
+          initial: C.copyState(before),
+          turns: [],
+          final: null
+        };
+      }
+
+      gs.liveReplay.turns.push({
+        p1: { ...result.actions.p1 },
+        p2: { ...result.actions.p2 }
+      });
+
+      gs.liveReplay.final =
+        C.copyState(result.state);
+
+      gs.core = result.state;
+      gs.actions = result.actions;
+      gs.history = nextHistory;
+      gs.roundCounter = result.state.round;
+
+      delete gs.presentationRound;
+
+      paintSnapshot(gs, result.state);
+      g.UI.showActionBanner("");
+
+      if (pendingCancellations.length) {
+        setBanner(
+          "STATUS UPDATE",
+          cancellationLines(
+            gs,
+            pendingCancellations
+          )
+        );
+
+        if (!await readableDelay(context)) {
+          return false;
+        }
+      }
+
+      if (!context.current()) return false;
+
+      if (gs.core.winner) {
+        g.GameView.finish(gs.core.winner);
+        return true;
+      }
+
+      if (!await readableDelay(context)) {
+        return false;
+      }
+
+      await g.MatchManager.begin();
       return true;
+    } catch (error) {
+      if (
+        controller.signal.aborted ||
+        !ownsTurn(gs, token)
+      ) {
+        return false;
+      }
+
+      throw error;
+    } finally {
+      clearInterval(ownershipTimer);
+      controller.abort();
+      delete gs.presentationRound;
     }
-
-    for (const slot of SLOTS) {
-      showSideMedia(slot, "IDLE");
-    }
-
-    await K.wait(450);
-
-    if (!isCurrent(gs, token)) return false;
-
-    await g.MatchManager.begin();
-    return true;
   }
 
   g.CombatPlayback = {
     VERSION,
+    PATCH,
     assertReady,
     playTurn
   };

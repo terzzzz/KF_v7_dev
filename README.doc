@@ -1,44 +1,76 @@
-ver. 20260831-
+# Kamen Fight — Project Documentation
+**Version: 20261015 · Updated: 15 October 2026**
 
-Kamen Fight - Project DocumentationKamen Fight is a Web-based, turn-based Kamen Rider fighting game built with vanilla JavaScript, HTML5 Video, and CSS3. 
-The game features simultaneous command selection, directional charge mechanics, sequential video-driven combat resolution, smart AI decision engines, batch match simulation, and full mirror-match support.
-Key FeaturesDirectional Charge System: Players hold directional keys (A, D, W, S) to build charge percentage before confirming attacks with action keys (J, K, L, I). 
-Charge percentage dynamically scales damage, accuracy, and guard success.
-Special Guard (A+I) omni-blocks attacks, while mismatched guards lead to full damage and action interruption.
-Chi & Faint Mechanics: Resource pool caps at 16 Chi with active Full Power (>14 Chi) and Low Power (<5 Chi) modifiers. Accumulating 100 Faint points stuns the target into a 1-turn forced idle state.
+Kamen Fight is a web-based, turn-based Kamen Rider fighting game built with vanilla JavaScript (ES6+), HTML5 Video, and CSS3.
 
+The game features simultaneous command selection, directional charge mechanics, sequential video-driven combat resolution, deterministic seeded combat, parallel AI lookahead, Double DQN neural learning, specialized evolutionary policy agents, headless batch simulation, replay verification, and full mirror-match support.
 
-├── index.html              # Main game layout and media containers
-├── css/
-│   └── style.css           # Styling, HUD layout, floating popups, video scaling
-├── data/
-│   ├── moves.json          # Move definitions, Chi costs, damage ratios, video mappings
-│   └── riders.json         # Roster list, maximum LP, sprite icon bindings
-├── js/
-│   ├── common.js           # Shared combat parameters, charge thresholds, helpers
-│   ├── combat_engine.js    # Turn resolution, guard calculations, faint buildup
-│   ├── cpu_controller.js   # CPU charge manager
-│   ├── foresee_engine.js   # Minimax / Expectimax 3-turn tree search
-│   ├── ai.js               # Memory store, habit tracking, AI profiles
-│   ├── game.js             # Core battle initialization and match state management
-│   ├── match_manager.js    # Round countdown, input handlers, action confirmation
-│   ├── media.js            # Center cutscene player and video duration handlers
-│   ├── simulator.js        # Synchronized headless batch simulation engine
-│   ├── ui.js               # HUD rendering and floating text popups
-│   └── vs_select.js        # Character select screen, BGM, simulation modal UI
-└── assets/
-    ├── sounds/             # BGM tracks (matchup.mp3, matchup1.mp3)
-    ├── images/icons/       # Rider thumbnails
-    └── videos/             # Rider video clips (idle.mp4, faint.mp4, etc.)
+The v5 neural pipeline uses **256 observation inputs and 17 discrete actions**, including an explicit `DO_NOTHING` action. A dedicated training page and integration test suite support observation validation, action-mask checks, reward verification, checkpoint round-trips, and basic training stability checks.
 
+## Key Features & Architecture
 
-Setup & Deployment InstructionsLocal Execution: 
-Clone or download the repository folder and open index.html directly in any modern Web browser (Chrome, Firefox, Edge, Safari). No build steps or server dependencies required.
+### Directional Charge System
+Players hold directional keys (**W, A, S, D**) to build charge before confirming attacks with action keys (**I, J, K, L**). Charge levels influence damage, accuracy, priority, and guard effectiveness according to each move’s rules.
 
-GitHub Pages Deployment: 
-Push the repository to GitHub and enable GitHub Pages under Settings > Pages. 
-Asset Naming Warning: Ensure all asset paths and video filenames inside assets/videos/<rider_id>/ are strictly lowercase (e.g., idle.mp4, guard.mp4) to prevent 404 errors on Linux host servers.
+The neural environment tracks charging separately from action confirmation. Missing inputs represent **WAIT**, rather than automatically selecting or locking an attack. Switching stance must preserve the existing charge-start timestamp, including a timestamp of zero.
 
+### Decoupled Deterministic Combat Core
+The combat rules engine (`js/combat_core.js`) separates state resolution from visual playback. It supports seedable Mulberry32 PRNG mechanics, outcome probability enumeration, move compilation (`compileMoves`), and side-swapping spatial symmetry.
+
+Shared legality and charge calculations allow gameplay, simulation, and AI environments to use consistent combat rules.
+
+### Multi-Engine AI & Neural Architecture
+The AI decision pipeline includes:
+
+- Parallel Web Worker execution through `js/cpu_controller.js`.
+- Expectimax evaluation and rollout search through `js/foresee_engine.js`.
+- Simultaneous-move PUCT Monte Carlo Tree Search through `js/mcts_engine.js`.
+- CPU-based multilayer perceptrons, Double DQN learning, and Adam optimization through `js/neural_core.js`.
+- Character-specific tactical heuristics through `js/rider_brains.js`.
+- Specialized evolutionary policy agents such as `js/agent_ichigo.js`.
+- Neural-agent initialization and integration through `js/soul_agent.js`.
+
+### Neural Environment & Observation Vector
+The `SoulEnv` wrapper (`js/charge_env.js`) provides a **256-input observation vector** and **17-action interface** for neural decision-making and simulation.
+
+Key contracts checked by the pipeline tests include:
+
+- LP and CHI features read the actual fighter state rather than control-cell values.
+- Faint buildup and active status effects influence the observation.
+- Observation values remain finite.
+- Action index **16** maps to `DO_NOTHING`.
+- A fainted fighter has only the explicit idle action available.
+- Missing inputs do not lock either fighter’s command.
+- Stance switches preserve the charge clock.
+
+The updated mask test checks the **reachable-charge planning-mask contract**, comparing each action with `CombatCore.isLegal()` at the charge returned by `CombatCore.maxCharge(fighter, direction)`. This is distinct from checking immediate legality at zero charge.
+
+### Resource & Stun Mechanics
+CHI is capped at **16**, with Low Power penalties below **5 CHI** and Full Power bonuses above **14 CHI**.
+
+Faint buildup uses a **100-point threshold**. Reaching the threshold forces the affected fighter into a one-turn stunned idle state.
+
+### Neural Training & Reward Modes
+The dedicated training page (`Train.html`) loads the combat core, neural environment, simulator, agent, pipeline tests, and training interface.
+
+The neural simulation layer (`js/soul_sim.js`) includes a `terminal_only` reward mode. The integration suite checks that nonterminal LP and CHI changes produce no reward in this mode and that a terminal win returns the expected positive reward.
+
+Network checks cover checkpoint reconstruction and a basic training update to detect non-finite losses or predictions.
+
+### Headless Batch Simulation & Evolutionary Training
+The background simulation engine (`js/simulator.js`) supports CPU-versus-CPU balancing, batch evaluations, evolutionary policy mutation, and deterministic replay verification through `verifyReplay`.
+
+These tools allow combat rules and agent performance to be evaluated without video playback.
+
+### Automated Testing
+The project includes two complementary testing layers:
+
+- **Combat tests and AI benchmarks:** `index_test.html` and `js/combat_tests.js` cover combat rules, state immutability, interrupt behavior, PRNG determinism, and AI difficulty comparisons.
+- **Neural pipeline integration tests:** `js/soul_pipeline_tests.js`, exposed as `runSoulPipelineTests()`, checks the v5 observation/action interface, planning masks, input handling, rewards, checkpoints, and training stability.
+
+The pipeline suite reports descriptive failures and returns `{ passed, lines }` when all checks pass.
+
+ 
 # Kamen_Fight game development timeline
 
 18/8/26: Kick-start, create portrait photos, player selection screen; follow yu yu hakusho Super Nintendo game style. 
@@ -56,6 +88,24 @@ Riders: Include all showga riders + shadow moon (portrait only)
 27/8/26: Easy, Normal and Hard level fine-tuning completed. Building more visuals for v3 rider.
 28/8/26: Enable visual play of v3 rider and working on Riderman.
 
-02/9/26: Finalise 4 riders and working on rider x.
-04/9/26: Bug fixing on each file, fixing difficulty implementation, charge up bars etc.
-05/9/26: Fix bug where Aggressive and Master are easier to beat. 
+2/9/26: Finalise 4 riders and working on rider x.
+4/9/26: Bug fixing on each file, fixing difficulty implementation, charge up bars etc.
+5/9/26: Fix bug where Aggressive and Master are easier to beat. 
+6/9/26: Revise codings, adding comments, spotting & fixing minor bugs. Verificaiton of game difficulty.
+7/9/26: Rider Amazon - design. 
+15/9/26: Confirm the deepmind neutral maching learning works. Training Ichigo as SOUL.
+17-21/9/26: Continue to enhance SOUL training logic. More stats revealed for analysis and ensure the training is on right track.
+22/9-27/9/26: Considered plugging training to python or enalrge training matrix size but failed, switched back to original. 
+28/9/26: Try to give a more accurate rewards in the matrix.
+30/09/26: Update matrix by more accurately record the rider status like buff and debuff; re-training matrix for potential higher intelligence.
+1/10-9/10/26: Training of rider difficulty and amended the game rule for better defence usage.
+12/10/26: Enhance functinoality of training interface.
+14-16/10/26: Upgraded the matrix and bug fixing on learning for better performance. Re-training RIDER from ichigo.
+18/10/26: Upgrated the matrix to recognize usage of status buff properly.
+21/10/26: Matrix sophistication and training.
+24/10/26: Migrate the training game logic to actual gameplay flow, so that guard can be selected always.
+26/10/26: Addition of game guide and credits.
+28/10/26: Revamper the interface. 
+1/11/26: Game released to itch and plicy. Bug fix to follow.
+
+

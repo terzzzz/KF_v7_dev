@@ -1,87 +1,422 @@
-/**
- * Universal CPU Charge, Reaction Delay & Turn Trigger
- * Path: js/cpu_controller.js
+/* js/cpu_controller.js
+ * Worker-backed CPU planning bridge.
+ *
+ * Patch: release-worker-bridge-1
+ *
+ * The engine build is obtained from the loaded dispatcher.
+ * Worker responses must report that same build.
+ *
+ * No combat rules or action scores are changed here.
  */
-(function (window) {
-  'use strict';
+(function (g) {
+  "use strict";
 
-  /**
-   * Pure evaluation function: computes target charge % without side effects.
-   * @param {Object} cpuPlayer - CPU player instance
-   * @param {string} moveKey - Selected move key (e.g. 'S+L')
-   * @param {string} difficulty - AI difficulty level
-   * @returns {number} Target charge percentage (0–100)
-   */
-  function setUniversalChargeTarget(cpuPlayer, moveKey, difficulty = 'normal') {
-    if (!cpuPlayer || !moveKey || moveKey === 'DO_NOTHING') {
-      return 0;
-    }
+  const C = g.CombatCore;
+  const K = g.KF;
 
-    const diff = String(difficulty || 'normal').toLowerCase();
-    const keyStr = String(moveKey);
-    const dirKey = keyStr.split('+')[0] || 'D';
+  const BUILD = g.KF_AI?.VERSION;
 
-    // Zero-cost guards → full 100% lock
-    const moves = (window.gameState && cpuPlayer === window.gameState.p1)
-      ? window.gameState.p1Moves
-      : (window.gameState ? window.gameState.p2Moves : null);
-    const moveData = moves ? moves[moveKey] : null;
-
-    if (dirKey === 'A' && moveData && (moveData.chiCost || 0) === 0) {
-      return 100;
-    }
-
-    let target = 85;
-
-    if (dirKey === 'A') {
-      target = (diff === 'master') ? 100 : 20;
-    } else if (diff === 'easy') {
-      target = Math.floor(Math.random() * 16) + 65;      // 65–80
-    } else if (diff === 'master') {
-      target = Math.floor(Math.random() * 4) + 96;       // 96–99
-    } else if (diff === 'hard') {
-      target = Math.floor(Math.random() * 8) + 88;       // 88–95
-    } else if (dirKey === 'D') {
-      target = Math.floor(Math.random() * 11) + 82;      // 82–92
-    } else {
-      target = Math.floor(Math.random() * 11) + 85;      // 85–95
-    }
-
-    if (dirKey === 'S' && (diff === 'hard' || diff === 'master')) {
-      target = Math.max(target, 92);
-    }
-
-    return Math.min(100, Math.max(25, target));
+  if (!BUILD) {
+    throw new Error(
+      "Load ai.js before cpu_controller.js."
+    );
   }
 
-  /**
-   * Human-like reaction delay before CPU starts charging (ms)
-   * @param {string} difficulty - AI difficulty level
-   * @returns {number} Delay in milliseconds
-   */
-  function getCPUReactionDelay(difficulty = 'normal') {
-    const diff = String(difficulty).toLowerCase();
-    if (diff === 'master') return 120;
-    if (diff === 'hard') return 200;
-    if (diff === 'easy') return 450;
-    return 320; // normal / balanced
+  const workers = [null, null];
+  const disabledWorkers = [false, false];
+  const pending = new Map();
+
+  let nextId = 1;
+  let nextWorker = 0;
+  let mainThreadWarningShown = false;
+
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(
+      object,
+      key
+    );
   }
 
-  /**
-   * Trigger CPU turn routine for a slot
-   * @param {string} slotKey - Slot identifier ('p1' or 'p2')
-   */
-  function triggerCPUTurn(slotKey) {
-    if (typeof window.startCPUTurnRoutine === 'function') {
-      window.startCPUTurnRoutine(slotKey);
-    } else {
-      console.warn('startCPUTurnRoutine not found. Ensure combat_engine.js is loaded.');
+  function cloneJSON(value) {
+    return value == null
+      ? value
+      : JSON.parse(JSON.stringify(value));
+  }
+
+  function failWorker(index, error) {
+    const worker = workers[index];
+
+    workers[index] = null;
+    disabledWorkers[index] = true;
+
+    if (!worker) return;
+
+    worker.terminate();
+
+    for (const [id, job] of pending) {
+      if (job.worker !== worker) continue;
+
+      clearTimeout(job.timeout);
+      pending.delete(id);
+      job.reject(error);
     }
   }
 
-  // Exports
-  window.setUniversalChargeTarget = setUniversalChargeTarget;
-  window.getCPUReactionDelay = getCPUReactionDelay;
-  window.triggerCPUTurn = triggerCPUTurn;
+  function getWorker(index) {
+    if (
+      !g.Worker ||
+      disabledWorkers[index] ||
+      g.__AGENT_FORCE_MAIN_THREAD__
+    ) {
+      return null;
+    }
 
+    if (workers[index]) {
+      return workers[index];
+    }
+
+    try {
+      const url = new URL(
+        "js/ai_worker.js",
+        document.baseURI
+      );
+
+      url.searchParams.set("v", BUILD);
+
+      const worker = new Worker(url);
+      workers[index] = worker;
+
+      worker.onmessage = event => {
+        const message = event.data || {};
+        const job = pending.get(message.id);
+
+        if (!job || job.worker !== worker) {
+          return;
+        }
+
+        if (message.build !== BUILD) {
+          failWorker(
+            index,
+            new Error(
+              "AI worker build mismatch. Reload the " +
+              "complete matching script set."
+            )
+          );
+
+          return;
+        }
+
+        if (
+          !message.error &&
+          message.result?.debug?.engineVersion !== BUILD
+        ) {
+          failWorker(
+            index,
+            new Error(
+              "AI worker loaded an incompatible dispatcher."
+            )
+          );
+
+          return;
+        }
+
+        clearTimeout(job.timeout);
+        pending.delete(message.id);
+
+        if (message.error) {
+          job.reject(new Error(message.error));
+        } else {
+          job.resolve(message.result);
+        }
+      };
+
+      worker.onerror = event => {
+        failWorker(
+          index,
+          new Error(
+            event.message || "AI worker failed."
+          )
+        );
+      };
+
+      worker.onmessageerror = () => {
+        failWorker(
+          index,
+          new Error(
+            "Could not decode an AI worker response."
+          )
+        );
+      };
+
+      return worker;
+    } catch (error) {
+      disabledWorkers[index] = true;
+
+      console.warn(
+        "[AIService] Worker unavailable:",
+        error
+      );
+
+      return null;
+    }
+  }
+
+  function verifyDecision(context, result) {
+    if (!result?.action) {
+      throw new Error(
+        "CPU planner returned no action."
+      );
+    }
+
+    function requirePositiveMoveCharge(action) {
+      // Explicit idle is separate from all sixteen moves.
+      if (action.key === "DO_NOTHING") return;
+
+      if (
+        !Number.isFinite(action.charge) ||
+        action.charge < 1 ||
+        action.charge > 100
+      ) {
+        throw new Error(
+          "CPU planner returned an invalid move charge. " +
+          "Playable moves require 1–100% charge."
+        );
+      }
+    }
+
+    // Validate before normalization so an invalid proposal
+    // cannot silently be converted into a different action.
+    requirePositiveMoveCharge(result.action);
+
+    if (
+      !C.isLegal(
+        context.state,
+        context.slot,
+        result.action
+      )
+    ) {
+      throw new Error(
+        "CPU planner returned an illegal action."
+      );
+    }
+
+    const action = C.normalizeAction(
+      context.state,
+      context.slot,
+      result.action
+    );
+
+    requirePositiveMoveCharge(action);
+
+    if (action.key !== "DO_NOTHING") {
+      const move =
+        context.state.moves[context.slot][action.key];
+
+      if (!move) {
+        throw new Error(
+          "CPU planner returned an unknown move."
+        );
+      }
+
+      const chargeLimit = C.maxCharge(
+        context.state[context.slot],
+        move.direction
+      );
+
+      if (action.charge > chargeLimit) {
+        throw new Error(
+          "CPU planner returned an unreachable charge level."
+        );
+      }
+    }
+
+    return {
+      ...result,
+      action
+    };
+  }
+
+  async function prepareContext(context) {
+    const difficulty = K.difficulty(context.difficulty);
+    const opponentDifficulty = K.difficulty(
+      context.opponentDifficulty ??
+      (difficulty === "easy" ? "balanced" : "master")
+    );
+
+    const prepared = {
+      ...context,
+      difficulty,
+      opponentDifficulty,
+      state: C.copyState
+        ? C.copyState(context.state)
+        : C.cloneState(context.state),
+      history: cloneJSON(context.history || [])
+    };
+
+    if (hasOwn(context, "policyWeights")) {
+      prepared.policyWeights = cloneJSON(
+        context.policyWeights
+      );
+      prepared.disableAgent = true;
+      return prepared;
+    }
+
+    if (context.disableAgent) {
+      delete prepared.policyWeights;
+      prepared.disableAgent = true;
+      return prepared;
+    }
+
+    const usesCheckpoint =
+      difficulty === "soul" ||
+      difficulty === "rider" ||
+      opponentDifficulty === "soul" ||
+      opponentDifficulty === "rider";
+
+    if (!usesCheckpoint) {
+      delete prepared.policyWeights;
+      prepared.disableAgent = true;
+      return prepared;
+    }
+
+    if (!g.SoulAgent) {
+      delete prepared.policyWeights;
+      prepared.disableAgent = false;
+      return prepared;
+    }
+
+    if (
+      g.SoulAgent.VERSION !== BUILD ||
+      typeof g.SoulAgent.ready !== "function" ||
+      typeof g.SoulAgent.getSection !== "function"
+    ) {
+      throw new Error(
+        "SoulAgent and AI dispatcher builds do not match."
+      );
+    }
+
+    await g.SoulAgent.ready();
+
+    const checkpoint = g.SoulAgent.getSection(
+      context.state[context.slot].id,
+      context.state[C.other(context.slot)].id,
+      "active"
+    );
+
+    prepared.policyWeights = cloneJSON(checkpoint);
+    prepared.disableAgent = true;
+
+    return prepared;
+  }
+
+  async function mainThread(context) {
+    if (!mainThreadWarningShown) {
+      mainThreadWarningShown = true;
+
+      console.warn(
+        "[AIService] Using main-thread search. " +
+        "Standard deep searches may temporarily block input."
+      );
+    }
+
+    await K.wait(0);
+
+    return verifyDecision(
+      context,
+      g.KF_AI.choose(context)
+    );
+  }
+
+  async function plan(context) {
+    if (
+      !context?.state ||
+      !["p1", "p2"].includes(context.slot) ||
+      !context.state[context.slot] ||
+      !context.state[C.other(context.slot)]
+    ) {
+      throw new Error(
+        "Invalid AIService planning context."
+      );
+    }
+
+    if (g.KF_AI?.VERSION !== BUILD) {
+      throw new Error(
+        "The AI dispatcher changed after AIService loaded. " +
+        "Reload the page."
+      );
+    }
+
+    const prepared = await prepareContext(context);
+
+    if (
+      prepared.state.winner ||
+      prepared.state[prepared.slot].isFainted
+    ) {
+      return verifyDecision(
+        prepared,
+        g.KF_AI.choose(prepared)
+      );
+    }
+
+    if (prepared.neuralNetwork) {
+      return mainThread(prepared);
+    }
+
+    const index = nextWorker++ % workers.length;
+    const worker = getWorker(index);
+
+    if (!worker) {
+      return mainThread(prepared);
+    }
+
+    const id = nextId++;
+
+    const result = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        failWorker(
+          index,
+          new Error(
+            "AI worker timed out. The decision was not " +
+            "silently replaced with a different policy."
+          )
+        );
+      }, 120000);
+
+      pending.set(id, {
+        worker,
+        timeout,
+        resolve,
+        reject
+      });
+
+      try {
+        worker.postMessage({
+          id,
+          context: prepared
+        });
+      } catch (error) {
+        clearTimeout(timeout);
+        pending.delete(id);
+        reject(error);
+      }
+    });
+
+    return verifyDecision(prepared, result);
+  }
+
+  function dispose() {
+    for (let index = 0; index < workers.length; index++) {
+      failWorker(
+        index,
+        new Error("AIService was stopped.")
+      );
+    }
+  }
+
+  g.AIService = {
+    VERSION: BUILD,
+    PATCH: "release-worker-bridge-1",
+    plan,
+    dispose
+  };
 })(window);

@@ -1,336 +1,1150 @@
-/**
- * Media, Video & Animation Controller
- * Path: js/media.js
+/*
+ * js/media.js
+ * Sequential battle-media controller with KFAudio & Glass Shatter FX triggers.
+ *
+ * Public compatibility:
+ *   getTransformFlip()
+ *   updateCharacterMedia()
+ *   playCenterVideo()
+ *   hideCenterScreen()
+ *   unlockMobileVideos()
+ *
+ * New:
+ *   playReactionVideo()
+ *   KFMedia.freezeSides()
+ *   KFMedia.cancelAll()
+ *   KFMedia.status()
  */
 
-(function (window) {
-  'use strict';
+(function (g) {
+  "use strict";
 
-  function getTransformFlip(player, playerKey, moveObj = null) {
-    if (moveObj && moveObj.unmirrored === true) {
-      return 'scaleX(1)';
-    }
+  const VERSION = "sequential-media-1";
+  const SLOTS = ["p1", "p2"];
+  const VIDEO_IDS = ["p1-video", "p2-video", "center-video"];
 
-    const riderId = String(
-      (player && player.id) || (playerKey === 'p1' ? 'ichigo' : 'nigo')
+  const CONFIG = g.KF_MEDIA_CONFIG = Object.assign({
+    LOAD_TIMEOUT_MS: 12000,
+    STALL_TIMEOUT_MS: 8000,
+    IMAGE_TIMEOUT_MS: 4000,
+    DEBUG: false
+  }, g.KF_MEDIA_CONFIG || {});
+
+  const tasks = new Map();
+  const preferredSources = new Map();
+
+  let requestNumber = 0;
+  let epoch = 0;
+  let pendingForeground = 0;
+  let queue = Promise.resolve();
+  let centerOwner = null;
+
+  const el = id => document.getElementById(id);
+
+  function positive(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+
+  function log(...args) {
+    if (CONFIG.DEBUG) console.debug("[KFMedia]", ...args);
+  }
+
+  function visible(node, show, display = "block") {
+    if (!node) return;
+    node.hidden = !show;
+    node.style.display = show ? display : "none";
+  }
+
+  function pause(video) {
+    if (!video) return;
+    try {
+      video.pause();
+    } catch (_) {}
+  }
+
+  function clearVideoHandlers(video) {
+    if (!video) return;
+    video.onplaying = null;
+    video.onended = null;
+    video.onerror = null;
+    video.onloadedmetadata = null;
+    video.onloadeddata = null;
+    video.oncanplay = null;
+    video.oncanplaythrough = null;
+    video.ontimeupdate = null;
+  }
+
+  function prepareVideo(video) {
+    if (!video) return;
+
+    // Playback is owned by this controller, not HTML autoplay.
+    video.autoplay = false;
+    video.removeAttribute("autoplay");
+
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+
+    video.setAttribute("muted", "");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+  }
+
+  function playerFor(slot) {
+    return g.gameState?.[slot] || g.gameState?.core?.[slot] || null;
+  }
+
+  function riderFor(slot) {
+    return String(
+      playerFor(slot)?.id || (slot === "p1" ? "ichigo" : "nigo")
+    ).toLowerCase();
+  }
+
+  function isP2MirrorPalette(slot) {
+    return slot === "p2" && riderFor("p1") === riderFor("p2");
+  }
+
+  function getTransformFlip(player, slot, move = null) {
+    if (move?.unmirrored === true) return "scaleX(1)";
+
+    const rider = String(
+      player?.id || (slot === "p1" ? "ichigo" : "nigo")
     ).toLowerCase();
 
-    const defaultFacing = (riderId === 'ichigo') ? 'left' : 'right';
+    const nativeFacing =
+      move?.sourceFacing ||
+      player?.sourceFacing ||
+      (rider === "ichigo" ? "left" : "right");
 
-    const nativeFacing = (
-      (moveObj && moveObj.sourceFacing) ||
-      (player && player.sourceFacing) ||
-      defaultFacing
-    );
+    const wantedFacing = slot === "p1" ? "right" : "left";
 
-    const targetFacing = (playerKey === 'p1') ? 'right' : 'left';
-    return (nativeFacing !== targetFacing) ? 'scaleX(-1)' : 'scaleX(1)';
+    return nativeFacing === wantedFacing
+      ? "scaleX(1)"
+      : "scaleX(-1)";
   }
 
-  // Helper: extract clean base filename from URI or path
-  function getCleanFileName(url) {
-    if (!url) return '';
-    const filename = url.split('/').pop().split('?')[0];
-    return filename.replace(/\.(mp4|webm|png|jpg)$/i, '');
+  function normalizedState(slot, requested) {
+    let state = String(requested || "IDLE")
+      .replace(/\.(mp4|webm)$/i, "")
+      .toUpperCase();
+
+    const aliases = {
+      HIT_PHYSICAL: "HIT2",
+      BEING_HIT: "HIT",
+      BLOCK: "GUARD",
+      MISS: "DODGE",
+      MID_AIR: "MID-AIR",
+      AIRBORNE: "MID-AIR"
+    };
+
+    state = aliases[state] || state;
+
+    if (state === "IDLE") {
+      const player = playerFor(slot);
+
+      if (player && Number(player.lp) <= 0) {
+        state = "KO";
+      } else if (player?.isFainted) {
+        state = "FAINT";
+      } else if (Number(player?.airborneTicks) > 0) {
+        state = "MID-AIR";
+      }
+    }
+
+    return state;
   }
 
-  // Side Character Video Updater (Idle, Mid-Air, Faint, Victory, KO)
-  function updateCharacterMedia(playerKey, stateType = 'IDLE') {
-    const videoEl = document.getElementById(`${playerKey}-video`);
-    const spriteEl = document.getElementById(`${playerKey}-sprite`);
-    if (!videoEl) return;
+  function filesForState(state) {
+    const files = {
+      IDLE: ["idle.mp4"],
 
-    const player = window.gameState ? window.gameState[playerKey] : null;
-    const riderId = (player && player.id) ? player.id : (playerKey === 'p1' ? 'ichigo' : 'nigo');
+      // Actual reaction filename first; legacy alias second.
+      HIT: ["hit.mp4"],
+      HIT2: ["hit_physical.mp4", "hit.mp4"],
+      GUARD: ["guard.mp4"],
+      DODGE: ["dodge.mp4", "guard.mp4"],
+      FAINT: ["faint.mp4"],
+      KO: ["ko.mp4"],
+      "MID-AIR": ["mid-air.mp4", "mid_air.mp4"],
 
-    let state = String(stateType || 'IDLE').toLowerCase();
-    let fileName = state;
+      VICTORY: Math.random() < 0.5
+        ? ["victory.mp4", "victory2.mp4"]
+        : ["victory2.mp4", "victory.mp4"]
+    };
 
-    if (state === 'idle') {
-      if (player && player.isFainted) {
-        fileName = 'faint';
-      } else if (player && player.airborneTicks > 0) {
-        fileName = 'mid-air';
-      } else {
-        fileName = 'idle';
-      }
-    } else if (state === 'victory') {
-      fileName = Math.random() < 0.5 ? 'victory' : 'victory2';
-    } else if (state === 'ko') {
-      fileName = 'ko';
-    }
+    return files[state] || [`${state.toLowerCase()}.mp4`];
+  }
 
-    const cleanFile = fileName.replace(/\.(mp4|webm)$/i, '');
-    const currentSrc = videoEl.currentSrc || videoEl.src || '';
-    const currentCleanName = getCleanFileName(currentSrc);
+  function candidatePaths(rider, files) {
+    const candidates = [];
 
-    // Prevent redundant DOM reload if video is already playing the target clip
-    const isMatchingClip = (
-      currentCleanName === cleanFile ||
-      currentCleanName === `${riderId}_${cleanFile}` ||
-      currentCleanName.endsWith(`_${cleanFile}`)
-    );
+    for (const item of files) {
+      const file = String(item || "").trim();
+      if (!file) continue;
 
-    if (isMatchingClip && !videoEl.paused && videoEl.currentTime > 0) {
-      videoEl.hidden = false;
-      videoEl.style.display = 'block';
-      if (spriteEl) spriteEl.hidden = true;
-      videoEl.style.transform = getTransformFlip(player, playerKey);
-
-      try {
-        videoEl.currentTime = 0;
-        const p = videoEl.play();
-        if (p !== undefined) p.catch((err) => console.warn("Video replay warning:", err));
-      } catch (e) {}
-      return;
-    }
-
-    let secondaryFallback = 'idle';
-    if (cleanFile === 'hit' || cleanFile === 'hit_physical') {
-      secondaryFallback = 'faint';
-    } else if (cleanFile === 'dodge') {
-      secondaryFallback = 'guard';
-    }
-
-    const videoCandidates = [
-      `assets/videos/${riderId}/${cleanFile}.mp4`,
-      `assets/videos/${riderId}_${cleanFile}.mp4`,
-      `assets/videos/${cleanFile}.mp4`,
-      `assets/videos/${riderId}/${secondaryFallback}.mp4`,
-      `assets/videos/${riderId}_${secondaryFallback}.mp4`,
-      `assets/videos/${riderId}/idle.mp4`,
-      `assets/videos/${riderId}_idle.mp4`
-    ];
-
-    const imageCandidates = [
-      `assets/images/icons/${riderId}.png`,
-      `assets/images/${riderId}.png`,
-      `assets/images/icons/ichigo.png`
-    ];
-
-    videoEl.style.transform = getTransformFlip(player, playerKey);
-    videoEl.muted = true;
-    videoEl.defaultMuted = true;
-    videoEl.playsInline = true;
-    videoEl.setAttribute('playsinline', '');
-    videoEl.setAttribute('webkit-playsinline', '');
-
-    const isLoopingState = ['idle', 'mid-air', 'faint'].includes(cleanFile);
-    videoEl.loop = isLoopingState;
-
-    let candidateIdx = 0;
-
-    function tryNextVideo() {
-      if (candidateIdx >= videoCandidates.length) {
-        tryImageFallback();
-        return;
+      if (/^(blob:|data:|https?:)/i.test(file)) {
+        candidates.push(file);
+        continue;
       }
 
-      const src = videoCandidates[candidateIdx++];
-
-      videoEl.onerror = () => tryNextVideo();
-      videoEl.onplaying = () => {
-        videoEl.hidden = false;
-        videoEl.style.display = 'block';
-        if (spriteEl) spriteEl.hidden = true;
-      };
-
-      videoEl.src = src;
-      videoEl.load();
-
-      try {
-        const p = videoEl.play();
-        if (p !== undefined) {
-          p.then(() => {
-            videoEl.hidden = false;
-            videoEl.style.display = 'block';
-            if (spriteEl) spriteEl.hidden = true;
-          }).catch(() => tryNextVideo());
+      if (file.includes("/")) {
+        candidates.push(file);
+        const base = file.split("/").pop();
+        if (base) {
+          candidates.push(
+            `assets/videos/${rider}/${base}`,
+            `assets/videos/${rider}_${base}`,
+            `assets/videos/${base}`
+          );
         }
-      } catch (e) {
-        tryNextVideo();
+        continue;
+      }
+
+      const filename = /\.(mp4|webm)$/i.test(file)
+        ? file
+        : `${file}.mp4`;
+
+      const lower = filename.toLowerCase();
+
+      candidates.push(
+        `assets/videos/${rider}/${filename}`,
+        `assets/videos/${rider}_${filename}`,
+        `assets/videos/${filename}`
+      );
+
+      if (lower !== filename) {
+        candidates.push(
+          `assets/videos/${rider}/${lower}`,
+          `assets/videos/${rider}_${lower}`,
+          `assets/videos/${lower}`
+        );
       }
     }
 
-    function tryImageFallback() {
-      videoEl.hidden = true;
-      videoEl.style.display = 'none';
-      if (!spriteEl) return;
-
-      let imgIdx = 0;
-      function tryNextImg() {
-        if (imgIdx >= imageCandidates.length) return;
-        const imgSrc = imageCandidates[imgIdx++];
-        spriteEl.onerror = () => tryNextImg();
-        spriteEl.onload = () => {
-          spriteEl.hidden = false;
-          spriteEl.style.display = 'block';
-        };
-        spriteEl.src = imgSrc;
-      }
-      tryNextImg();
-    }
-
-    tryNextVideo();
+    return [...new Set(candidates)];
   }
 
-  // Action Cutscene Video Player (Center Box)
-  function playCenterVideo(playerKey, videoFile, actionName = '', maxDurationMs = null, moveObj = null) {
-    return new Promise((resolve) => {
-      const centerBox = document.getElementById('center-box');
-      const centerVid = document.getElementById('center-video');
-      const actionLabel = document.getElementById('center-action-label');
+  function scope(options = {}) {
+    const capturedEpoch = epoch;
+    const capturedGame = g.gameState;
 
-      if (!centerBox || !centerVid) {
-        resolve();
-        return;
+    return () => (
+      epoch === capturedEpoch &&
+      g.gameState === capturedGame &&
+      !options.signal?.aborted &&
+      (
+        typeof options.isCurrent !== "function" ||
+        options.isCurrent()
+      )
+    );
+  }
+
+  function centerVisible(show) {
+    visible(el("center-box"), show, "flex");
+
+    for (const slot of SLOTS) {
+      el(`${slot}-box`)?.classList.toggle("blanked", show);
+    }
+
+    // The battle banner already displays the action name.
+    visible(el("center-action-label"), false);
+  }
+
+  function freezeSides() {
+    for (const slot of SLOTS) {
+      const task = tasks.get(slot);
+
+      if (task?.background) {
+        task.controller.abort();
+        tasks.delete(slot);
       }
 
-      const player = window.gameState ? window.gameState[playerKey] : null;
-      const riderId = (player && player.id) ? player.id : (playerKey === 'p1' ? 'ichigo' : 'nigo');
+      if (!tasks.get(slot)) {
+        pause(el(`${slot}-video`));
+      }
+    }
+  }
 
-      if (actionLabel) {
-        const name = player ? player.name : playerKey.toUpperCase();
-        actionLabel.textContent = actionName ? `[${playerKey.toUpperCase()}] ${name} : ${actionName}!` : '';
-        actionLabel.hidden = !actionName;
+  /**
+   * Fires a callback at an exact video playback timestamp (in seconds).
+   */
+  function syncTimestamp(video, targetSeconds, callback) {
+    if (!video || typeof callback !== "function") return;
+    let fired = false;
+
+    const onTimeUpdate = () => {
+      if (!fired && video.currentTime >= targetSeconds) {
+        fired = true;
+        callback();
+        video.removeEventListener("timeupdate", onTimeUpdate);
+      }
+    };
+
+    video.addEventListener("timeupdate", onTimeUpdate);
+  }
+
+  /*
+   * Reuses the persistent channel <video> element in the DOM so user-gesture
+   * activation and compositor state are never lost across attempts.
+   */
+  function acquireVideo(task) {
+    const id = task.channel === "center"
+      ? "center-video"
+      : `${task.channel}-video`;
+
+    const video = el(id);
+    if (!video) return null;
+
+    clearVideoHandlers(video);
+    pause(video);
+
+    video.classList.remove("mirror-flip");
+    video.classList.toggle("p2-mirror-palette", Boolean(task.mirrorPalette));
+    prepareVideo(video);
+
+    video.loop = Boolean(task.background);
+    if (!video.loop) {
+      video.removeAttribute("loop");
+    }
+
+    video.style.transform = task.transform;
+    video.dataset.mediaRequest = String(task.id);
+    video.dataset.mediaAttempt = String(task.attempt);
+
+    task.video = video;
+
+    visible(video, true);
+
+    if (task.channel !== "center") {
+      visible(el(`${task.channel}-sprite`), false);
+    }
+
+    return video;
+  }
+
+  /*
+   * A single candidate attempt has exactly one completion path.
+   */
+  function attemptVideo(task, src) {
+    task.attempt += 1;
+
+    const attemptToken = task.attempt;
+    const requestToken = String(task.id);
+    const attemptString = String(attemptToken);
+
+    return new Promise(resolve => {
+      let video = null;
+      let finished = false;
+      let watchdog = null;
+      let started = false;
+      let playInFlight = false;
+      let playRetries = 0;
+      let lastTime = 0;
+      let lastProgress = performance.now();
+
+      const signal = task.controller.signal;
+
+      const ownsVideoNode = () => (
+        Boolean(video) &&
+        video.dataset.mediaRequest === requestToken &&
+        video.dataset.mediaAttempt === attemptString
+      );
+
+      const ownsAttempt = () => (
+        !finished &&
+        task.valid() &&
+        task.attempt === attemptToken &&
+        ownsVideoNode()
+      );
+
+      function complete(status, error = null) {
+        if (finished) return;
+        finished = true;
+
+        if (watchdog !== null) {
+          clearInterval(watchdog);
+          watchdog = null;
+        }
+
+        signal.removeEventListener("abort", abort);
+
+        if (ownsVideoNode()) {
+          clearVideoHandlers(video);
+          if (!task.background || status !== "playing") {
+            pause(video);
+          }
+        }
+
+        log("attempt finished", task.id, attemptToken, status, src);
+
+        resolve({ status, src, error });
       }
 
-      centerBox.hidden = false;
-      centerBox.style.display = 'flex';
-
-      centerVid.muted = true;
-      centerVid.defaultMuted = true;
-      centerVid.playsInline = true;
-      centerVid.setAttribute('playsinline', '');
-      centerVid.setAttribute('webkit-playsinline', '');
-
-      centerVid.style.transform = getTransformFlip(player, playerKey, moveObj);
-
-      let resolved = false;
-      let fallbackTimer = null;
-
-      const cleanUpAndResolve = () => {
-        if (resolved) return;
-        resolved = true;
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-
-        centerVid.onended = null;
-        centerVid.onerror = null;
-
-        try {
-          centerVid.pause();
-        } catch (e) {}
-
-        centerVid.style.transform = 'none';
-        centerBox.hidden = true;
-        centerBox.style.display = 'none';
-        if (actionLabel) actionLabel.hidden = true;
-
-        // Resume player side idle videos when cutscene ends
-        updateCharacterMedia('p1', 'IDLE');
-        updateCharacterMedia('p2', 'IDLE');
-
-        resolve();
-      };
-
-      const cleanFileName = getCleanFileName(videoFile) || 'idle';
-
-      // Smart fallback chain for reaction clips
-      let fallback1 = 'idle';
-      let fallback2 = 'idle';
-
-      if (cleanFileName === 'hit' || cleanFileName === 'hit_physical') {
-        fallback1 = 'faint';
-        fallback2 = 'ko';
-      } else if (cleanFileName === 'dodge') {
-        fallback1 = 'guard';
-        fallback2 = 'jump';
+      function abort() {
+        complete("cancelled");
       }
 
-      const candidates = [
-        `assets/videos/${riderId}/${cleanFileName}.mp4`,
-        `assets/videos/${riderId}_${cleanFileName}.mp4`,
-        `assets/videos/${cleanFileName}.mp4`,
-        `assets/videos/${riderId}/${fallback1}.mp4`,
-        `assets/videos/${riderId}_${fallback1}.mp4`,
-        `assets/videos/${riderId}/${fallback2}.mp4`,
-        `assets/videos/${riderId}/idle.mp4`,
-        `assets/videos/${riderId}_idle.mp4`
-      ];
-
-      let candidateIdx = 0;
-
-      function tryNextCenterVideo() {
-        if (candidateIdx >= candidates.length || resolved) {
-          cleanUpAndResolve();
+      function failed(error) {
+        if (!ownsAttempt()) {
+          complete("cancelled");
           return;
         }
 
-        const src = candidates[candidateIdx++];
-
-        centerVid.onended = () => cleanUpAndResolve();
-        centerVid.onerror = () => tryNextCenterVideo();
-
-        centerVid.src = src;
-        centerVid.load();
-
-        try {
-          const p = centerVid.play();
-          if (p !== undefined) {
-            p.catch(() => tryNextCenterVideo());
+        if (error?.name === "AbortError") {
+          if (!task.valid() || signal.aborted) {
+            complete("cancelled", error);
+            return;
           }
-        } catch (e) {
-          tryNextCenterVideo();
+
+          // Transient play() interruption while loading: allow retry if not exhausted.
+          if (playRetries < 3) {
+            playRetries += 1;
+            playInFlight = false;
+            setTimeout(() => {
+              if (ownsAttempt() && !started) {
+                requestPlay();
+              }
+            }, 40);
+            return;
+          }
+
+          complete("error", error);
+        } else if (error?.name === "NotAllowedError") {
+          // Ensure muted fallback and retry once before giving up as blocked.
+          if (video && playRetries < 2) {
+            playRetries += 1;
+            playInFlight = false;
+            video.muted = true;
+            video.defaultMuted = true;
+            video.setAttribute("muted", "");
+            setTimeout(() => {
+              if (ownsAttempt() && !started) {
+                requestPlay();
+              }
+            }, 40);
+            return;
+          }
+          complete("blocked", error);
+        } else {
+          complete("error", error);
         }
       }
 
-      fallbackTimer = setTimeout(cleanUpAndResolve, maxDurationMs || 8000);
-      tryNextCenterVideo();
+      function markPlaying() {
+        if (!ownsAttempt()) {
+          complete("cancelled");
+          return;
+        }
+
+        if (!started) {
+          started = true;
+          playInFlight = false;
+          lastTime = video.currentTime;
+          lastProgress = performance.now();
+
+          preferredSources.set(task.cacheKey, src);
+
+          log("playing", task.id, attemptToken, src);
+
+          // Reaction hit audio SFX and visual glass shatter integration
+        // Inside markPlaying() in js/media.js
+if (task.channel === "p1" || task.channel === "p2") {
+  const srcLower = String(src || "").toLowerCase();
+  const isHitPhysical = srcLower.includes("hit_physical");
+  const isHit = srcLower.includes("hit");
+
+  if (isHitPhysical || isHit) {
+    // Determine heavy hit based on move properties or explicitly passed options
+    const isHeavy = Boolean(task.isSpecial || task.heavy || task.moveObj?.type === "S");
+
+    if (isHitPhysical) {
+      syncTimestamp(video, 0.12, () => g.KFAudio?.playHitSFX(false));
+    } else {
+      syncTimestamp(video, 0.22, () => g.KFAudio?.playHitSFX(isHeavy));
+    }
+
+    const triggerCrack = g.triggerGlassCrack || g.UI?.triggerGlassCrack;
+    if (typeof triggerCrack === "function") {
+      triggerCrack(`${task.channel}-box`, isHeavy ? 350 : 150, null, isHeavy);
+    }
+  }
+}
+
+          // Background loops resolve as soon as playback is active.
+          if (task.background) {
+            task.ready({ status: "playing", src });
+            complete("playing");
+          }
+        }
+      }
+
+      function requestPlay() {
+        if (!ownsAttempt() || started || playInFlight) return;
+        playInFlight = true;
+
+        try {
+          const playPromise = video.play();
+          if (playPromise && typeof playPromise.then === "function") {
+            playPromise.then(() => {
+              playInFlight = false;
+              if (!ownsAttempt()) {
+                complete("cancelled");
+                return;
+              }
+              if (!video.paused) {
+                markPlaying();
+              }
+            }).catch(err => {
+              playInFlight = false;
+              if (!ownsAttempt()) {
+                complete("cancelled");
+                return;
+              }
+              // If already playing despite promise rejection, ignore.
+              if (started || !video.paused) {
+                markPlaying();
+                return;
+              }
+              failed(err);
+            });
+          } else {
+            playInFlight = false;
+          }
+        } catch (err) {
+          playInFlight = false;
+          failed(err);
+        }
+      }
+
+      if (!task.valid()) {
+        complete("cancelled");
+        return;
+      }
+
+      signal.addEventListener("abort", abort, { once: true });
+
+      try {
+        video = acquireVideo(task);
+
+        if (!video) {
+          complete("unavailable");
+          return;
+        }
+
+        video.onloadeddata = () => {
+          if (!ownsAttempt()) return;
+          requestPlay();
+        };
+
+        video.oncanplay = () => {
+          if (!ownsAttempt()) return;
+          requestPlay();
+        };
+
+        video.oncanplaythrough = () => {
+          if (!ownsAttempt()) return;
+          requestPlay();
+        };
+
+        video.onplaying = () => {
+          markPlaying();
+        };
+
+        video.ontimeupdate = () => {
+          if (!ownsAttempt()) return;
+          if (video.currentTime > 0 && !started) {
+            markPlaying();
+          }
+          if (video.currentTime !== lastTime) {
+            lastTime = video.currentTime;
+            lastProgress = performance.now();
+          }
+        };
+
+        video.onended = () => {
+          if (!ownsAttempt()) {
+            complete("cancelled");
+            return;
+          }
+
+          if (!task.background) {
+            complete("ended");
+          }
+        };
+
+        video.onerror = () => {
+          failed(video.error || new Error("Video loading failed."));
+        };
+
+        watchdog = setInterval(() => {
+          if (!ownsAttempt()) {
+            complete("cancelled");
+            return;
+          }
+
+          const now = performance.now();
+
+          // Do not count a backgrounded tab as a playback stall.
+          if (document.hidden) {
+            lastProgress = now;
+            lastTime = video.currentTime;
+            return;
+          }
+
+          if (video.currentTime !== lastTime) {
+            lastTime = video.currentTime;
+            lastProgress = now;
+          }
+
+          if (
+            started &&
+            !task.background &&
+            video.ended
+          ) {
+            complete("ended");
+            return;
+          }
+
+          // If browser paused a foreground clip mid-playback without ending, resume it.
+          if (
+            started &&
+            !task.background &&
+            video.paused &&
+            !video.ended &&
+            !playInFlight
+          ) {
+            requestPlay();
+          }
+
+          const limit = started
+            ? task.stallMs
+            : positive(CONFIG.LOAD_TIMEOUT_MS, 12000);
+
+          if (now - lastProgress >= limit) {
+            const error = new Error(
+              started ? "Video playback stalled." : "Video loading timed out."
+            );
+
+            complete(
+              started && !task.background ? "timeout" : "error",
+              error
+            );
+          }
+        }, 200);
+
+        video.src = src;
+        video.load();
+      } catch (error) {
+        failed(error);
+
+        if (!finished && !video) complete("error", error);
+      }
     });
+  }
+
+  function attemptImage(task, src) {
+    task.attempt += 1;
+
+    const attemptToken = task.attempt;
+
+    return new Promise(resolve => {
+      const image = new Image();
+      const signal = task.controller.signal;
+
+      let finished = false;
+      let timer = null;
+
+      function complete(status) {
+        if (finished) return;
+        finished = true;
+
+        if (timer !== null) clearTimeout(timer);
+
+        image.onload = null;
+        image.onerror = null;
+        signal.removeEventListener("abort", abort);
+
+        resolve({ status, src });
+      }
+
+      function abort() {
+        complete("cancelled");
+      }
+
+      function current() {
+        return (
+          !finished &&
+          task.valid() &&
+          task.attempt === attemptToken
+        );
+      }
+
+      if (!current()) {
+        complete("cancelled");
+        return;
+      }
+
+      signal.addEventListener("abort", abort, { once: true });
+
+      image.onload = () => {
+        if (!current()) {
+          complete("cancelled");
+          return;
+        }
+
+        const sprite = el(`${task.channel}-sprite`);
+
+        if (!sprite) {
+          complete("unavailable");
+          return;
+        }
+
+        sprite.onload = null;
+        sprite.onerror = null;
+        sprite.src = src;
+        sprite.classList.add("rider-media");
+        sprite.classList.toggle("p2-mirror-palette", Boolean(task.mirrorPalette));
+        sprite.style.transform = task.transform;
+
+        pause(el(`${task.channel}-video`));
+        visible(el(`${task.channel}-video`), false);
+        visible(sprite, true);
+
+        complete("image");
+      };
+
+      image.onerror = () => {
+        complete(current() ? "error" : "cancelled");
+      };
+
+      timer = setTimeout(
+        () => complete(current() ? "error" : "cancelled"),
+        positive(CONFIG.IMAGE_TIMEOUT_MS, 4000)
+      );
+
+      image.src = src;
+    });
+  }
+
+  function runChannel(channel, spec) {
+    const previous = tasks.get(channel);
+    if (previous) {
+      previous.controller.abort();
+      tasks.delete(channel);
+    }
+
+    const controller = new AbortController();
+
+    let resolveReady;
+    const readyPromise = new Promise(resolve => {
+      resolveReady = resolve;
+    });
+
+    const slot = spec.slot || channel;
+
+    const task = {
+      id: ++requestNumber,
+      attempt: 0,
+      channel,
+      slot,
+      mirrorPalette: isP2MirrorPalette(slot),
+      background: !!spec.background,
+      controller,
+      video: null,
+      transform: spec.transform,
+      cacheKey: spec.cacheKey,
+      identity: spec.identity,
+      stallMs: positive(
+        spec.stallMs,
+        positive(CONFIG.STALL_TIMEOUT_MS, 8000)
+      ),
+      ready: resolveReady,
+      readyPromise,
+      valid: null
+    };
+
+    task.valid = () => (
+      tasks.get(channel) === task &&
+      !controller.signal.aborted &&
+      spec.valid()
+    );
+
+    tasks.set(channel, task);
+
+    const externalAbort = () => controller.abort();
+
+    spec.signal?.addEventListener("abort", externalAbort, { once: true });
+
+    if (spec.signal?.aborted) controller.abort();
+
+    const ownershipTimer = setInterval(() => {
+      if (!task.valid()) controller.abort();
+    }, 100);
+
+    task.done = (async () => {
+      let result = { status: "cancelled" };
+
+      try {
+        const candidates = [...spec.candidates];
+        const preferred = preferredSources.get(task.cacheKey);
+        const preferredIndex = candidates.indexOf(preferred);
+
+        if (preferredIndex > 0) {
+          candidates.splice(preferredIndex, 1);
+          candidates.unshift(preferred);
+        }
+
+        for (const src of candidates) {
+          if (!task.valid()) {
+            result = { status: "cancelled" };
+            return result;
+          }
+
+          result = await attemptVideo(task, src);
+
+          if (result.status === "error") {
+            if (preferredSources.get(task.cacheKey) === src) {
+              preferredSources.delete(task.cacheKey);
+            }
+
+            // Only this loop advances the candidate list.
+            continue;
+          }
+
+          if (
+            result.status === "playing" ||
+            result.status === "ended" ||
+            result.status === "cancelled" ||
+            result.status === "timeout"
+          ) {
+            return result;
+          }
+
+          // Autoplay restriction or missing DOM:
+          // do not misclassify every filename as missing.
+          break;
+        }
+
+        if (!task.valid()) {
+          result = { status: "cancelled" };
+          return result;
+        }
+
+        console.warn(
+          "[KFMedia] Video unavailable; using a portrait or skipping.",
+          { channel, candidates: spec.candidates, result }
+        );
+
+        if (channel !== "center") {
+          const images = [
+            `assets/images/icons/${spec.rider}.png`,
+            `assets/images/${spec.rider}.png`
+          ];
+
+          for (const src of images) {
+            result = await attemptImage(task, src);
+
+            if (result.status !== "error") return result;
+          }
+        }
+
+        result = { status: "unavailable" };
+        return result;
+      } catch (error) {
+        console.warn("[KFMedia] Media request failed:", error);
+
+        result = {
+          status: controller.signal.aborted
+            ? "cancelled"
+            : "unavailable",
+          error
+        };
+
+        return result;
+      } finally {
+        clearInterval(ownershipTimer);
+
+        spec.signal?.removeEventListener("abort", externalAbort);
+
+        // Keep background loop alive in the DOM after attemptVideo resolves "playing".
+        if (!task.background || result.status !== "playing") {
+          controller.abort();
+          if (tasks.get(channel) === task) {
+            tasks.delete(channel);
+          }
+        }
+
+        resolveReady(result);
+      }
+    })();
+
+    return task.background ? readyPromise : task.done;
+  }
+
+  function enqueueForeground(work, options = {}) {
+    const valid = scope(options);
+
+    pendingForeground += 1;
+    freezeSides();
+
+    const job = queue.then(async () => {
+      if (!valid()) return { status: "cancelled" };
+
+      freezeSides();
+      return work(valid);
+    }).catch(error => {
+      console.warn("[KFMedia] Foreground request failed:", error);
+      return { status: "unavailable", error };
+    });
+
+    const completed = job.finally(() => {
+      pendingForeground -= 1;
+    });
+
+    // A failed job must not poison the queue.
+    queue = completed.then(
+      () => undefined,
+      () => undefined
+    );
+
+    return completed;
+  }
+
+  function playReactionVideo(slot, stateType = "HIT", options = {}) {
+    if (!SLOTS.includes(slot)) {
+      return Promise.resolve({ status: "unavailable" });
+    }
+
+    const state = normalizedState(slot, stateType);
+    const rider = riderFor(slot);
+    const files = filesForState(state);
+    const transform = getTransformFlip(playerFor(slot), slot);
+
+    return enqueueForeground(valid => runChannel(slot, {
+      slot,
+      rider,
+      candidates: candidatePaths(rider, files),
+      cacheKey: `${rider}|reaction|${state}`,
+      identity: `${rider}|${state}`,
+      background: false, // Even FAINT must end when used as a reaction.
+      transform,
+      stallMs: options.stallMs,
+      signal: options.signal,
+      valid
+    }), options);
+  }
+
+  function updateCharacterMedia(slot, stateType = "IDLE", options = {}) {
+    if (!SLOTS.includes(slot)) {
+      return Promise.resolve({ status: "unavailable" });
+    }
+
+    const state = normalizedState(slot, stateType);
+    const isBackground = ["IDLE", "FAINT", "MID-AIR"].includes(state);
+
+    if (!isBackground || options.once === true) {
+      return playReactionVideo(slot, state, options);
+    }
+
+    // Do not let unrelated idle updates interrupt a combat sequence.
+    if (
+      pendingForeground > 0 ||
+      g.gameState?.roundPhase === "RESOLUTION"
+    ) {
+      return Promise.resolve({ status: "deferred" });
+    }
+
+    const rider = riderFor(slot);
+    const identity = `${rider}|${state}`;
+    const existing = tasks.get(slot);
+
+    if (
+      existing?.background &&
+      existing.identity === identity &&
+      existing.valid() &&
+      existing.video &&
+      !existing.video.paused
+    ) {
+      existing.video.classList.toggle("p2-mirror-palette", isP2MirrorPalette(slot));
+      return existing.readyPromise;
+    }
+
+    const baseValid = scope(options);
+
+    return runChannel(slot, {
+      slot,
+      rider,
+      candidates: candidatePaths(rider, filesForState(state)),
+      cacheKey: `${rider}|background|${state}`,
+      identity,
+      background: true,
+      transform: getTransformFlip(playerFor(slot), slot),
+      stallMs: options.stallMs,
+      signal: options.signal,
+      valid: () => (
+        baseValid() &&
+        pendingForeground === 0 &&
+        g.gameState?.roundPhase !== "RESOLUTION"
+      )
+    });
+  }
+
+  function playCenterVideo(
+    slot,
+    videoFile,
+    actionName = "",
+    maxDurationMs = null,
+    moveObj = null,
+    options = {}
+  ) {
+    if (!videoFile) {
+      return Promise.resolve({ status: "unavailable" });
+    }
+
+    const rider = riderFor(slot);
+    const transform = getTransformFlip(playerFor(slot), slot, moveObj);
+
+    // Shout localized Japanese move callout when special attack begins
+    const localizedMove = typeof g.localizeBattleText === "function"
+      ? g.localizeBattleText(actionName)
+      : actionName;
+
+    if (g.KFAudio?.shout && localizedMove) {
+      g.KFAudio.shout(localizedMove, "ja-JP");
+    }
+
+    return enqueueForeground(async valid => {
+      if (!el("center-box") || !el("center-video")) {
+        return { status: "unavailable" };
+      }
+
+      const owner = Symbol("center-request");
+      centerOwner = owner;
+
+      centerVisible(true);
+      log("center action", actionName);
+
+      try {
+        return await runChannel("center", {
+          slot,
+          rider,
+          candidates: candidatePaths(rider, [videoFile]),
+          cacheKey: `${rider}|action|${videoFile}`,
+          identity: `${rider}|${videoFile}`,
+          background: false,
+          transform,
+
+          // Compatibility argument now acts as a no-progress timeout.
+          // A healthy clip longer than 8 seconds is not cut short.
+          stallMs: options.stallMs ?? maxDurationMs,
+
+          signal: options.signal,
+          valid
+        });
+      } finally {
+        if (centerOwner === owner) {
+          centerOwner = null;
+          centerVisible(false);
+        }
+
+        // Intentionally NO updateCharacterMedia(..., "IDLE") here.
+      }
+    }, options);
+  }
+
+  function cancelAll() {
+    // Invalidates active AND queued requests.
+    epoch += 1;
+
+    for (const task of tasks.values()) {
+      task.controller.abort();
+    }
+    tasks.clear();
+
+    for (const id of VIDEO_IDS) {
+      const video = el(id);
+      if (!video) continue;
+
+      clearVideoHandlers(video);
+      pause(video);
+      video.classList.remove("p2-mirror-palette");
+
+      try {
+        video.removeAttribute("src");
+        video.load();
+      } catch (_) {}
+    }
+
+    centerOwner = null;
+    centerVisible(false);
   }
 
   function hideCenterScreen() {
-    const centerBox = document.getElementById('center-box');
-    const centerVid = document.getElementById('center-video');
-    if (centerVid) {
+    if (pendingForeground > 0 && g.gameState?.roundPhase === "RESOLUTION") {
+      return;
+    }
+
+    const centerTask = tasks.get("center");
+    if (centerTask) {
+      centerTask.controller.abort();
+      tasks.delete("center");
+    }
+
+    const video = el("center-video");
+    if (video) {
+      clearVideoHandlers(video);
+      pause(video);
+      video.classList.remove("p2-mirror-palette");
       try {
-        centerVid.pause();
-      } catch (e) {}
-      centerVid.removeAttribute('src');
-      centerVid.style.transform = 'none';
+        video.removeAttribute("src");
+        video.load();
+      } catch (_) {}
     }
-    if (centerBox) {
-      centerBox.hidden = true;
-      centerBox.style.display = 'none';
-    }
-    updateCharacterMedia('p1', 'IDLE');
-    updateCharacterMedia('p2', 'IDLE');
+
+    centerOwner = null;
+    centerVisible(false);
   }
 
   function unlockMobileVideos() {
-    const vids = document.querySelectorAll('video');
-    vids.forEach(v => {
-      v.muted = true;
-      v.playsInline = true;
-      v.setAttribute('playsinline', '');
-      v.setAttribute('webkit-playsinline', '');
-      try {
-        const p = v.play();
-        if (p !== undefined) {
-          p.then(() => {
-            if (v.id !== 'p1-video' && v.id !== 'p2-video' && v.id !== 'center-video') {
-              v.pause();
-            }
-          }).catch(() => {});
-        }
-      } catch (e) {}
-    });
+    document.querySelectorAll("video").forEach(prepareVideo);
+    return Promise.resolve();
   }
 
-  window.getTransformFlip = getTransformFlip;
-  window.updateCharacterMedia = updateCharacterMedia;
-  window.playCenterVideo = playCenterVideo;
-  window.hideCenterScreen = hideCenterScreen;
-  window.unlockMobileVideos = unlockMobileVideos;
+  function status() {
+    return {
+      version: VERSION,
+      pendingForeground,
+      active: [...tasks.values()].map(task => ({
+        request: task.id,
+        attempt: task.attempt,
+        channel: task.channel,
+        background: task.background,
+        source: task.video?.currentSrc || task.video?.src || ""
+      })),
+      playing: VIDEO_IDS.filter(id => {
+        const video = el(id);
+        return video && !video.paused && !video.ended;
+      })
+    };
+  }
 
+  g.getTransformFlip = getTransformFlip;
+  g.updateCharacterMedia = updateCharacterMedia;
+  g.playReactionVideo = playReactionVideo;
+  g.playCenterVideo = playCenterVideo;
+  g.hideCenterScreen = hideCenterScreen;
+  g.unlockMobileVideos = unlockMobileVideos;
+
+  g.KFMedia = {
+    VERSION,
+    freezeSides,
+    cancelAll,
+    status
+  };
+
+  for (const id of VIDEO_IDS) prepareVideo(el(id));
+
+  g.addEventListener("pagehide", cancelAll);
 })(window);

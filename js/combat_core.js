@@ -405,9 +405,13 @@
   }
 
   /**
-   * Combines the fighter's active combat modifiers.
+   * Combines the fighter's active combat modifiers and start-of-turn Chi state.
+   *
+   * Start-of-turn Chi thresholds:
+   * - chi < 5  : attack -35% (x0.65), evasion x0.75
+   * - chi > 14 : attack +35% (x1.35), evasion x1.25
    */
-  function modifiers(player) {
+  function modifiers(player, startChi = player.chi) {
     const result = {
       attack: 1,
       dAttack: 1,
@@ -432,6 +436,14 @@
           result[key] *= value;
         }
       }
+    }
+
+    if (startChi < 5) {
+      result.attack *= 0.65;
+      result.evasion *= 0.75;
+    } else if (startChi > 14) {
+      result.attack *= 1.35;
+      result.evasion *= 1.25;
     }
 
     result.speed = K.clamp(result.speed, 0.25, 3);
@@ -865,6 +877,21 @@
       p2: state.p2.isFainted
     };
 
+    const startChi = {
+      p1: state.p1.chi,
+      p2: state.p2.chi
+    };
+
+    const startedFullPower = {
+      p1: startChi.p1 > 14,
+      p2: startChi.p2 > 14
+    };
+
+    const startedLowPower = {
+      p1: startChi.p1 < 5,
+      p2: startChi.p2 < 5
+    };
+
     const interrupted = {
       p1: false,
       p2: false
@@ -1046,7 +1073,7 @@
 
       touchedFaint[slot] = true;
 
-      const adjusted = player.chi < 5
+      const adjusted = startedLowPower[slot]
         ? Math.floor(amount * 1.25)
         : amount;
 
@@ -1186,10 +1213,10 @@
       }
 
       /*
-       * Offensive move resolution.
+       * Offensive move resolution (evaluated strictly using start-of-turn Chi).
        */
-      const atk = modifiers(attacker);
-      const def = modifiers(defender);
+      const atk = modifiers(attacker, startChi[slot]);
+      const def = modifiers(defender, startChi[targetSlot]);
 
       const chargeFactor = Math.sqrt(
         0.5 + 0.5 * action.charge / 100
@@ -1253,11 +1280,7 @@
         !defender.isFainted &&
         !idleTarget
       ) {
-        let evasion = def.evasion;
-
-        if (defender.chi < 5) {
-          evasion -= 0.25;
-        }
+        const evasion = def.evasion;
 
         let instability = 1;
 
@@ -1273,7 +1296,7 @@
         const accuracy =
           move.hitChance * chargeFactor +
           atk.accuracy +
-          (attacker.chi > 14 ? 20 : 0);
+          (startedFullPower[slot] ? 20 : 0);
 
         const hitProbability = K.clamp(
           accuracy *
@@ -1320,8 +1343,7 @@
         atk.attack *
         stanceAttack *
         def.armor *
-        (attacker.chi > 14 ? 1.20 : 1) *
-        (defender.chi < 5 ? 1.25 : 1) *
+        (startedLowPower[targetSlot] ? 1.25 : 1) *
         damageRatio;
 
       if (glancing) {

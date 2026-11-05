@@ -284,7 +284,7 @@
                     tabindex="0"
                     onclick="toggleDifficulty('${slot}')"
                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
-                ${index === 0 ? "N/A" : "BALANCED"}
+                ${index === 0 ? "N/A" : "CRICKET"}
               </span>
             </div>
           </div>
@@ -485,10 +485,90 @@
     (function (g) {
       "use strict";
 
-      /*
-       * Compatibility fallback only.
-       * Does not replace a toggleControlType supplied by vs_select.js.
-       */
+      const TIER_ORDER = ["easy", "balanced", "defensive", "master", "rider"];
+      const TIER_LABELS = {
+        en: {
+          easy: "TREE-HOPPER",
+          balanced: "CRICKET",
+          defensive: "BEETLE",
+          master: "BULLET ANT",
+          rider: "RIDER",
+          na: "N/A"
+        },
+        ja: {
+          easy: "ツノゼミ",
+          balanced: "コオロギ",
+          defensive: "カブトムシ",
+          master: "パラポネラ",
+          rider: "ライダー",
+          na: "なし"
+        }
+      };
+
+      function getLangKey() {
+        const raw = g.gameLang || document.documentElement?.lang || "en";
+        return String(raw).toLowerCase().startsWith("ja") ? "ja" : "en";
+      }
+
+      function syncDiffBadges() {
+        const state = g.vsSelectionState;
+        if (!state) return;
+        const lang = getLangKey();
+        const dict = TIER_LABELS[lang] || TIER_LABELS.en;
+
+        ["p1", "p2"].forEach(function (slot) {
+          const badge = document.getElementById(slot + "-diff-display");
+          if (!badge) return;
+
+          const isCPU = Boolean(state[slot + "IsCPU"]);
+          if (!isCPU) {
+            badge.textContent = dict.na;
+            return;
+          }
+
+          let diff = g.KF?.difficulty
+            ? g.KF.difficulty(state[slot + "Difficulty"])
+            : String(state[slot + "Difficulty"] || "balanced").toLowerCase();
+          if (!TIER_ORDER.includes(diff)) {
+            diff = "balanced";
+          }
+          state[slot + "Difficulty"] = diff;
+          badge.textContent = dict[diff] || dict.balanced;
+        });
+      }
+
+      if (typeof g.updateSelectionUI === "function") {
+        const originalUpdateSelectionUI = g.updateSelectionUI;
+        g.updateSelectionUI = function () {
+          const res = originalUpdateSelectionUI.apply(this, arguments);
+          syncDiffBadges();
+          return res;
+        };
+      }
+
+      g.toggleDifficulty = function (slot) {
+        if (!["p1", "p2"].includes(slot)) return;
+        const state = g.vsSelectionState;
+        if (!state) return;
+
+        const requiredStep = slot === "p1" ? 1 : 2;
+        if ((Number(state.step) || 1) !== requiredStep) return;
+        if (!state[slot + "IsCPU"]) return;
+
+        const current = g.KF?.difficulty
+          ? g.KF.difficulty(state[slot + "Difficulty"])
+          : String(state[slot + "Difficulty"] || "balanced").toLowerCase();
+        const idx = TIER_ORDER.indexOf(current);
+        const nextDiff = TIER_ORDER[(idx + 1) % TIER_ORDER.length];
+
+        state[slot + "Difficulty"] = nextDiff;
+        if (typeof g.updateSelectionUI === "function") {
+          g.updateSelectionUI();
+        } else {
+          syncDiffBadges();
+        }
+      };
+
       if (typeof g.toggleControlType !== "function") {
         g.toggleControlType = function (slot) {
           if (!["p1", "p2"].includes(slot)) return;
@@ -506,6 +586,8 @@
           g.updateSelectionUI?.();
         };
       }
+
+      syncDiffBadges();
     })(window);
   </script>
 </body>

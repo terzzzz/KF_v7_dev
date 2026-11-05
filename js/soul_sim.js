@@ -2,11 +2,11 @@
  * Round-based training and evaluation using CombatCore.resolve().
  *
  * Features:
- *   - One v5 implementation; no legacy sub-tick simulation.
  *   - Environment-owned observations and legal-action masks.
  *   - One replay transition per resolved round.
  *   - Multi-turn proportional credit assignment for W buffs, stackable evasion,
  *     attack multipliers, and periodic LP regen/bleed payoffs.
+ *   - Per-match tactical parameter telemetry (16 metrics + 10 reserved backup slots).
  *   - Core-owned execution-charge limits.
  *   - Deterministic seeded action selection.
  *   - Evaluation without guidance or training exploration.
@@ -186,26 +186,6 @@
     }
     const move = state?.moves?.[slot]?.[key];
     return move?.direction === "W" || key.startsWith("W+");
-  }
-
-  function getMinSChiCost(state, slot) {
-    const moves = state?.moves?.[slot];
-    if (!moves) {
-      return 4;
-    }
-
-    let minCost = Infinity;
-    for (const [key, move] of Object.entries(moves)) {
-      if (!move) continue;
-      if (move.direction === "S" || key.startsWith("S+")) {
-        const cost = Number(move.chiCost);
-        if (Number.isFinite(cost) && cost > 0 && cost < minCost) {
-          minCost = cost;
-        }
-      }
-    }
-
-    return Number.isFinite(minCost) ? minCost : 4;
   }
 
   function canSlotUseSMove(state, slot) {
@@ -484,7 +464,7 @@
       0.45
     );
 
-const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
+    const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
     const innateEvasion = Number(after[evaderSlot].evasionRate || 0);
     const buffEvasion = Math.max(0, totalEvasion - innateEvasion);
     const evasionMultiplier = buffEvasion > 0.05
@@ -525,7 +505,10 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
       move.targetDebuff?.effects?.lpBleed ??
       0
     );
-    const grantsAirborne = Boolean(move.grantsAirborne || Number(ownAfter.airborneTicks) > Number(ownBefore.airborneTicks));
+    const grantsAirborne = Boolean(
+      move.grantsAirborne ||
+      Number(ownAfter.airborneTicks) > Number(ownBefore.airborneTicks)
+    );
 
     const hasBuffEffect =
       evasionBoost > 0 ||
@@ -672,12 +655,12 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
       }
     }
 
-   if (evadedScore > 0) {
+    if (evadedScore > 0) {
       const baseEvasion =
         Math.max(0.02, Number(g.COMBAT_RULES?.BASE_EVASION_CHANCE ?? 0.02)) +
         Math.max(0, Number(ownBefore.evasionRate || 0));
       let totalBuffEvasion = 0;
-     
+
       for (const entry of activeEntries) {
         totalBuffEvasion += Math.max(0, entry.buffMeta.evasionBoost);
       }
@@ -1346,6 +1329,25 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
     let qSum = 0;
     let qCount = 0;
 
+    // Match telemetry accumulators for the v7 Match Parameter Matrix
+    let totalDamageDealtRatio = 0;
+    let totalDamageTakenRatio = 0;
+    let totalChiEarned = 0;
+    let totalChiSpent = 0;
+    let totalNetChiAdvantage = 0;
+    let totalChargeSum = 0;
+    let nonIdleChargeCount = 0;
+    let priorityContestedCount = 0;
+    let priorityWins = 0;
+    let sMoveCount = 0;
+    let aGuardCount = 0;
+    let aGuardSuccessCount = 0;
+    let wBuffCastCount = 0;
+    let enemyOffensiveCount = 0;
+    let evasionTriggers = 0;
+    let faintInflicted = false;
+    let faintSuffered = false;
+
     const BUFF_CREDIT_WINDOW = 3;
     const pendingWindow = [];
 
@@ -1559,6 +1561,63 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
         );
       }
 
+      // Accumulate Match Parameter Telemetry for this round
+      const ownMaxLp = Math.max(1, Number(before[learnerSlot].maxLp || 1600));
+      const enemyMaxLp = Math.max(1, Number(before[enemySlot].maxLp || 1600));
+
+      totalDamageDealtRatio += Math.max(0, before[enemySlot].lp - state[enemySlot].lp) / enemyMaxLp;
+      totalDamageTakenRatio += Math.max(0, before[learnerSlot].lp - state[learnerSlot].lp) / ownMaxLp;
+
+      const chiDelta = state[learnerSlot].chi - before[learnerSlot].chi;
+      if (chiDelta > 0) totalChiEarned += chiDelta;
+      if (chiDelta < 0) totalChiSpent += Math.abs(chiDelta);
+      totalNetChiAdvantage += state[learnerSlot].chi - state[enemySlot].chi;
+
+      if (resolvedAction.key !== "DO_NOTHING" && resolvedAction.charge > 0) {
+        totalChargeSum += resolvedAction.charge;
+        nonIdleChargeCount++;
+      }
+
+      if (
+        resolvedAction.key !== "DO_NOTHING" &&
+        resolvedEnemyAction?.key &&
+        resolvedEnemyAction.key !== "DO_NOTHING"
+      ) {
+        priorityContestedCount++;
+        const cmp =
+          C.comparePriority(
+            before,
+            learnerSlot === "p1" ? resolvedAction : resolvedEnemyAction,
+            learnerSlot === "p1" ? resolvedEnemyAction : resolvedAction
+          ) * (learnerSlot === "p1" ? 1 : -1);
+        if (cmp > 0) {
+          priorityWins++;
+        }
+      }
+
+      if (isSMoveKey(before, learnerSlot, resolvedAction.key)) {
+        sMoveCount++;
+      }
+
+      const enemyMoveObj = before.moves?.[enemySlot]?.[resolvedEnemyAction?.key];
+      if (isAGuardKey(before, learnerSlot, resolvedAction.key)) {
+        aGuardCount++;
+        if (
+          enemyMoveObj?.offensive &&
+          state[learnerSlot].lp >= before[learnerSlot].lp - 20
+        ) {
+          aGuardSuccessCount++;
+        }
+      }
+
+      if (isWKey(before, learnerSlot, resolvedAction.key)) {
+        wBuffCastCount++;
+      }
+
+      if (enemyMoveObj?.offensive) {
+        enemyOffensiveCount++;
+      }
+
       if (rewardMode === "standard") {
         attributeRealizedBuffPayoffs(
           pendingWindow,
@@ -1571,6 +1630,17 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
 
       const evadedEnemyAttack =
         detectEvadedAttack(before, state, learnerSlot, result.actions) > 0;
+
+      if (evadedEnemyAttack) {
+        evasionTriggers++;
+      }
+
+      if (!before[enemySlot].isFainted && state[enemySlot].isFainted) {
+        faintInflicted = true;
+      }
+      if (!before[learnerSlot].isFainted && state[learnerSlot].isFainted) {
+        faintSuffered = true;
+      }
 
       const healedLpThisTurn =
         state[learnerSlot].lp > before[learnerSlot].lp;
@@ -1707,6 +1777,30 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
       };
     }
 
+    const rCount = Math.max(1, rounds);
+    const finalOwnMaxLp = Math.max(1, Number(state[learnerSlot]?.maxLp || 1600));
+    const finalEnemyMaxLp = Math.max(1, Number(state[enemySlot]?.maxLp || 1600));
+
+    const matchMetrics = {
+      rounds,
+      finalLpRatio: Math.max(0, Number(state[learnerSlot]?.lp || 0)) / finalOwnMaxLp,
+      enemyFinalLpRatio: Math.max(0, Number(state[enemySlot]?.lp || 0)) / finalEnemyMaxLp,
+      damageDealtRatio: totalDamageDealtRatio,
+      damageTakenRatio: totalDamageTakenRatio,
+      chiEarnedPerRound: totalChiEarned / rCount,
+      chiSpentPerRound: totalChiSpent / rCount,
+      netChiAdvantage: totalNetChiAdvantage / rCount,
+      avgExecutionCharge: nonIdleChargeCount > 0 ? totalChargeSum / nonIdleChargeCount : 0,
+      priorityWinRate: priorityContestedCount > 0 ? priorityWins / priorityContestedCount : 0,
+      sMoveUsageRate: sMoveCount / rCount,
+      aGuardSuccessRate: aGuardCount > 0 ? aGuardSuccessCount / aGuardCount : 0,
+      wBuffCastRate: wBuffCastCount / rCount,
+      evasionTriggerRate: enemyOffensiveCount > 0 ? evasionTriggers / enemyOffensiveCount : 0,
+      faintInflicted: faintInflicted ? 1 : 0,
+      faintSuffered: faintSuffered ? 1 : 0,
+      reservedSlots: new Array(10).fill(0)
+    };
+
     yield {
       type: "end",
       result: {
@@ -1715,7 +1809,8 @@ const totalEvasion = C.modifiers(after[evaderSlot]).evasion;
         ticks: rounds,
         avgQ: qCount ? qSum / qCount : 0,
         qSumDelta: 0,
-        qCountDelta: 0
+        qCountDelta: 0,
+        matchMetrics
       }
     };
   }

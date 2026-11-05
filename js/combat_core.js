@@ -12,7 +12,7 @@
  * - Regeneration cannot revive a fighter at zero LP.
  * - Direct attack/chip LP damage removes statuses marked cancelOnLpDamage.
  * - Charging timers never apply or expire combat statuses.
- *
+ *  
  * Randomness:
  * - resolve() requires an explicit RNG.
  * - distribution() enumerates the same resolver's chance branches.
@@ -42,6 +42,7 @@
     hitChance: 100,
     offensive: false,
     guardKind: null,
+    requiresSpecialsEnabled: false,
     video: "idle.mp4"
   });
 
@@ -67,7 +68,10 @@
     gigi_focus: { evasion: 0.30 },
     bleeding: { lpBleed: 150, refreshable: true },
     lprecover: { lpRegen: 100 },
-    lpRecovery: { lpRegen: 100 }
+    lpRecovery: { lpRegen: 100 },
+    electro_coat: { armor: 0.78, accuracy: 15 },
+    electro_dynamo: { sAttack: 1.25, enableSpecials: true },
+    paralyze_shock: { speed: 0.70 }
   };
 
   /**
@@ -161,6 +165,10 @@
       parts.push(`-${Math.round(effects.lpBleed)} LP/RND`);
     }
 
+    if (effects.enableSpecials) {
+      parts.push("S-MOVES");
+    }
+
     return parts.length > 0
       ? `${baseTitle} (${parts.join(" / ")})`
       : baseTitle;
@@ -181,6 +189,10 @@
     }
 
     const effects = effectDefinition(buff, riderId);
+
+    if (buff.enableSpecials !== undefined) {
+      effects.enableSpecials = Boolean(buff.enableSpecials);
+    }
 
     // Explicit move-data amounts override dictionary defaults.
     for (const key of ["lpRegen", "lpBleed"]) {
@@ -205,6 +217,7 @@
       ...buff,
       duration,
       effects,
+      enableSpecials: Boolean(effects.enableSpecials),
       label: formatStatusLabel(buff.label, buff.id, effects),
 
       cancelOnLpDamage: Boolean(
@@ -222,6 +235,28 @@
   }
 
   /**
+   * Returns true if the fighter currently has an active status effect
+   * with `enableSpecials: true` (e.g. Stronger's Electro Dynamo).
+   */
+  function hasSpecialsEnabled(player) {
+    if (!player || !Array.isArray(player.activeBuffs)) {
+      return false;
+    }
+
+    for (const buff of player.activeBuffs) {
+      if (!(buff?.roundsLeft > 0)) continue;
+      if (
+        buff.enableSpecials === true ||
+        buff.effects?.enableSpecials === true
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Compiles raw rider move definitions into normalized move structures.
    *
    * Compiled move data is treated as read-only during combat.
@@ -233,6 +268,15 @@
       const moves = {
         DO_NOTHING: IDLE
       };
+
+      // Detect whether this rider's kit gates S-stance specials behind an
+      // `enableSpecials: true` buff (such as Stronger's W+K Electro Dynamo).
+      const kitGatesSpecials = Object.values(definitions).some(
+        src => Boolean(
+          src?.buff?.enableSpecials ||
+          src?.buff?.effects?.enableSpecials
+        )
+      );
 
       for (const [key, source] of Object.entries(definitions)) {
         if (key === "DO_NOTHING") continue;
@@ -260,6 +304,11 @@
 
           guardKind: null,
 
+          requiresSpecialsEnabled: Boolean(
+            source.requiresSpecialsEnabled ??
+            (kitGatesSpecials && direction === "S")
+          ),
+
           buff: normalizeBuff(source.buff, riderId),
           debuff: normalizeBuff(source.debuff, riderId)
         };
@@ -282,7 +331,7 @@
         if (type === "DEFENSE") {
           const legacyOmni =
             key === "A+I" &&
-            ["ichigo", "nigo"].includes(riderId) &&
+            ["ichigo", "nigo", "stronger"].includes(riderId) &&
             move.chiCost > 0;
 
           move.guardKind =
@@ -419,16 +468,21 @@
       armor: 1,
       speed: 1,
       accuracy: 0,
-      evasion: Number(player.evasionRate || 0)
+      evasion: Number(player.evasionRate || 0),
+      enableSpecials: false
     };
 
     for (const buff of player.activeBuffs || []) {
       if (buff.roundsLeft <= 0) continue;
 
+      if (buff.enableSpecials || buff.effects?.enableSpecials) {
+        result.enableSpecials = true;
+      }
+
       for (const [key, value] of Object.entries(
         buff.effects || {}
       )) {
-        if (!(key in result)) continue;
+        if (key === "enableSpecials" || !(key in result)) continue;
 
         if (key === "accuracy" || key === "evasion") {
           result[key] += value;
@@ -627,6 +681,38 @@
     return chargePercent(player, direction, available);
   }
 
+  /**
+   * Returns true if the move requires `enableSpecials` (or if the rider's kit
+   * has an `enableSpecials` buff and the move is an S-direction move) and the
+   * fighter does NOT currently have `enableSpecials` active.
+   */
+  function isSpecialLocked(state, slot, move) {
+    if (!move || move.key === "DO_NOTHING") return false;
+
+    const player = state?.[slot];
+    if (!player) return false;
+
+    if (move.requiresSpecialsEnabled) {
+      return !hasSpecialsEnabled(player);
+    }
+
+    if (move.direction === "S") {
+      const slotMoves = state?.moves?.[slot];
+      if (slotMoves) {
+        for (const m of Object.values(slotMoves)) {
+          if (
+            m?.buff?.enableSpecials ||
+            m?.buff?.effects?.enableSpecials
+          ) {
+            return !hasSpecialsEnabled(player);
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
   function isLegal(state, slot, action) {
     if (
       !action ||
@@ -646,6 +732,10 @@
     }
 
     if (state.winner || player.isFainted) {
+      return false;
+    }
+
+    if (isSpecialLocked(state, slot, move)) {
       return false;
     }
 
@@ -714,6 +804,8 @@
       }
 
       if (move.chiCost > state[slot].chi) continue;
+
+      if (isSpecialLocked(state, slot, move)) continue;
 
       const dirConstraint =
         directionConstraints &&
@@ -1272,6 +1364,14 @@
           state.round
         );
 
+        if (defender.lp > 0 && move.debuff) {
+          applyBuff(
+            defender,
+            move.debuff,
+            state.round
+          );
+        }
+
         if (move.grantsAirborne) {
           attacker.airborneTicks = move.grantsAirborne;
           attacker.airborneAppliedRound = state.round;
@@ -1692,6 +1792,8 @@
     copyFighter,
     copyState,
     modifiers,
+    hasSpecialsEnabled,
+    isSpecialLocked,
     chargeMs,
     timeToChargeMs,
     maxCharge,

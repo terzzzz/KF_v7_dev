@@ -1,18 +1,16 @@
 /* js/soul_pipeline_tests.js
- * Integration checks for the v5 neural pipeline.
- * Build: v5-state256-action17-charge1-reset1-tests3
+ * Integration checks for the v7 Rider Matrix Bundle & neural pipeline.
+ * Build: v5-state256-action17-charge1-reset1-v7matrix
  *
  * Contracts:
- * - 256 observation inputs and 17 actions.
+ * - 256 observation inputs and 17 actions (42,257 parameters per matchup).
  * - Action index 16 is DO_NOTHING.
  * - Planning masks use reachable-charge legality.
  * - Missing controller inputs mean WAIT.
  * - Repeating a direction preserves its charge clock.
  * - Changing direction resets the charge clock.
- *
- * Required core signatures:
- * CombatCore.maxCharge(fighter, direction)
- * CombatCore.chargePercent(fighter, direction, elapsedMs)
+ * - Per-Rider Master Bundle (001.json) packs 001_001..001_007 + 10 backup slots
+ *   and 10 reserved match parameter slots without cross-matchup weight pollution.
  */
 (function (g) {
   "use strict";
@@ -42,7 +40,6 @@
       }
     }
 
-    // Fail clearly if a required script is missing or outdated.
     assert(C, "CombatCore is not loaded.");
     assert(E, "SoulEnv is not loaded.");
     assert(N, "SoulNN is not loaded.");
@@ -229,7 +226,6 @@
               "Missing move definition: " + slot + " " + key
             );
 
-            // Planning legality uses reachable charge, not zero.
             const charge = idle
               ? 0
               : C.maxCharge(fighter, move.direction);
@@ -371,8 +367,6 @@
       );
 
       const originalStartedAt = env.cells.p1.startedAt;
-
-      // Inputs are processed before E.step advances time.
       const switchedAt = env.t;
 
       assert(
@@ -399,10 +393,6 @@
         "Switching direction did not reset both charge timestamps."
       );
 
-      /*
-       * E.step advances time after the switch and refreshes charge.
-       * The returned charge therefore need not still be exactly 1%.
-       */
       const expectedCharge = C.chargePercent(
         env.state.p1,
         "D",
@@ -581,9 +571,88 @@
       );
     });
 
+    test("v7 Rider Matrix Bundle (001.json) pack, backup slots, and isolated matchup round-trip", () => {
+      const agent = g.SoulAgent;
+      const input = E.vector(
+        E.observe(E.create(fresh()), "p1"),
+        spec
+      );
+
+      const existing1 = agent.getSection(first.id, first.id, "candidate");
+      const existing2 = agent.getSection(first.id, second.id, "candidate");
+
+      const net1 = new N.Network(spec.input, ...spec.hidden, spec.output);
+      const net2 = new N.Network(spec.input, ...spec.hidden, spec.output);
+
+      // Perturb net2 so net1 and net2 have distinct weights
+      net2.layers[0].b[0] += 0.25;
+
+      const pred1Before = net1.predict(input);
+      const pred2Before = net2.predict(input);
+
+      const makeDummyCp = (oppId, netObj, gamesCount) => ({
+        version: agent.WORKER_VERSION,
+        trainerBuild: agent.VERSION,
+        trainerPatch: agent.PATCH,
+        spec,
+        net: netObj.toJSON(),
+        canonicalKey: agent.getCanonicalKey(first.id, oppId),
+        learnerId: first.id,
+        opponentId: oppId,
+        games: gamesCount,
+        steps: gamesCount * 6,
+        savedAt: new Date().toISOString(),
+        seed: 42,
+        rewardMode: "standard",
+        matchParameters: agent.createDefaultMatchParameters({
+          avgRounds: 5.5,
+          priorityWinRate: 0.62
+        })
+      });
+
+      agent.setCandidate(makeDummyCp(first.id, net1, 12));
+      agent.setCandidate(makeDummyCp(second.id, net2, 24));
+
+      const bundle = agent.buildRiderBundle(first.id, "candidate", false);
+      const bundleValidation = agent.validateRiderBundle(bundle, first.id);
+
+      assert(bundleValidation.valid, "Bundle validation failed: " + bundleValidation.error);
+      assert(bundle.backupSlotCount === 10, "Expected 10 backup slots in Rider bundle.");
+      assert(
+        Object.keys(bundle.backupSlots).length === 10,
+        "Bundle backupSlots object does not have 10 reserved keys."
+      );
+
+      const imported = agent.importCandidate(bundle);
+      assert(imported.isBundle === true, "importCandidate did not recognize v7 Rider bundle.");
+
+      const restored1 = agent.getSection(first.id, first.id, "candidate");
+      const restored2 = agent.getSection(first.id, second.id, "candidate");
+
+      assert(
+        Array.isArray(restored1.matchParameters?.reservedSlots) &&
+          restored1.matchParameters.reservedSlots.length === 10,
+        "Match parameters missing 10 reserved backup slots."
+      );
+
+      const pred1After = N.Network.fromJSON(restored1.net).predict(input);
+      const pred2After = N.Network.fromJSON(restored2.net).predict(input);
+
+      assert(
+        pred1Before.every((v, idx) => v === pred1After[idx]),
+        "001_001 weights changed or were polluted during bundle round-trip."
+      );
+      assert(
+        pred2Before.every((v, idx) => v === pred2After[idx]),
+        "001_002 weights changed or were polluted during bundle round-trip."
+      );
+
+      if (existing1) agent.setCandidate(existing1);
+      if (existing2) agent.setCandidate(existing2);
+    });
+
     lines.push("", `${passed} pipeline tests passed.`);
 
-    // Preserve the return shape used by the training interface.
     return { passed, lines };
   }
 

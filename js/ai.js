@@ -33,7 +33,29 @@
     return K.difficulty(value);
   }
 
-  function clampReachableAction(state, slot, action) {
+  function availableMsForDirection(live, direction) {
+    if (!live || typeof live !== "object" || live.isInitial) {
+      return undefined;
+    }
+
+    const remainingMs = Number(live.remainingMs);
+    if (!Number.isFinite(remainingMs)) {
+      return undefined;
+    }
+
+    const selfDir = String(live.selfDirection || "").toUpperCase();
+    const dir = String(direction || "").toUpperCase();
+
+    if (selfDir && dir === selfDir) {
+      const selfElapsedMs = Math.max(0, Number(live.selfElapsedMs) || 0);
+      return selfElapsedMs + Math.max(0, remainingMs);
+    }
+
+    const switchPenaltyMs = Math.max(0, Number(live.switchPenaltyMs) || 0);
+    return Math.max(0, remainingMs - switchPenaltyMs);
+  }
+
+  function clampReachableAction(state, slot, action, live) {
     if (!action || typeof action.key !== "string") {
       return null;
     }
@@ -45,14 +67,25 @@
     const move = state?.moves?.[slot]?.[action.key];
     if (!move) return null;
 
-    const reachable = C.maxCharge(state[slot], move.direction);
+    const availableMs = availableMsForDirection(live, move.direction);
+    const reachable = C.maxCharge(state[slot], move.direction, availableMs);
     if (reachable < 1) return null;
+
+    const selfDir = String(live?.selfDirection || "").toUpperCase();
+    const minCharge =
+      !live?.isInitial &&
+      selfDir &&
+      move.direction === selfDir &&
+      Number.isFinite(live?.selfCharge) &&
+      live.selfCharge >= 1
+        ? K.clamp(Math.floor(live.selfCharge), 1, reachable)
+        : 1;
 
     return {
       key: action.key,
       charge: K.clamp(
         Math.floor(Number(action.charge) || 1),
-        1,
+        minCharge,
         reachable
       )
     };
@@ -92,6 +125,8 @@
     if (!g.ForeseeEngine || typeof g.ForeseeEngine.search !== "function") {
       throw new Error("ForeseeEngine.search is missing.");
     }
+
+    const liveContext = safeContext.liveContext || state.liveContext || null;
 
     let net = safeContext.neuralNetwork || null;
     let spec = safeContext.neuralSpec || null;
@@ -152,17 +187,25 @@
       customBudget = safeContext.maxTimeMs;
     }
 
+    const defaultRiderBudgetMs =
+      liveContext && !liveContext.isInitial ? 65 : 100;
+
     const timeBudgetMs =
       rider && !isTraining
         ? Number.isFinite(customBudget) && customBudget > 0
           ? customBudget
-          : 100
+          : defaultRiderBudgetMs
         : Number.isFinite(customBudget) && customBudget > 0
           ? customBudget
           : 0;
 
+    const copiedState = C.copyState(state);
+    if (liveContext) {
+      copiedState.liveContext = Object.assign({}, liveContext);
+    }
+
     const searchContext = Object.assign({}, safeContext, {
-      state: C.copyState(state),
+      state: copiedState,
       slot: slot,
       history: safeContext.history || [],
       difficulty: searchDifficulty,
@@ -170,6 +213,7 @@
       isRider: rider,
       isTeacher: isTeacher,
       isTraining: isTraining,
+      liveContext: liveContext ? Object.assign({}, liveContext) : null,
       timeBudgetMs: timeBudgetMs,
       timeLimitMs: timeBudgetMs,
       maxTimeMs: timeBudgetMs
@@ -186,7 +230,12 @@
     const rows = rawRows
       .map(function (row) {
         if (!row || !Number.isFinite(row.score)) return null;
-        const clampedAction = clampReachableAction(state, slot, row.action);
+        const clampedAction = clampReachableAction(
+          state,
+          slot,
+          row.action,
+          liveContext
+        );
         if (!clampedAction || !C.isLegal(state, slot, clampedAction)) {
           return null;
         }
@@ -243,6 +292,7 @@
       difficulty: difficulty,
       chosenScore: Number(selected.score.toFixed(3)),
       neural: Boolean(evaluator),
+      liveReplan: Boolean(liveContext && !liveContext.isInitial),
       strategy: rider
         ? evaluator
           ? "RIDER: neural-evaluated Foresee search"

@@ -1,37 +1,53 @@
 /* js/soul_agent.js
- * Exact-matchup checkpoint storage.
+ * Exact-matchup checkpoint & Per-Rider Master Matrix Bundle storage (v7).
  *
  * Build: v5-state256-action17
+ * Matrix: v7-7riders-10backup
  * Patch: charge1-reset1
  */
 (function (g) {
   "use strict";
 
   const VERSION = "v5-state256-action17";
-  const MASTER_VERSION = "kf-soul-matrix-v5-state256-action17";
+  const MASTER_VERSION = "kf-soul-matrix-v7-state256-action17";
+  const BUNDLE_VERSION = "kf-soul-rider-bundle-v7-state256-action17";
   const WORKER_VERSION = "kf-soul-ddqn-v5-state256-action17";
 
   const PATCH = "charge1-reset1";
-  const CACHE_TAG = VERSION + "-" + PATCH;
+  const CACHE_TAG = VERSION + "-" + PATCH + "-v7";
 
   const EXPECTED_SCHEMA =
     "kf-state256-action17-v2-charge1-reset1";
 
   const STORAGE_KEY =
-    "kf_soul_agent_data_v5_state256_action17_charge1_reset1";
+    "kf_soul_agent_data_v7_matrix_state256_action17_charge1_reset1";
 
-  const LEGACY_STORAGE_KEY =
-    "kf_soul_agent_data_v5_state256_action17";
+  const ACTIVE_ROSTER_COUNT = 7;
+  const BACKUP_SLOT_COUNT = 10;
+  const RESERVED_PARAM_SLOTS = 10;
+  const TOTAL_MATRIX_SLOTS = ACTIVE_ROSTER_COUNT + BACKUP_SLOT_COUNT;
 
-  const RIDER_CODES = Object.freeze({
+  const DEFAULT_RIDER_CODES = Object.freeze({
     ichigo: "001",
     nigo: "002",
     v3: "003",
     riderman: "004",
     x: "005",
-    amazon: "006"
+    amazon: "006",
+    stronger: "007",
+    skyrider: "008",
+    super1: "009",
+    zx: "010",
+    black: "011",
+    shadowmoon: "012",
+    rx: "013",
+    shin: "014",
+    zo: "015",
+    j: "016",
+    kuuga: "017"
   });
 
+  const RIDER_CODES = { ...DEFAULT_RIDER_CODES };
   const REVERSE_CODES = Object.fromEntries(
     Object.entries(RIDER_CODES).map(([id, code]) => [code, id])
   );
@@ -48,22 +64,73 @@
 
   const warnings = [];
 
+  function formatCodeNumber(num) {
+    return String(num).padStart(3, "0");
+  }
+
+  function getAllSlotCodes() {
+    const codes = [];
+    for (let i = 1; i <= TOTAL_MATRIX_SLOTS; i++) {
+      codes.push(formatCodeNumber(i));
+    }
+    return codes;
+  }
+
+  function getActiveCodes() {
+    if (Array.isArray(cachedData?.riders) && cachedData.riders.length > 0) {
+      return cachedData.riders.map((rider, idx) => {
+        try {
+          return toCode(rider.id);
+        } catch (_) {
+          return formatCodeNumber(idx + 1);
+        }
+      });
+    }
+    const codes = [];
+    for (let i = 1; i <= ACTIVE_ROSTER_COUNT; i++) {
+      codes.push(formatCodeNumber(i));
+    }
+    return codes;
+  }
+
+  function getBackupCodes() {
+    const activeSet = new Set(getActiveCodes());
+    return getAllSlotCodes().filter(code => !activeSet.has(code)).slice(0, BACKUP_SLOT_COUNT);
+  }
+
+  function syncRosterCodes(riders) {
+    if (!Array.isArray(riders)) return;
+
+    riders.forEach((rider, index) => {
+      const id = String(rider?.id || "").trim().toLowerCase();
+      if (!id) return;
+
+      const code = formatCodeNumber(index + 1);
+      RIDER_CODES[id] = code;
+      REVERSE_CODES[code] = id;
+    });
+  }
+
   function toCode(id) {
-    const value = String(id || "").toLowerCase();
+    const value = String(id || "").trim().toLowerCase();
 
     if (Object.prototype.hasOwnProperty.call(RIDER_CODES, value)) {
       return RIDER_CODES[value];
     }
 
-    if (Object.prototype.hasOwnProperty.call(REVERSE_CODES, value)) {
-      return value;
+    if (/^\d{3}$/.test(value)) {
+      const idx = Number(value);
+      if (idx >= 1 && idx <= TOTAL_MATRIX_SLOTS) {
+        return value;
+      }
     }
 
     throw new Error("Unknown rider ID/code: " + id);
   }
 
   function fromCode(code) {
-    return REVERSE_CODES[code] || code;
+    const normalized = String(code || "").trim();
+    return REVERSE_CODES[normalized] || normalized;
   }
 
   function getCanonicalKey(learner, opponent) {
@@ -72,6 +139,58 @@
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function createDefaultMatchParameters(overrides = null) {
+    const base = {
+      avgRounds: 0,
+      avgFinalLpRatio: 0,
+      avgEnemyFinalLpRatio: 0,
+      avgDamageDealtRatio: 0,
+      avgDamageTakenRatio: 0,
+      avgChiEarned: 0,
+      avgChiSpent: 0,
+      avgNetChiAdvantage: 0,
+      avgExecutionCharge: 0,
+      priorityWinRate: 0,
+      sMoveUsageRate: 0,
+      aGuardSuccessRate: 0,
+      wBuffCastRate: 0,
+      evasionTriggerRate: 0,
+      faintInflictedRate: 0,
+      faintSufferedRate: 0,
+      stanceDistribution: { W: 0, A: 0, S: 0, D: 0, IDLE: 0 },
+      buttonDistribution: { J: 0, K: 0, I: 0, L: 0, NONE: 0 },
+      reservedSlots: new Array(RESERVED_PARAM_SLOTS).fill(0)
+    };
+
+    if (!overrides || typeof overrides !== "object") {
+      return base;
+    }
+
+    const merged = {
+      ...base,
+      ...overrides,
+      stanceDistribution: {
+        ...base.stanceDistribution,
+        ...(overrides.stanceDistribution || {})
+      },
+      buttonDistribution: {
+        ...base.buttonDistribution,
+        ...(overrides.buttonDistribution || {})
+      },
+      reservedSlots: Array.isArray(overrides.reservedSlots)
+        ? overrides.reservedSlots
+            .slice(0, RESERVED_PARAM_SLOTS)
+            .map(v => (Number.isFinite(Number(v)) ? Number(v) : 0))
+        : new Array(RESERVED_PARAM_SLOTS).fill(0)
+    };
+
+    while (merged.reservedSlots.length < RESERVED_PARAM_SLOTS) {
+      merged.reservedSlots.push(0);
+    }
+
+    return merged;
   }
 
   function assertRuntime() {
@@ -117,8 +236,7 @@
 
       if (checkpoint.spec?.schema !== EXPECTED_SCHEMA) {
         throw new Error(
-          "Checkpoint uses an earlier or unknown charging-rule schema. " +
-          "Retrain under charge1-reset1; do not rename its schema field."
+          "Checkpoint uses an incompatible charging-rule schema."
         );
       }
 
@@ -196,13 +314,164 @@
     }
   }
 
+  function isRiderBundle(payload) {
+    return Boolean(
+      payload &&
+      typeof payload === "object" &&
+      (payload.bundleType === "rider_matrix_v7" ||
+        payload.version === BUNDLE_VERSION ||
+        (payload.matchups && typeof payload.matchups === "object" && !payload.net))
+    );
+  }
+
+  function validateRiderBundle(bundle, expectedLearner = null) {
+    try {
+      assertRuntime();
+
+      if (!isRiderBundle(bundle)) {
+        throw new Error("Payload is not a v7 Rider Matrix Bundle.");
+      }
+
+      if (bundle.schema && bundle.schema !== EXPECTED_SCHEMA) {
+        throw new Error("Bundle schema does not match " + EXPECTED_SCHEMA + ".");
+      }
+
+      const learnerCode = toCode(bundle.learnerCode || bundle.learnerId);
+
+      if (expectedLearner && toCode(expectedLearner) !== learnerCode) {
+        throw new Error(
+          `Bundle learner mismatch: got ${learnerCode}, expected ${toCode(expectedLearner)}.`
+        );
+      }
+
+      const validMatchups = {};
+      const entries = Object.entries(bundle.matchups || {});
+
+      for (const [rawKey, cp] of entries) {
+        if (!cp) continue;
+
+        const parts = String(rawKey).split("_");
+        const oppCode = parts.length === 2 ? parts[1] : cp.opponentId;
+        const expectedKey = `${learnerCode}_${toCode(oppCode)}`;
+
+        const validation = validateCheckpoint(
+          cp,
+          cp.learnerId || fromCode(learnerCode),
+          cp.opponentId || fromCode(toCode(oppCode))
+        );
+
+        if (!validation.valid) {
+          throw new Error(`${expectedKey}: ${validation.error}`);
+        }
+
+        validMatchups[validation.canonicalKey] = cp;
+      }
+
+      return {
+        valid: true,
+        learnerCode,
+        learnerId: bundle.learnerId || fromCode(learnerCode),
+        matchups: validMatchups,
+        count: Object.keys(validMatchups).length
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        error: error?.message || String(error)
+      };
+    }
+  }
+
+  function buildRiderBundle(learner, target = "candidate", fallbackToActive = true) {
+    assertRuntime();
+
+    const learnerCode = toCode(learner);
+    const learnerId = fromCode(learnerCode);
+    const activeCodes = getActiveCodes();
+    const backupCodes = getBackupCodes();
+
+    const matchups = {};
+    let totalGames = 0;
+    let totalSteps = 0;
+    let populatedMatchups = 0;
+
+    for (const oppCode of activeCodes) {
+      const key = `${learnerCode}_${oppCode}`;
+      let cp = store[target]?.matchups?.[key] || null;
+
+      if (!cp && fallbackToActive && target !== "active") {
+        cp = store.active?.matchups?.[key] || null;
+      }
+
+      if (cp) {
+        const copy = clone(cp);
+        copy.canonicalKey = key;
+        copy.matchParameters = createDefaultMatchParameters(copy.matchParameters);
+        matchups[key] = copy;
+        totalGames += copy.games || 0;
+        totalSteps += copy.steps || 0;
+        populatedMatchups++;
+      } else {
+        matchups[key] = null;
+      }
+    }
+
+    const backupSlots = {};
+    for (const backupCode of backupCodes) {
+      const key = `${learnerCode}_${backupCode}`;
+      const cp =
+        store[target]?.matchups?.[key] ||
+        (fallbackToActive ? store.active?.matchups?.[key] : null) ||
+        null;
+      backupSlots[key] = cp ? clone(cp) : null;
+      if (cp) {
+        populatedMatchups++;
+      }
+    }
+
+    if (populatedMatchups === 0) {
+      throw new Error(
+        `No trained matchups exist yet for Rider ${learnerCode} (${learnerId}).`
+      );
+    }
+
+    return {
+      bundleType: "rider_matrix_v7",
+      version: BUNDLE_VERSION,
+      masterVersion: MASTER_VERSION,
+      workerVersion: WORKER_VERSION,
+      trainerBuild: VERSION,
+      trainerPatch: PATCH,
+      schema: EXPECTED_SCHEMA,
+      learnerCode,
+      learnerId,
+      activeRosterCount: activeCodes.length,
+      backupSlotCount: backupCodes.length,
+      reservedParamSlotCount: RESERVED_PARAM_SLOTS,
+      savedAt: new Date().toISOString(),
+      spec: g.SoulEnv.makeSpec(),
+      matchups,
+      backupSlots,
+      riderParameterSummary: {
+        totalGames,
+        totalSteps,
+        populatedMatchups,
+        neuralParamsPerMatchup: 42257,
+        totalNeuralParamsInBundle: populatedMatchups * 42257,
+        max7RiderBundleParams: ACTIVE_ROSTER_COUNT * 42257,
+        max17SlotBundleParams: TOTAL_MATRIX_SLOTS * 42257,
+        reservedSummarySlots: new Array(RESERVED_PARAM_SLOTS).fill(0)
+      }
+    };
+  }
+
   function saveToLocalStorage() {
     try {
       const storage = g.localStorage;
 
       if (!storage) {
         storageWarning =
-          "LocalStorage unavailable. Export checkpoints to save.";
+          "LocalStorage unavailable. Export Rider bundles to save.";
         return;
       }
 
@@ -218,7 +487,7 @@
     } catch (_) {
       storageWarning =
         "Persistent save failed. Models remain in RAM; " +
-        "export them before closing.";
+        "export Rider matrix bundles before closing.";
     }
   }
 
@@ -230,60 +499,36 @@
       const storage = g.localStorage;
       if (!storage) return;
 
-      // New storage takes precedence. Earlier storage is read-only.
-      for (const storageKey of [
-        STORAGE_KEY,
-        LEGACY_STORAGE_KEY
-      ]) {
-        const raw = storage.getItem(storageKey);
-        if (!raw) continue;
+      const raw = storage.getItem(STORAGE_KEY);
+      if (!raw) return;
 
-        let payload;
+      let payload;
+      try {
+        payload = JSON.parse(raw);
+      } catch (_) {
+        warnings.push("Could not parse stored v7 matrix data.");
+        return;
+      }
 
-        try {
-          payload = JSON.parse(raw);
-        } catch (_) {
-          warnings.push(
-            "Could not parse stored checkpoint data: " + storageKey
-          );
-          continue;
-        }
+      if (payload.version !== MASTER_VERSION) {
+        return;
+      }
 
-        if (payload.version !== MASTER_VERSION) {
-          warnings.push(
-            "Ignored incompatible stored checkpoint container: " +
-            storageKey
-          );
-          continue;
-        }
+      for (const target of ["candidate", "active"]) {
+        for (const [key, checkpoint] of Object.entries(
+          payload[target]?.matchups || {}
+        )) {
+          if (!checkpoint || store[target].matchups[key]) continue;
 
-        let ignored = 0;
+          const validation = validateCheckpoint(checkpoint);
 
-        for (const target of ["candidate", "active"]) {
-          for (const [key, checkpoint] of Object.entries(
-            payload[target]?.matchups || {}
-          )) {
-            if (store[target].matchups[key]) continue;
-
-            const validation = validateCheckpoint(checkpoint);
-
-            if (
-              validation.valid &&
-              validation.canonicalKey === key
-            ) {
-              store[target].matchups[key] = checkpoint;
-              store[target].legacy = checkpoint;
-            } else {
-              ignored++;
-            }
+          if (validation.valid && validation.canonicalKey === key) {
+            checkpoint.matchParameters = createDefaultMatchParameters(
+              checkpoint.matchParameters
+            );
+            store[target].matchups[key] = checkpoint;
+            store[target].legacy = checkpoint;
           }
-        }
-
-        if (ignored) {
-          warnings.push(
-            `Ignored ${ignored} incompatible or invalid stored checkpoints ` +
-            `from ${storageKey}. Earlier charging-rule models need retraining.`
-          );
         }
       }
     } catch (error) {
@@ -302,9 +547,10 @@
     return new URL("../", g.location.href).href;
   }
 
-  function matchupURL(key) {
+  function riderBundleURL(learner) {
+    const code = toCode(learner);
     const url = new URL(
-      `data/matrix/${key}.json`,
+      `data/matrix/${code}.json`,
       projectBase()
     );
 
@@ -312,118 +558,106 @@
     return url;
   }
 
-  async function fetchMatchupFromCDN(learner, opponent) {
+  function ingestRiderBundleIntoStore(bundle, overwriteActive = true) {
+    const validation = validateRiderBundle(bundle);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    let loadedCount = 0;
+
+    const allEntries = {
+      ...(bundle.backupSlots || {}),
+      ...(bundle.matchups || {})
+    };
+
+    for (const [, cp] of Object.entries(allEntries)) {
+      if (!cp) continue;
+
+      const check = validateCheckpoint(cp);
+      if (!check.valid) continue;
+
+      const key = check.canonicalKey;
+      const saved = clone(cp);
+      saved.canonicalKey = key;
+      saved.matchParameters = createDefaultMatchParameters(saved.matchParameters);
+
+      if (overwriteActive || !store.active.matchups[key]) {
+        store.active.matchups[key] = saved;
+        store.active.legacy = saved;
+      }
+
+      if (!store.candidate.matchups[key]) {
+        const candidateCopy = clone(saved);
+        store.candidate.matchups[key] = candidateCopy;
+        store.candidate.legacy = candidateCopy;
+      }
+
+      loadedCount++;
+    }
+
+    return {
+      learnerCode: validation.learnerCode,
+      loadedCount
+    };
+  }
+
+  async function fetchRiderBundleFromCDN(learner) {
     assertRuntime();
 
-    const key = getCanonicalKey(learner, opponent);
-
-    const response = await fetch(matchupURL(key), {
+    const code = toCode(learner);
+    const response = await fetch(riderBundleURL(code), {
       cache: "no-store"
     });
 
     if (!response.ok) {
       throw new Error(
-        `Cannot fetch ${key}.json: HTTP ${response.status}.`
+        `Cannot fetch data/matrix/${code}.json: HTTP ${response.status}.`
       );
     }
 
-    const checkpoint = await response.json();
+    const payload = await response.json();
 
-    const validation = validateCheckpoint(
-      checkpoint,
-      learner,
-      opponent
+    if (isRiderBundle(payload)) {
+      const result = ingestRiderBundleIntoStore(payload, true);
+      saveToLocalStorage();
+      return result;
+    }
+
+    throw new Error(
+      `data/matrix/${code}.json is not a v7 Rider Matrix Bundle.`
     );
+  }
 
-    if (!validation.valid) {
-      throw new Error(
-        `${key}.json: ${validation.error}`
-      );
-    }
-
-    const saved = clone(checkpoint);
-    saved.canonicalKey = key;
-
-    store.active.matchups[key] = saved;
-    store.active.legacy = saved;
-
-    if (!store.candidate.matchups[key]) {
-      const candidate = clone(saved);
-      store.candidate.matchups[key] = candidate;
-      store.candidate.legacy = candidate;
-    }
-
-    saveToLocalStorage();
-    return saved;
+  async function fetchMatchupFromCDN(learner, opponent) {
+    return fetchRiderBundleFromCDN(learner, opponent);
   }
 
   async function scanAllMatchupsFromRepo() {
     assertRuntime();
 
     let found = 0;
-    let incompatible = 0;
+    const activeCodes = getActiveCodes();
 
-    const jobs = [];
+    const jobs = activeCodes.map(async code => {
+      try {
+        const response = await fetch(riderBundleURL(code), {
+          cache: "no-store"
+        });
 
-    for (const learner of Object.keys(RIDER_CODES)) {
-      for (const opponent of Object.keys(RIDER_CODES)) {
-        const key = getCanonicalKey(learner, opponent);
+        if (!response.ok) return;
 
-        // Startup must not overwrite locally activated checkpoints.
-        if (store.active.matchups[key]) continue;
+        const payload = await response.json();
+        if (!isRiderBundle(payload)) return;
 
-        jobs.push((async () => {
-          try {
-            const response = await fetch(matchupURL(key), {
-              cache: "no-store"
-            });
-
-            if (!response.ok) return;
-
-            const checkpoint = await response.json();
-
-            const validation = validateCheckpoint(
-              checkpoint,
-              learner,
-              opponent
-            );
-
-            if (!validation.valid) {
-              incompatible++;
-              return;
-            }
-
-            // Re-check after awaiting the network request.
-            if (store.active.matchups[key]) return;
-
-            checkpoint.canonicalKey = key;
-            store.active.matchups[key] = checkpoint;
-            store.active.legacy = checkpoint;
-
-            if (!store.candidate.matchups[key]) {
-              const candidate = clone(checkpoint);
-              store.candidate.matchups[key] = candidate;
-              store.candidate.legacy = candidate;
-            }
-
-            found++;
-          } catch (_) {
-            // Missing/offline files do not prevent fresh training.
-          }
-        })());
+        const result = ingestRiderBundleIntoStore(payload, false);
+        found += result.loadedCount;
+      } catch (_) {
+        // Missing/offline bundle files do not block fresh training.
       }
-    }
+    });
 
     await Promise.all(jobs);
-
-    if (incompatible) {
-      warnings.push(
-        `Ignored ${incompatible} incompatible repository checkpoints. ` +
-        "Old 136/16 models and earlier 256/17 charging-rule schemas " +
-        "need retraining."
-      );
-    }
-
     saveToLocalStorage();
     return found;
   }
@@ -434,6 +668,10 @@
         assertRuntime();
 
         cachedData = await g.KF.loadData();
+        if (Array.isArray(cachedData?.riders)) {
+          syncRosterCodes(cachedData.riders);
+        }
+
         loadFromLocalStorage();
         await scanAllMatchupsFromRepo();
 
@@ -458,13 +696,32 @@
       throw new Error("Unknown checkpoint target: " + target);
     }
 
-    if (!learner || !opponent) {
+    if (!learner || !opponent || opponent === "*") {
       return bucket.legacy;
     }
 
     return bucket.matchups[
       getCanonicalKey(learner, opponent)
     ] || null;
+  }
+
+  function getLearnerSections(learner, target = "candidate") {
+    const bucket = store[target];
+    if (!bucket) {
+      throw new Error("Unknown checkpoint target: " + target);
+    }
+
+    const learnerCode = toCode(learner);
+    const result = {};
+
+    for (const oppCode of getActiveCodes()) {
+      const key = `${learnerCode}_${oppCode}`;
+      if (bucket.matchups[key]) {
+        result[key] = bucket.matchups[key];
+      }
+    }
+
+    return result;
   }
 
   function snapshot(target = "candidate") {
@@ -547,8 +804,8 @@
 
     const saved = clone(checkpoint);
     saved.canonicalKey = validation.canonicalKey;
+    saved.matchParameters = createDefaultMatchParameters(saved.matchParameters);
 
-    // Imported evaluation metadata must match these exact weights/rules.
     if (saved.evaluation) {
       try {
         assertEvaluation(saved, saved.evaluation);
@@ -570,12 +827,57 @@
   }
 
   function importCandidate(payload) {
-    return setCandidate(payload);
+    if (isRiderBundle(payload)) {
+      const validation = validateRiderBundle(payload);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+
+      const importedKeys = [];
+      const allEntries = {
+        ...(payload.backupSlots || {}),
+        ...(payload.matchups || {})
+      };
+
+      for (const [, cp] of Object.entries(allEntries)) {
+        if (!cp) continue;
+        const saved = setCandidate(cp);
+        importedKeys.push(saved.canonicalKey);
+      }
+
+      if (importedKeys.length === 0) {
+        throw new Error("Rider Matrix Bundle contained no populated matchup checkpoints.");
+      }
+
+      return {
+        isBundle: true,
+        learnerCode: validation.learnerCode,
+        learnerId: validation.learnerId,
+        importedKeys,
+        canonicalKey: `${validation.learnerCode}.json (${importedKeys.length} matchups)`
+      };
+    }
+
+    const single = setCandidate(payload);
+    return {
+      isBundle: false,
+      learnerCode: toCode(single.learnerId),
+      learnerId: single.learnerId,
+      importedKeys: [single.canonicalKey],
+      canonicalKey: single.canonicalKey
+    };
   }
 
   function recordEvaluation(target, report) {
     if (!report) {
       throw new Error("Evaluation report is missing.");
+    }
+
+    if (Array.isArray(report.matchupReports) && report.matchupReports.length > 0) {
+      for (const subReport of report.matchupReports) {
+        recordEvaluation(target, subReport);
+      }
+      return;
     }
 
     const checkpoint = getSection(
@@ -603,6 +905,41 @@
   }
 
   function promote(learner, opponent) {
+    if (learner && opponent === "*") {
+      const learnerCode = toCode(learner);
+      const promotedKeys = [];
+
+      for (const oppCode of getActiveCodes()) {
+        const key = `${learnerCode}_${oppCode}`;
+        const candidate = store.candidate.matchups[key];
+        if (!candidate) continue;
+
+        const evaluation = candidate.evaluation;
+        if (
+          evaluation &&
+          evaluation.learnerPolicy === "rider" &&
+          !evaluation.cancelled &&
+          evaluation.games === evaluation.requested &&
+          evaluation.games >= 2
+        ) {
+          assertEvaluation(candidate, evaluation);
+          const saved = clone(candidate);
+          store.active.matchups[key] = saved;
+          store.active.legacy = saved;
+          promotedKeys.push(key);
+        }
+      }
+
+      if (promotedKeys.length === 0) {
+        throw new Error(
+          `No evaluated RIDER-policy candidates ready to activate for Rider ${learnerCode}.`
+        );
+      }
+
+      saveToLocalStorage();
+      return { promotedKeys };
+    }
+
     const checkpoint = learner && opponent
       ? getSection(learner, opponent, "candidate")
       : store.candidate.legacy;
@@ -640,19 +977,26 @@
       throw new Error("Unknown checkpoint target: " + target);
     }
 
+    const codes = getActiveCodes();
     const matrix = {};
 
-    for (const learner of Object.values(RIDER_CODES)) {
+    for (const learner of codes) {
       matrix[learner] = {};
 
-      for (const opponent of Object.values(RIDER_CODES)) {
+      for (const opponent of codes) {
         const checkpoint =
           store[target].matchups[`${learner}_${opponent}`];
 
         matrix[learner][opponent] = {
           hasModel: Boolean(checkpoint),
           games: checkpoint?.games || 0,
-          steps: checkpoint?.steps || 0
+          steps: checkpoint?.steps || 0,
+          evaluated: Boolean(
+            checkpoint?.evaluation &&
+            checkpoint.evaluation.learnerPolicy === "rider" &&
+            !checkpoint.evaluation.cancelled &&
+            checkpoint.evaluation.games === checkpoint.evaluation.requested
+          )
         };
       }
     }
@@ -660,31 +1004,15 @@
     return matrix;
   }
 
-  function downloadMatchupFile(
+  function downloadRiderBundle(
     learner,
-    opponent,
     target = "candidate"
   ) {
-    const checkpoint = getSection(
-      learner,
-      opponent,
-      target
-    );
-
-    const validation = validateCheckpoint(
-      checkpoint,
-      learner,
-      opponent
-    );
-
-    if (!validation.valid) {
-      throw new Error(validation.error);
-    }
-
-    const fileName = validation.canonicalKey + ".json";
+    const bundle = buildRiderBundle(learner, target, true);
+    const fileName = `${bundle.learnerCode}.json`;
 
     const blob = new Blob(
-      [JSON.stringify(checkpoint, null, 2)],
+      [JSON.stringify(bundle, null, 2)],
       { type: "application/json" }
     );
 
@@ -704,10 +1032,21 @@
 
     return {
       fileName,
-      key: validation.canonicalKey,
+      key: bundle.learnerCode,
+      populatedMatchups: bundle.riderParameterSummary.populatedMatchups,
+      activeRosterCount: bundle.activeRosterCount,
+      backupSlotCount: bundle.backupSlotCount,
       sizeMB: (blob.size / 1048576).toFixed(2),
-      games: checkpoint.games
+      games: bundle.riderParameterSummary.totalGames
     };
+  }
+
+  function downloadMatchupFile(
+    learner,
+    opponent,
+    target = "candidate"
+  ) {
+    return downloadRiderBundle(learner, target);
   }
 
   function seedFromSearchEngine() {
@@ -723,8 +1062,13 @@
       patch: PATCH,
       schema: EXPECTED_SCHEMA,
       masterVersion: MASTER_VERSION,
+      bundleVersion: BUNDLE_VERSION,
       workerVersion: WORKER_VERSION,
       storageKey: STORAGE_KEY,
+
+      activeRosterCount: getActiveCodes().length,
+      backupSlotCount: BACKUP_SLOT_COUNT,
+      reservedParamSlotCount: RESERVED_PARAM_SLOTS,
 
       candidate: store.candidate.legacy,
       active: store.active.legacy,
@@ -743,17 +1087,30 @@
   g.SoulAgent = {
     VERSION,
     MASTER_VERSION,
+    BUNDLE_VERSION,
     WORKER_VERSION,
     PATCH,
+    ACTIVE_ROSTER_COUNT,
+    BACKUP_SLOT_COUNT,
+    RESERVED_PARAM_SLOTS,
 
     ready,
     toCode,
     fromCode,
+    getActiveCodes,
+    getBackupCodes,
+    getAllSlotCodes,
+    syncRosterCodes,
     getCanonicalKey,
+    createDefaultMatchParameters,
     fingerprint,
     validateCheckpoint,
+    validateRiderBundle,
+    buildRiderBundle,
+    isRiderBundle,
 
     getSection,
+    getLearnerSections,
     snapshot,
     setCandidate,
     importCandidate,
@@ -761,7 +1118,9 @@
     promote,
 
     getMatchupBreakdown,
+    downloadRiderBundle,
     downloadMatchupFile,
+    fetchRiderBundleFromCDN,
     fetchMatchupFromCDN,
     scanAllMatchupsFromRepo,
     seedFromSearchEngine,

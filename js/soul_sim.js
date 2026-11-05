@@ -7,6 +7,7 @@
  *   - Multi-turn proportional credit assignment for W buffs, stackable evasion,
  *     attack multipliers, and periodic LP regen/bleed payoffs.
  *   - Per-match tactical parameter telemetry (16 metrics + 10 reserved backup slots).
+ *   - Rider Matrix EV (30 * P_Matrix + 45 * V_Matrix) for live Rider search policy.
  *   - Core-owned execution-charge limits.
  *   - Deterministic seeded action selection.
  *   - Evaluation without guidance or training exploration.
@@ -837,15 +838,43 @@
   }
 
   function normalizeMode(mode) {
-    if (mode === "mcts") {
+    const raw = String(mode || "").trim().toLowerCase();
+    if (raw === "mcts" || raw === "rider") {
       return "rider";
     }
-
-    if (mode === "novice") {
+    if (
+      raw === "novice" ||
+      raw === "easy" ||
+      raw === "tree-hopper" ||
+      raw === "tree_hopper" ||
+      raw === "treehopper"
+    ) {
       return "easy";
     }
-
-    return mode;
+    if (
+      raw === "balanced" ||
+      raw === "balance" ||
+      raw === "cricket"
+    ) {
+      return "balanced";
+    }
+    if (
+      raw === "defensive" ||
+      raw === "defense" ||
+      raw === "beetle"
+    ) {
+      return "defensive";
+    }
+    if (
+      raw === "master" ||
+      raw === "bullet-ant" ||
+      raw === "bullet_ant" ||
+      raw === "bulletant" ||
+      raw === "soul"
+    ) {
+      return "master";
+    }
+    return raw;
   }
 
   function makeNeuralEvaluator(
@@ -892,7 +921,11 @@
         : -heuristicScore;
     }
 
-    evaluateLeaf.actionBonuses = function (state, perspective, history = rootHistory) {
+    /*
+     * Computes EV_Matrix(a) = 30.0 * P_Matrix(a|s) + 45.0 * V_Matrix(s, a)
+     * for Rider's Unified EV Points Engine.
+     */
+    evaluateLeaf.matrixMetrics = function (state, perspective, history = rootHistory) {
       if (perspective !== learnerSlot || state.winner || state[learnerSlot]?.isFainted) {
         return null;
       }
@@ -918,15 +951,43 @@
 
       const mean = sum / count;
       const spread = Math.max(0.25, maxQ - minQ);
-      const bonuses = {};
+      const temperature = Math.max(0.15, spread * 0.35);
 
+      let expSum = 0;
+      const expValues = new Float64Array(q.length);
+      for (let i = 0; i < q.length; i++) {
+        if (!m[i]) continue;
+        const ev = Math.exp((q[i] - maxQ) / temperature);
+        expValues[i] = ev;
+        expSum += ev;
+      }
+
+      const metrics = {};
       for (let i = 0; i < q.length; i++) {
         if (!m[i]) continue;
         const key = E.ACTION_MAP[i];
-        const advantage = K.clamp((q[i] - mean) / spread, -1, 1);
-        bonuses[key] = advantage * 24;
+        const pMatrix = expSum > 0 ? expValues[i] / expSum : 1 / count;
+        const vMatrix = K.clamp((q[i] - mean) / spread, -1, 1);
+        const evMatrix = 30.0 * pMatrix + 45.0 * vMatrix;
+        metrics[key] = {
+          pMatrix,
+          vMatrix,
+          evMatrix
+        };
       }
 
+      return metrics;
+    };
+
+    evaluateLeaf.actionBonuses = function (state, perspective, history = rootHistory) {
+      const matrix = evaluateLeaf.matrixMetrics(state, perspective, history);
+      if (!matrix) {
+        return null;
+      }
+      const bonuses = {};
+      for (const [key, item] of Object.entries(matrix)) {
+        bonuses[key] = item.evMatrix;
+      }
       return bonuses;
     };
 
@@ -1015,7 +1076,8 @@
               state: C.copyState(env.state),
               slot,
               history,
-              difficulty: options.teacherDifficulty || "master",
+              difficulty: normalizeMode(options.teacherDifficulty || "master"),
+              isTeacher: true,
               isTraining: Boolean(options.isTraining),
               disableAgent: true,
               seed: options.seed ?? 1
@@ -1028,7 +1090,7 @@
             state: C.copyState(env.state),
             slot,
             history,
-            difficulty: net ? "rider" : "soul",
+            difficulty: net ? "rider" : "master",
             neuralNetwork: net || null,
             neuralSpec: spec,
             isTraining: Boolean(options.isTraining),
@@ -1269,8 +1331,8 @@
         "network",
         "easy",
         "balanced",
+        "defensive",
         "master",
-        "soul",
         "rider"
       ].includes(activeOpponentMode)
     ) {
@@ -1322,7 +1384,7 @@
 
     const teacherDifficulty =
       typeof teacher === "string"
-        ? teacher
+        ? normalizeMode(teacher)
         : "master";
 
     let rounds = 0;
@@ -1443,7 +1505,7 @@
 
         const difficulty =
           activeOpponentMode === "rider" && !opponentNet
-            ? "soul"
+            ? "master"
             : activeOpponentMode;
 
         opposingAction = ai.choose({

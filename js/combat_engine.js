@@ -76,11 +76,12 @@
     g.GameView.paint();
   }
 
-  function popup(slot, text, type = "scratch") {
+  function popup(slot, text, type = "scratch", isSpecialMove = false) {
     g.UI.showDamagePopup(
       `${slot}-box`,
       text,
-      type
+      type,
+      isSpecialMove
     );
   }
 
@@ -546,7 +547,11 @@
         ? "damage"
         : "block";
 
-    popup(target, label, popupType);
+    const isSpecialMove =
+      move.direction === "S" ||
+      String(move.type || "").toUpperCase() === "SPECIAL";
+
+    popup(target, label, popupType, isSpecialMove);
 
     setBanner(
       `${actorName}: ${move.name || event.key}\n` +

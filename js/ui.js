@@ -1,7 +1,7 @@
 /* js/ui.js
  * Battle HUD and status presentation (Bilingual EN / JA).
  *
- * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock
+ * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock + 5-insect-tiers
  */
 (function (g) {
   "use strict";
@@ -45,10 +45,11 @@
         airborne_boost: "Airborne Boost"
       },
       diffLabels: {
-        easy: "Rugrat",
-        balanced: "All-rounder",
-        master: "Geek",
-        soul: "Monomaniac",
+        easy: "Tree-hopper",
+        balanced: "Cricket",
+        defensive: "Beetle",
+        master: "Bullet Ant",
+        soul: "Bullet Ant",
         rider: "Rider"
       },
       riderNames: {
@@ -139,10 +140,11 @@
         airborne_boost: "空中強化"
       },
       diffLabels: {
-        easy: "ちびっこ",
-        balanced: "オールラウンダー",
-        master: "マニア",
-        soul: "特撮の鬼",
+        easy: "ツノゼミ",
+        balanced: "コオロギ",
+        defensive: "カブトムシ",
+        master: "パラポネラ",
+        soul: "パラポネラ",
         rider: "ライダー"
       },
       riderNames: {
@@ -665,8 +667,24 @@
       vs[`${slot}Difficulty`] ||
       "balanced";
 
-    let diffKey = String(rawDiff).toLowerCase();
-    if (diffKey === "mcts") diffKey = "rider";
+    const diffAliases = {
+      novice: "easy",
+      "tree-hopper": "easy",
+      tree_hopper: "easy",
+      treehopper: "easy",
+      balance: "balanced",
+      cricket: "balanced",
+      defense: "defensive",
+      beetle: "defensive",
+      "bullet-ant": "master",
+      bullet_ant: "master",
+      bulletant: "master",
+      soul: "master",
+      mcts: "rider"
+    };
+
+    let diffKey = String(rawDiff).trim().toLowerCase();
+    diffKey = diffAliases[diffKey] || diffKey;
 
     return { isCPU, diffKey };
   }
@@ -1778,7 +1796,7 @@
 
   g.UI = {
     ...(g.UI || {}),
-    PATCH: "numeric-status-hud-2-i18n",
+    PATCH: "numeric-status-hud-2-i18n-5tiers",
     updatePlayerHUD,
     showDamagePopup,
     triggerGlassCrack,

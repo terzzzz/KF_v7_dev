@@ -1,5 +1,6 @@
 /* js/training_ui.js
  * Build: v5-state256-action17
+ * Matrix: v7-7riders-10backup
  * Patch: charge1-reset1
  */
 (function (g) {
@@ -7,7 +8,7 @@
 
   const BUILD = "v5-state256-action17";
   const PATCH = "charge1-reset1";
-  const CACHE_TAG = BUILD + "-" + PATCH;
+  const CACHE_TAG = BUILD + "-" + PATCH + "-v7";
 
   const EXPECTED_SCHEMA =
     "kf-state256-action17-v2-charge1-reset1";
@@ -31,45 +32,25 @@
     host.classList.add("soul-tools");
 
     host.innerHTML = `
-      <h2>KAMEN FIGHT — RIDER LEVEL TRAINER</h2>
+      <h2>KAMEN FIGHT — v7 RIDER MATRIX TRAINER (7 RIDERS + 10 BACKUP SLOTS)</h2>
 
       <p>
-        Build: <strong>${BUILD}</strong><br>
+        Build: <strong>${BUILD}</strong> |
+        Matrix: <strong>v7 Per-Rider Bundle (001.json – 007.json)</strong> |
         Patch: <strong>${PATCH}</strong><br>
-        256 inputs / 17 actions.
+        256 inputs / 17 actions (42,257 params/matchup | 295,799 params/Rider bundle | 10 backup slots reserved).
       </p>
 
       <p>
-        This game is turn-based decision picking with a charge action 
-        bar to select the % of engagement with every 8-second turn.
-        There is no frame advanatage, no attack range, no spacing.
-        Non-idle moves require 1–100% charge.
+        Turn-based decision picking with an 8-second charge action bar (1–100%).
         Selecting a different direction resets charging to 1%.
         Repeating the same direction preserves its charge clock.
-        Once an action is locked, it cannot be changed.
-      </p>
-
-      <p>
-        Training uses the direct neural controller with exploration and
-        optional search demonstrations. The 17 outputs represent move
-        keys, not charge percentages or within-round feints.
-        Direct-network training uses a canonical reachable charge.
-        RIDER evaluation preserves the search-selected charge.
-      </p>
-
-      <p>
-        Charge affects action priority alongside range, stance and speed.
-        Shorter charge does not override every other priority rule.
-      </p>
-
-      <p class="soul-warning">
-        Earlier charging-rule schemas, including older 256/17
-        checkpoints, are incompatible. Keep old exports separately.
-        Do not rename their schema fields to bypass validation.
+        Training against <strong>ALL OPPONENTS</strong> cycles across 001..007
+        with isolated networks and replay buffers (zero cross-matchup weight pollution).
       </p>
 
       <div class="soul-fields">
-        <label>Learner
+        <label>Learner (Rider Matrix File)
           <select data-field="learner"></select>
         </label>
 
@@ -108,7 +89,7 @@
                  min="2"
                  max="100000"
                  step="1"
-                 value="400">
+                 value="420">
         </label>
 
         <label>Evaluation matches
@@ -117,7 +98,7 @@
                  min="2"
                  max="100000"
                  step="2"
-                 value="100">
+                 value="140">
         </label>
 
         <label>Guidance % (0–100)
@@ -158,14 +139,14 @@
         <button type="button" data-action="warm">GUIDED WARM-START</button>
         <button type="button" data-action="eval-candidate">EVALUATE CANDIDATE</button>
         <button type="button" data-action="eval-active">EVALUATE ACTIVE</button>
-        <button type="button" data-action="promote">ACTIVATE SELECTED CANDIDATE</button>
+        <button type="button" data-action="promote">ACTIVATE CANDIDATE(S)</button>
         <button type="button" data-action="stop" disabled>STOP</button>
       </div>
 
       <div class="soul-buttons">
-        <button type="button" data-action="export">EXPORT SELECTED CANDIDATE</button>
-        <button type="button" data-action="import">IMPORT CHECKPOINT</button>
-        <button type="button" data-action="sync">LOAD SELECTED REPO MODEL</button>
+        <button type="button" data-action="export">EXPORT RIDER MATRIX (00X.json)</button>
+        <button type="button" data-action="import">IMPORT MATRIX / CHECKPOINT</button>
+        <button type="button" data-action="sync">LOAD REPO RIDER MATRIX</button>
         <button type="button" data-action="tests">RUN PIPELINE TESTS</button>
         ${dedicated
           ? ""
@@ -188,7 +169,7 @@
       style.textContent = `
         .soul-tools {
           box-sizing: border-box;
-          width: min(1050px, 95vw);
+          width: min(1100px, 96vw);
           max-height: 92vh;
           overflow: auto;
           padding: 20px;
@@ -295,14 +276,18 @@
 
     function refresh() {
       const selected = pair();
+      const agent = g.SoulAgent;
+      const isMulti = selected.opponent === "*";
 
-      const validPair = Boolean(
-        selected.learner && selected.opponent
+      const validSelection = Boolean(
+        selected.learner && selected.opponent && agent
       );
 
-      const agent = g.SoulAgent;
+      const learnerCode = validSelection
+        ? agent.toCode(selected.learner)
+        : "---";
 
-      const candidate = validPair && agent
+      const candidate = validSelection && !isMulti
         ? agent.getSection(
             selected.learner,
             selected.opponent,
@@ -310,7 +295,7 @@
           )
         : null;
 
-      const active = validPair && agent
+      const active = validSelection && !isMulti
         ? agent.getSection(
             selected.learner,
             selected.opponent,
@@ -318,41 +303,54 @@
           )
         : null;
 
+      const learnerCandidateMap = validSelection
+        ? agent.getLearnerSections(selected.learner, "candidate")
+        : {};
+      const learnerActiveMap = validSelection
+        ? agent.getLearnerSections(selected.learner, "active")
+        : {};
+
+      const candCount = Object.keys(learnerCandidateMap).length;
+      const actCount = Object.keys(learnerActiveMap).length;
+
       const status = agent?.status?.() || {
         storageWarning: "",
         warnings: []
       };
 
+      const codes = agent ? agent.getActiveCodes() : [];
+
       const lines = [
-        validPair && agent
-          ? "Selected matchup: " +
-            agent.getCanonicalKey(
-              selected.learner,
-              selected.opponent
-            )
+        validSelection
+          ? isMulti
+            ? `Selected Bundle: ${learnerCode}.json (${learnerCode}_001 .. ${learnerCode}_${codes[codes.length - 1] || "007"} Auto-Cycle + 10 backup slots)`
+            : `Selected Matchup: ${agent.getCanonicalKey(selected.learner, selected.opponent)} (in ${learnerCode}.json)`
           : "Loading matchup data…",
 
-        `Candidate: ${
-          candidate
-            ? `${candidate.games} games / ${candidate.steps} accepted decisions`
-            : "none — fresh training available"
-        }`,
+        isMulti
+          ? `Rider ${learnerCode} Candidate Bundle: ${candCount} / ${codes.length} active matchups populated`
+          : `Candidate: ${
+              candidate
+                ? `${candidate.games} games / ${candidate.steps} accepted decisions`
+                : "none — fresh training available"
+            }`,
 
-        `Active: ${
-          active
-            ? `${active.games} games / ${active.steps} accepted decisions`
-            : "none"
-        }`,
+        isMulti
+          ? `Rider ${learnerCode} Active Bundle: ${actCount} / ${codes.length} active matchups populated`
+          : `Active: ${
+              active
+                ? `${active.games} games / ${active.steps} accepted decisions`
+                : "none"
+            }`,
 
         status.storageWarning,
         ...(status.warnings || [])
       ].filter(Boolean);
 
       if (data && agent) {
-        lines.push("", "CANDIDATE MATCHUP GAMES");
+        lines.push("", `CANDIDATE MATCHUP MATRIX (${codes.length}x${codes.length} ACTIVE + 10 BACKUP SLOTS)`);
 
         const matrix = agent.getMatchupBreakdown("candidate");
-        const codes = ["001", "002", "003", "004", "005", "006"];
 
         lines.push(
           "     " + codes.map(code => code.padStart(7)).join(" ")
@@ -362,11 +360,10 @@
           lines.push(
             code + "  " +
             codes.map(opponent => {
-              const entry = matrix[code][opponent];
-
-              return (
-                entry.hasModel ? String(entry.games) : "-"
-              ).padStart(7);
+              const entry = matrix[code]?.[opponent];
+              if (!entry || !entry.hasModel) return "-".padStart(7);
+              const tag = entry.evaluated ? `${entry.games}*` : String(entry.games);
+              return tag.padStart(7);
             }).join(" ")
           );
         }
@@ -390,19 +387,38 @@
       if (close) close.disabled = busy;
 
       if (!busy && data) {
-        button("eval-candidate").disabled = !candidate;
-        button("eval-active").disabled = !active;
-        button("export").disabled = !candidate;
+        const hasAnyLearnerModel = candCount > 0 || actCount > 0;
+        button("export").disabled = !hasAnyLearnerModel;
 
-        const evaluation = candidate?.evaluation;
+        if (isMulti) {
+          button("eval-candidate").disabled = candCount === 0;
+          button("eval-active").disabled = actCount === 0;
 
-        button("promote").disabled = !(
-          evaluation &&
-          evaluation.learnerPolicy === "rider" &&
-          !evaluation.cancelled &&
-          evaluation.games === evaluation.requested &&
-          evaluation.games >= 2
-        );
+          const anyPromotable = Object.values(learnerCandidateMap).some(cp => {
+            const ev = cp?.evaluation;
+            return Boolean(
+              ev &&
+              ev.learnerPolicy === "rider" &&
+              !ev.cancelled &&
+              ev.games === ev.requested &&
+              ev.games >= 2
+            );
+          });
+          button("promote").disabled = !anyPromotable;
+        } else {
+          button("eval-candidate").disabled = !candidate;
+          button("eval-active").disabled = !active;
+
+          const evaluation = candidate?.evaluation;
+
+          button("promote").disabled = !(
+            evaluation &&
+            evaluation.learnerPolicy === "rider" &&
+            !evaluation.cancelled &&
+            evaluation.games === evaluation.requested &&
+            evaluation.games >= 2
+          );
+        }
       }
     }
 
@@ -476,12 +492,9 @@
             report.imitationCoefficient.toFixed(4)
           }`,
 
-          `Replay entries: ${report.replaySize}`,
+          `Replay entries (isolated per matchup): ${report.replaySize}`,
           `Gradient updates: ${report.updates}`,
-          `Latest combined training loss: ${report.loss.toFixed(6)}`,
-
-          "Guided decisions use the teacher instead of epsilon exploration.",
-          "Resume keeps weights/counters; optimizer and replay restart."
+          `Latest combined training loss: ${report.loss.toFixed(6)}`
         );
 
         if (report.updateStats) {
@@ -498,6 +511,22 @@
           `Checkpoint fingerprint: ${report.weightsID}`,
           `Loaded fingerprint: ${report.loadedWeightsID}`,
           "No gradient updates or epsilon exploration."
+        );
+      }
+
+      if (report.matchParameters) {
+        const mp = report.matchParameters;
+        lines.push(
+          "",
+          "MATCH PARAMETER TELEMETRY (ACTIVE CONTEXT + 10 RESERVED SLOTS)",
+          `  Avg Final LP (Own / Opp): ${(100 * mp.avgFinalLpRatio).toFixed(1)}% / ${(100 * mp.avgEnemyFinalLpRatio).toFixed(1)}%`,
+          `  Avg Damage (Dealt / Taken): ${(100 * mp.avgDamageDealtRatio).toFixed(1)}% / ${(100 * mp.avgDamageTakenRatio).toFixed(1)}%`,
+          `  Avg Chi/Round (Earned / Spent / NetAdv): ${mp.avgChiEarned.toFixed(2)} / ${mp.avgChiSpent.toFixed(2)} / ${mp.avgNetChiAdvantage.toFixed(2)}`,
+          `  Avg Execution Charge: ${mp.avgExecutionCharge.toFixed(1)}% | Priority Win Rate: ${(100 * mp.priorityWinRate).toFixed(1)}%`,
+          `  S-Move Rate: ${(100 * mp.sMoveUsageRate).toFixed(1)}% | A-Guard Counter Rate: ${(100 * mp.aGuardSuccessRate).toFixed(1)}%`,
+          `  W-Buff Rate: ${(100 * mp.wBuffCastRate).toFixed(1)}% | Evasion Trigger Rate: ${(100 * mp.evasionTriggerRate).toFixed(1)}%`,
+          `  Faint Rate (Inflicted / Suffered): ${(100 * mp.faintInflictedRate).toFixed(1)}% / ${(100 * mp.faintSufferedRate).toFixed(1)}%`,
+          `  Reserved Parameter Slots: [${(mp.reservedSlots || []).length} backup slots ready]`
         );
       }
 
@@ -557,10 +586,11 @@
         report.firstWinningGames.forEach((game, index) => {
           const gameNum = game.gameNumber || (index + 1);
           const totalRounds = game.totalRounds || game.moves?.length || 0;
+          const mKey = game.matchupKey ? ` [${game.matchupKey}]` : "";
 
           lines.push(
             "",
-            `--- WINNING GAME #${index + 1} (Match #${gameNum}, ${totalRounds} Rounds) ---`
+            `--- WINNING GAME #${index + 1}${mKey} (Match #${gameNum}, ${totalRounds} Rounds) ---`
           );
 
           if (Array.isArray(game.moves) && game.moves.length > 0) {
@@ -580,8 +610,6 @@
 
               lines.push(`  R${rNum}: Learner [ ${lAction} @ ${lCharge} ]${lLp} vs Opponent [ ${oAction} @ ${oCharge} ]${oLp}`);
             });
-          } else if (typeof game.moveSequence === "string") {
-            lines.push(`  Moves: ${game.moveSequence}`);
           }
         });
       }
@@ -627,42 +655,70 @@
 
       const selected = pair();
       const training = kind === "train";
+      const isMulti = selected.opponent === "*";
+      const mode = field("mode").value;
 
-      const checkpoint = training
-        ? (
-            g.SoulAgent.getSection(
-              selected.learner,
-              selected.opponent,
-              "candidate"
-            ) ||
-            g.SoulAgent.getSection(
-              selected.learner,
-              selected.opponent,
-              "active"
+      const checkpointsByMatchup = {};
+      const opponentCheckpointsByMatchup = {};
+
+      const opponentList = isMulti
+        ? data.riders.map(r => r.id)
+        : [selected.opponent];
+
+      for (const oppId of opponentList) {
+        const key = g.SoulAgent.getCanonicalKey(selected.learner, oppId);
+        const cp = training
+          ? (
+              g.SoulAgent.getSection(selected.learner, oppId, "candidate") ||
+              g.SoulAgent.getSection(selected.learner, oppId, "active")
             )
-          )
-        : g.SoulAgent.getSection(
-            selected.learner,
-            selected.opponent,
-            target
-          );
+          : g.SoulAgent.getSection(selected.learner, oppId, target);
 
-      if (!training && !checkpoint) {
-        throw new Error(
-          "No checkpoint exists for this exact matchup."
-        );
+        if (cp) {
+          const validation = g.SoulAgent.validateCheckpoint(
+            cp,
+            selected.learner,
+            oppId
+          );
+          if (!validation.valid) {
+            throw new Error(`${key}: ${validation.error}`);
+          }
+          checkpointsByMatchup[key] = cp;
+        }
+
+        if (mode === "rider") {
+          const revKey = g.SoulAgent.getCanonicalKey(oppId, selected.learner);
+          const revCp = g.SoulAgent.getSection(oppId, selected.learner, "active");
+          if (revCp) {
+            const revVal = g.SoulAgent.validateCheckpoint(
+              revCp,
+              oppId,
+              selected.learner
+            );
+            if (!revVal.valid) {
+              throw new Error(`Reverse model ${revKey}: ${revVal.error}`);
+            }
+            opponentCheckpointsByMatchup[revKey] = revCp;
+          }
+        }
       }
 
-      if (checkpoint) {
-        const validation = g.SoulAgent.validateCheckpoint(
-          checkpoint,
-          selected.learner,
-          selected.opponent
-        );
+      const checkpoint = !isMulti
+        ? checkpointsByMatchup[
+            g.SoulAgent.getCanonicalKey(selected.learner, selected.opponent)
+          ] || null
+        : null;
 
-        if (!validation.valid) {
-          throw new Error(validation.error);
-        }
+      const opponentCheckpoint = !isMulti && mode === "rider"
+        ? opponentCheckpointsByMatchup[
+            g.SoulAgent.getCanonicalKey(selected.opponent, selected.learner)
+          ] || null
+        : null;
+
+      if (!training && Object.keys(checkpointsByMatchup).length === 0) {
+        throw new Error(
+          "No checkpoint exists for the selected matchup(s)."
+        );
       }
 
       let matches = integer(
@@ -671,43 +727,26 @@
         100000
       );
 
-      if (!training && matches % 2 !== 0) {
-        matches++;
-        field("eval-count").value = matches;
+      if (!training) {
+        const evalOpponentsCount = isMulti
+          ? Math.max(1, Object.keys(checkpointsByMatchup).length)
+          : 1;
+        const stepMultiple = 2 * evalOpponentsCount;
+        if (matches % stepMultiple !== 0) {
+          matches = Math.ceil(matches / stepMultiple) * stepMultiple;
+          field("eval-count").value = matches;
+        }
       }
 
       const guidePct = integer("guide-pct", 0, 100);
       const initialEpsilon = integer("initial-epsilon", 1, 100);
       const winOnly = Boolean(field("win-only").checked);
-      const mode = field("mode").value;
 
       const teacher =
         warmStart &&
         ["easy", "balanced", "master", "soul"].includes(mode)
           ? mode
           : "soul";
-
-      const opponentCheckpoint = mode === "rider"
-        ? g.SoulAgent.getSection(
-            selected.opponent,
-            selected.learner,
-            "active"
-          )
-        : null;
-
-      if (opponentCheckpoint) {
-        const validation = g.SoulAgent.validateCheckpoint(
-          opponentCheckpoint,
-          selected.opponent,
-          selected.learner
-        );
-
-        if (!validation.valid) {
-          throw new Error(
-            "Reverse-matchup model: " + validation.error
-          );
-        }
-      }
 
       const job = {
         build: BUILD,
@@ -719,6 +758,8 @@
         data,
         checkpoint,
         opponentCheckpoint,
+        checkpointsByMatchup,
+        opponentCheckpointsByMatchup,
 
         matches,
         seed: integer("seed", 0, 4294967295),
@@ -797,17 +838,18 @@
             }
 
             if (message.type === "checkpoint") {
+              const cp = message.checkpoint;
               const validation = g.SoulAgent.validateCheckpoint(
-                message.checkpoint,
-                selected.learner,
-                selected.opponent
+                cp,
+                cp?.learnerId || selected.learner,
+                cp?.opponentId
               );
 
               if (!validation.valid) {
                 throw new Error(validation.error);
               }
 
-              g.SoulAgent.setCandidate(message.checkpoint);
+              g.SoulAgent.setCandidate(cp);
               refresh();
             } else if (message.type === "progress") {
               output(formatReport(message.report));
@@ -826,10 +868,10 @@
                 formatReport(report) +
                 (
                   training
-                    ? "\n\nCandidate retained. Check persistence warnings and export."
+                    ? `\n\nCandidate matchup(s) retained in RAM/LocalStorage. Click EXPORT RIDER MATRIX (${g.SoulAgent.toCode(selected.learner)}.json) to save all matchups.`
                     : report.cancelled
                       ? "\n\nIncomplete evaluation was not recorded for activation."
-                      : "\n\nEvaluation finished."
+                      : "\n\nEvaluation finished and recorded."
                 )
               );
 
@@ -901,14 +943,17 @@
             }
             break;
 
-          case "promote":
+          case "promote": {
+            const isMulti = selected.opponent === "*";
             if (!g.confirm(
-              "Activate this exact-matchup candidate?"
+              isMulti
+                ? `Activate all RIDER-evaluated candidates for Rider ${g.SoulAgent.toCode(selected.learner)}?`
+                : "Activate this exact-matchup candidate?"
             )) {
               break;
             }
 
-            g.SoulAgent.promote(
+            const promoted = g.SoulAgent.promote(
               selected.learner,
               selected.opponent
             );
@@ -916,24 +961,24 @@
             refresh();
 
             output(
-              "Selected candidate activated.\n" +
-              "New matches can use it. Matches already in progress " +
-              "keep their frozen checkpoint."
+              isMulti
+                ? `Activated ${promoted.promotedKeys.length} matchups for Rider ${g.SoulAgent.toCode(selected.learner)}:\n${promoted.promotedKeys.join(", ")}`
+                : "Selected candidate activated.\nNew matches can use it."
             );
             break;
+          }
 
           case "export": {
-            const result = g.SoulAgent.downloadMatchupFile(
+            const result = g.SoulAgent.downloadRiderBundle(
               selected.learner,
-              selected.opponent,
               "candidate"
             );
 
             output(
-              `Exported ${result.fileName}\n` +
-              `${result.games} games; ${result.sizeMB} MB\n` +
-              `Schema: ${EXPECTED_SCHEMA}\n` +
-              "Keep earlier-rule exports separately."
+              `Exported Master Rider Bundle: ${result.fileName}\n` +
+              `Populated Matchups: ${result.populatedMatchups} / ${result.activeRosterCount} active (+ ${result.backupSlotCount} backup slots reserved)\n` +
+              `Total Games in Bundle: ${result.games}; Size: ${result.sizeMB} MB\n` +
+              `Place ${result.fileName} inside data/matrix/${result.fileName}`
             );
             break;
           }
@@ -942,9 +987,10 @@
             field("file").click();
             break;
 
-          case "sync":
+          case "sync": {
+            const code = g.SoulAgent.toCode(selected.learner);
             if (!g.confirm(
-              "Replace the selected ACTIVE model with its repository file?"
+              `Load data/matrix/${code}.json from repository into ACTIVE?`
             )) {
               break;
             }
@@ -953,20 +999,19 @@
             refresh();
 
             try {
-              await g.SoulAgent.fetchMatchupFromCDN(
-                selected.learner,
-                selected.opponent
+              const res = await g.SoulAgent.fetchRiderBundleFromCDN(
+                selected.learner
               );
 
               output(
-                "Compatible repository model loaded into ACTIVE.\n" +
-                "Existing candidates were not overwritten."
+                `Loaded data/matrix/${res.learnerCode}.json into ACTIVE (${res.loadedCount} matchups).`
               );
             } finally {
               busy = false;
               refresh();
             }
             break;
+          }
 
           case "tests":
             busy = true;
@@ -1015,9 +1060,10 @@
         const imported = g.SoulAgent.importCandidate(payload);
 
         output(
-          "Compatible checkpoint imported into CANDIDATE.\n" +
-          "Matchup: " + imported.canonicalKey + "\n" +
-          "Select that matchup to train, evaluate or export it."
+          imported.isBundle
+            ? `Imported Rider Matrix Bundle (${imported.learnerCode}.json) into CANDIDATE.\n` +
+              `Matchups loaded (${imported.importedKeys.length}): ${imported.importedKeys.join(", ")}`
+            : `Imported single matchup checkpoint into CANDIDATE: ${imported.canonicalKey}`
         );
       } catch (error) {
         output("IMPORT ERROR\n" + error.message);
@@ -1051,12 +1097,16 @@
         g.SoulEnv?.SCHEMA !== EXPECTED_SCHEMA
       ) {
         throw new Error(
-          "Training modules are missing or use the previous charging rules. " +
-          "Apply the charge1-reset1 patches first."
+          "Training modules are missing or use incompatible charging rules."
         );
       }
 
       data = (await g.SoulAgent.ready()).data;
+
+      const allOption = document.createElement("option");
+      allOption.value = "*";
+      allOption.textContent = `ALL OPPONENTS [001–${g.SoulAgent.formatCodeNumber ? g.SoulAgent.getActiveCodes().slice(-1)[0] : "007"} Auto-Cycle]`;
+      field("opponent").appendChild(allOption);
 
       for (const rider of data.riders) {
         for (const name of ["learner", "opponent"]) {
@@ -1071,15 +1121,12 @@
       }
 
       field("learner").value = data.riders[0].id;
-      field("opponent").value =
-        (data.riders[1] || data.riders[0]).id;
+      field("opponent").value = "*";
 
       output(
-        "Ready.\n" +
-        "Run PIPELINE TESTS before starting a long training job.\n" +
-        "Fresh training needs no checkpoint.\n" +
-        "Guided warm-start runs actual training matches.\n" +
-        "Old charging-rule checkpoints are not automatically converted."
+        "Ready (v7 Per-Rider Matrix Mode).\n" +
+        "Select ALL OPPONENTS to auto-cycle training across all Riders with isolated matchup networks,\n" +
+        "then click EXPORT RIDER MATRIX to save a single 001.json bundle."
       );
     } catch (error) {
       data = null;

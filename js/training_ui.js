@@ -60,12 +60,12 @@
 
         <label>Opponent controller
           <select data-field="mode">
-            <option value="mixed">MIXED — 30 each of NOVICE/MASTER/BALANCED/SOUL cycle</option>
-            <option value="easy">NOVICE search</option>
-            <option value="balanced">BALANCED search</option>
-            <option value="master">MASTER search</option>
-            <option value="soul">SOUL search</option>
-            <option value="rider">RIDER — reverse active matchup model</option>
+            <option value="mixed">MIXED — 30 each of Tree-hopper / Cricket / Beetle / Bullet Ant cycle</option>
+            <option value="easy">Tree-hopper — Level 1 (Novice)</option>
+            <option value="balanced">Cricket — Level 2 (Balance)</option>
+            <option value="defensive">Beetle — Level 3 (Defensive)</option>
+            <option value="master">Bullet Ant — Level 4 (Master)</option>
+            <option value="rider">Rider — Level 5 (Reverse active matchup matrix)</option>
           </select>
         </label>
 
@@ -78,7 +78,7 @@
 
         <label>Evaluation learner policy
           <select data-field="evaluation-policy">
-            <option value="rider">RIDER — live search policy</option>
+            <option value="rider">Rider — live EV + Matrix search policy</option>
             <option value="network">Direct network — diagnostic</option>
           </select>
         </label>
@@ -744,9 +744,9 @@
 
       const teacher =
         warmStart &&
-        ["easy", "balanced", "master", "soul"].includes(mode)
+        ["easy", "balanced", "defensive", "master"].includes(mode)
           ? mode
-          : "soul";
+          : "master";
 
       const job = {
         build: BUILD,

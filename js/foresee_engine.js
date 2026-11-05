@@ -2,7 +2,8 @@
  * Kamen Fight
  * Neural-Guided Expectimax & Monte Carlo Horizon Search
  *
- * Fix: warmstart-history-loop-fix1 + rider-superset-timebudget-fix3 + ai-vs-s-doomed-fix4
+ * Fix: warmstart-history-loop-fix1 + rider-superset-timebudget-fix3 +
+ *      ai-vs-s-doomed-fix4 + realtime-dynamic-charge-speed-fix5
  */
 (function (g) {
   "use strict";
@@ -10,6 +11,8 @@
   const K = g.KF;
   const C = g.CombatCore;
   const B = g.RiderBrains;
+
+  const DIRS = ["W", "A", "S", "D"];
 
   function nowMs() {
     if (typeof performance !== "undefined" && typeof performance.now === "function") {
@@ -82,7 +85,7 @@
     return Number.isFinite(minCost) ? minCost : 4;
   }
 
-  function canUseMoveKey(state, slot, key) {
+  function canUseMoveKey(state, slot, key, dirConstraints = null) {
     if (!state || !state[slot] || state[slot].isFainted) {
       return false;
     }
@@ -90,14 +93,19 @@
     if (!move) {
       return false;
     }
-    const maxChg = C.maxCharge(state[slot], move.direction);
+    const dc = dirConstraints && move.direction ? dirConstraints[move.direction] : null;
+    if (dc && dc.allowed === false) {
+      return false;
+    }
+    const availMs = dc && Number.isFinite(dc.availableMs) ? dc.availableMs : undefined;
+    const maxChg = C.maxCharge(state[slot], move.direction, availMs);
     if (!Number.isFinite(maxChg) || maxChg < 1) {
       return false;
     }
     return C.isLegal(state, slot, { key, charge: maxChg });
   }
 
-  function canUseSMove(state, slot) {
+  function canUseSMove(state, slot, dirConstraints = null) {
     if (!state || !state[slot] || state[slot].isFainted) {
       return false;
     }
@@ -106,11 +114,113 @@
       return false;
     }
     for (const key of Object.keys(moves)) {
-      if (isSMove(state, slot, key) && canUseMoveKey(state, slot, key)) {
+      if (isSMove(state, slot, key) && canUseMoveKey(state, slot, key, dirConstraints)) {
         return true;
       }
     }
     return false;
+  }
+
+  /*
+   * Builds per-direction time and charge constraints for either the AI (`isSelf = true`)
+   * or the opponent (`isSelf = false`) during the 8-second real-time input window.
+   */
+  function buildDirectionConstraints(state, targetSlot, live, isSelf) {
+    if (!live || typeof live !== "object" || live.isInitial) {
+      return null;
+    }
+
+    const remainingMs = Math.max(0, Number(live.remainingMs) || 0);
+    const constraints = {
+      allowDoNothing: true
+    };
+
+    if (isSelf) {
+      const selfDir = String(live.selfDirection || "").toUpperCase();
+      const selfElapsedMs = Math.max(0, Number(live.selfElapsedMs) || 0);
+      const selfCharge = K.clamp(Math.floor(Number(live.selfCharge) || 0), 0, 100);
+      const switchPenaltyMs = Math.max(0, Number(live.switchPenaltyMs) || 0);
+
+      for (const dir of DIRS) {
+        if (selfDir && dir === selfDir) {
+          constraints[dir] = {
+            allowed: true,
+            availableMs: selfElapsedMs + remainingMs,
+            minCharge: Math.max(1, selfCharge),
+            maxCharge: 100
+          };
+        } else {
+          const switchAvailMs = Math.max(0, remainingMs - switchPenaltyMs);
+          constraints[dir] = {
+            allowed: switchAvailMs >= C.CHARGE_STEP_MS,
+            availableMs: switchAvailMs,
+            minCharge: 1,
+            maxCharge: 100
+          };
+        }
+      }
+      return constraints;
+    }
+
+    const oppDir = String(live.oppDirection || "").toUpperCase();
+    const oppElapsedMs = Math.max(0, Number(live.oppElapsedMs) || 0);
+    const oppCharge = K.clamp(Math.floor(Number(live.oppCharge) || 0), 0, 100);
+    const oppLocked = Boolean(live.oppLocked);
+
+    if (oppLocked) {
+      if (!DIRS.includes(oppDir) || oppCharge < 1) {
+        for (const dir of DIRS) {
+          constraints[dir] = {
+            allowed: false,
+            availableMs: 0,
+            minCharge: 0,
+            maxCharge: 0
+          };
+        }
+        constraints.allowDoNothing = true;
+        return constraints;
+      }
+
+      constraints.allowDoNothing = false;
+      for (const dir of DIRS) {
+        if (dir === oppDir) {
+          constraints[dir] = {
+            allowed: true,
+            availableMs: oppElapsedMs,
+            minCharge: oppCharge,
+            maxCharge: oppCharge
+          };
+        } else {
+          constraints[dir] = {
+            allowed: false,
+            availableMs: 0,
+            minCharge: 0,
+            maxCharge: 0
+          };
+        }
+      }
+      return constraints;
+    }
+
+    for (const dir of DIRS) {
+      if (oppDir && dir === oppDir) {
+        constraints[dir] = {
+          allowed: true,
+          availableMs: oppElapsedMs + remainingMs,
+          minCharge: Math.max(1, oppCharge),
+          maxCharge: 100
+        };
+      } else {
+        constraints[dir] = {
+          allowed: remainingMs >= C.CHARGE_STEP_MS,
+          availableMs: remainingMs,
+          minCharge: 1,
+          maxCharge: 100
+        };
+      }
+    }
+
+    return constraints;
   }
 
   /*
@@ -566,7 +676,7 @@
    * Build an action probability distribution from:
    * - RiderBrains tactical priors
    * - Observed move, button, direction, and A+I vs S tendencies
-   * - Current legal actions
+   * - Current legal actions (and real-time direction/speed constraints when provided)
    */
   function policy(
     state,
@@ -574,7 +684,9 @@
     history,
     difficulty,
     rolloutSelf = false,
-    counterRead = false
+    counterRead = false,
+    dirConstraints = null,
+    liveContext = null
   ) {
     const otherSlot = C.other(slot);
     const observed = observations(history || [], slot);
@@ -586,7 +698,7 @@
       difficulty === "soul" ||
       difficulty === "rider";
 
-    const ownCanUseS = canUseSMove(state, slot);
+    const ownCanUseS = canUseSMove(state, slot, dirConstraints);
     const otherCanUseS = canUseSMove(state, otherSlot);
     const otherCanUseAI = canUseMoveKey(state, otherSlot, "A+I");
 
@@ -601,10 +713,20 @@
       );
     }
 
+    if (
+      !rolloutSelf &&
+      liveContext &&
+      Number.isFinite(liveContext.oppCharge) &&
+      liveContext.oppCharge >= 1
+    ) {
+      chargeChoices.push(Math.floor(liveContext.oppCharge));
+    }
+
     const available = C.actions(
       state,
       slot,
-      [...new Set(chargeChoices)]
+      [...new Set(chargeChoices)],
+      dirConstraints
     );
 
     const groups = {};
@@ -634,6 +756,27 @@
       isSMove(state, otherSlot, prefKey) && canUseMoveKey(state, otherSlot, prefKey)
     );
 
+    const liveOppDir =
+      !rolloutSelf && liveContext && !liveContext.isInitial
+        ? String(liveContext.oppDirection || "").toUpperCase()
+        : "";
+    const liveOppCharge =
+      !rolloutSelf && liveContext
+        ? K.clamp(Number(liveContext.oppCharge) || 0, 0, 100)
+        : 0;
+    const liveOppElapsedMs =
+      !rolloutSelf && liveContext
+        ? Math.max(0, Number(liveContext.oppElapsedMs) || 0)
+        : 0;
+    const liveRemainingMs =
+      !rolloutSelf && liveContext && Number.isFinite(liveContext.remainingMs)
+        ? Math.max(0, Number(liveContext.remainingMs))
+        : 7700;
+    const liveOppSwitchCount =
+      !rolloutSelf && liveContext
+        ? Math.max(0, Number(liveContext.oppSwitchCount) || 0)
+        : 0;
+
     const entries = [];
 
     for (const [key, group] of Object.entries(groups)) {
@@ -655,6 +798,44 @@
       }
 
       /*
+       * Real-time opponent direction telemetry weighting:
+       * Reflects the direction the opponent is currently holding, scaled by
+       * how much charge/time they have invested and their speed buffs/debuffs,
+       * while still keeping switch possibilities alive if time remains.
+       */
+      if (!rolloutSelf && liveOppDir && move) {
+        const timeFraction = K.clamp(1 - liveRemainingMs / 7700, 0, 1);
+        const chargeProgress = K.clamp(liveOppCharge / 100, 0, 1);
+        const feintDampener =
+          liveOppSwitchCount >= 2 && liveOppElapsedMs < 600
+            ? 0.55
+            : 1.0;
+
+        if (move.direction === liveOppDir) {
+          const commitmentBoost =
+            1.0 +
+            feintDampener * (
+              1.6 +
+              2.6 * chargeProgress +
+              1.6 * timeFraction
+            );
+          keyWeight *= commitmentBoost;
+        } else if (key === "DO_NOTHING") {
+          keyWeight *= 0.25;
+        } else if (move.direction) {
+          const switchMaxCharge = C.maxCharge(
+            state[slot],
+            move.direction,
+            liveRemainingMs
+          );
+          const switchFeasibility = K.clamp(switchMaxCharge / 100, 0.10, 1.0);
+          keyWeight *=
+            switchFeasibility *
+            Math.max(0.20, 1 - 0.65 * timeFraction);
+        }
+      }
+
+      /*
        * Tactical A+I vs S and counter-read awareness for Master / Soul / Rider:
        * 1. Recognize when A+I is a guaranteed Chi win against an opponent capable of S.
        * 2. Accurately model a human opponent who uses A+I when we have S available.
@@ -666,7 +847,6 @@
 
         if (isKeyAI) {
           if (otherCanUseS) {
-            // Boost A+I when the opponent can use S moves
             const sThreatLevel =
               1.0 +
               (otherPrefersS ? 0.65 : 0.25) +
@@ -676,7 +856,6 @@
             keyWeight = Math.max(keyWeight, 2.8) * (1.45 * sThreatLevel);
           }
 
-          // When modeling the opponent (!rolloutSelf), strongly reflect observed A+I habits
           if (!rolloutSelf && (observed.aIWeight > 0 || observed.aIConsecutive > 0)) {
             const habitMultiplier =
               1.0 +
@@ -691,12 +870,10 @@
             keyWeight = Math.max(keyWeight * habitMultiplier, keyWeight + habitFloor);
           }
         } else if (isKeyS) {
-          // If modeling opponent who frequently uses S, reflect their S habit so AI counters with A+I
           if (!rolloutSelf && observed.dirCounts.S > 0.5) {
             keyWeight *= 1.0 + 0.35 * Math.min(4, observed.dirCounts.S);
           }
 
-          // If opponent has A+I available and is showing A+I usage, dampen blind S usage
           if (
             otherCanUseAI &&
             (otherObserved.aIWeight > 0.25 || otherObserved.aIConsecutive >= 1)
@@ -716,7 +893,6 @@
           otherCanUseAI &&
           (otherObserved.aIWeight > 0.30 || otherObserved.aIConsecutive >= 1)
         ) {
-          // Bait / punish opponent's A+I habit with D or W offensive moves instead of feeding S into A+I
           keyWeight *= 1.25 + 0.35 * Math.min(3, otherObserved.aIWeight + otherObserved.aIConsecutive);
         }
 
@@ -866,6 +1042,11 @@
       isTraining = false
     } = context;
 
+    const liveContext =
+      context.liveContext ||
+      state?.liveContext ||
+      null;
+
     const usingNeural = typeof evaluator === "function";
     const isRider = Boolean(context.isRider) || usingNeural;
 
@@ -930,11 +1111,13 @@
       /*
        * RIDER gets a strict superset of SOUL's search:
        * - 10 finalists (SOUL's top 8 + 2 Matrix-advised / diverse moves)
-       * - Guaranteed minimum of 80 rollouts per finalist (vs SOUL's 64),
-       *   scaling up to 128 rollouts per finalist within the 100ms time budget.
+       * - Guaranteed minimum rollouts per finalist, scaling up within timeBudgetMs.
        */
       settings.finalists = Math.max(settings.finalists, 10);
-      minRollouts = Math.max(settings.rollouts, 80);
+      const isLiveReplan = Boolean(liveContext && !liveContext.isInitial);
+      minRollouts = isLiveReplan
+        ? Math.max(32, Math.floor(settings.rollouts * 0.5))
+        : Math.max(settings.rollouts, 80);
       maxRollouts = activeTimeBudgetMs > 0
         ? Math.max(minRollouts, 128)
         : Math.max(settings.rollouts, 96);
@@ -961,17 +1144,41 @@
       }
     }
 
+    if (
+      liveContext &&
+      !liveContext.isInitial &&
+      Number.isFinite(liveContext.selfCharge) &&
+      liveContext.selfCharge >= 1
+    ) {
+      chargeChoices.push(Math.floor(liveContext.selfCharge));
+    }
+
+    const selfConstraints = buildDirectionConstraints(
+      state,
+      slot,
+      liveContext,
+      true
+    );
+
+    const oppConstraints = buildDirectionConstraints(
+      state,
+      opponentSlot,
+      liveContext,
+      false
+    );
+
     const allOwnActions = C.actions(
       state,
       slot,
-      [...new Set(chargeChoices)]
+      [...new Set(chargeChoices)],
+      selfConstraints
     );
 
     let ownActions = allOwnActions;
 
     const enemyObserved = observations(history, opponentSlot);
-    const enemyCanUseS = canUseSMove(state, opponentSlot);
-    const ownCanUseS = canUseSMove(state, slot);
+    const enemyCanUseS = canUseSMove(state, opponentSlot, oppConstraints);
+    const ownCanUseS = canUseSMove(state, slot, selfConstraints);
 
     if (
       Array.isArray(candidates) &&
@@ -990,8 +1197,6 @@
       if (filtered.length > 0) {
         ownActions = filtered;
 
-        // Never let candidate filtering blind the AI to A+I when opponent can use S,
-        // or force only S moves when the opponent is actively trapping with A+I.
         if (isSmartDifficulty) {
           const existingIds = new Set(ownActions.map(actionId));
 
@@ -1021,14 +1226,16 @@
       }
     }
 
-    // Model the opponent; enable evidence-based counter-reading on Master, Soul, and Rider.
+    // Model the opponent with real-time direction & speed constraints.
     const opponentPolicy = policy(
       state,
       opponentSlot,
       history,
       "master",
       false,
-      isSmartDifficulty
+      isSmartDifficulty,
+      oppConstraints,
+      liveContext
     );
 
     let enemySProb = 0;
@@ -1060,6 +1267,23 @@
     if (isSmartDifficulty && enemyCanUseS && !advisedKeys.includes("A+I")) {
       advisedKeys.unshift("A+I");
     }
+
+    const liveSelfDir =
+      liveContext && !liveContext.isInitial
+        ? String(liveContext.selfDirection || "").toUpperCase()
+        : "";
+    const liveSelfCharge =
+      liveContext && !liveContext.isInitial
+        ? K.clamp(Number(liveContext.selfCharge) || 0, 0, 100)
+        : 0;
+    const liveSelfElapsedMs =
+      liveContext && !liveContext.isInitial
+        ? Math.max(0, Number(liveContext.selfElapsedMs) || 0)
+        : 0;
+    const liveRemainingMs =
+      liveContext && !liveContext.isInitial && Number.isFinite(liveContext.remainingMs)
+        ? Math.max(0, Number(liveContext.remainingMs))
+        : 7700;
 
     const rows = [];
 
@@ -1097,18 +1321,15 @@
       );
 
       let tacticalRootBonus = 0;
+      const ownMove = state.moves?.[slot]?.[action.key];
 
       if (isSmartDifficulty) {
-        const ownMove = state.moves?.[slot]?.[action.key];
-
         if (action.key === "A+I" && enemyCanUseS) {
-          // Boost A+I when opponent has S available and likely to use it
           tacticalRootBonus +=
             36 * enemySProb +
             8 * Math.min(2.5, enemyObserved.dirCounts.S) +
             (state[opponentSlot].chi >= minSChiCost(state, opponentSlot) + 2 ? 10 : 0);
         } else if (isSMove(state, slot, action.key)) {
-          // If opponent is threatening or spamming A+I, suppress unconditional S bonus
           if (
             enemyAIProb >= 0.16 ||
             enemyObserved.aIWeight >= 0.35 ||
@@ -1136,10 +1357,30 @@
           ownCanUseS &&
           (enemyAIProb >= 0.20 || enemyObserved.aIConsecutive >= 1)
         ) {
-          // Reward baiting / punishing an opponent's A+I trap with non-S attacks
           tacticalRootBonus +=
             16 * enemyAIProb +
             8 * Math.min(2, enemyObserved.aIConsecutive);
+        }
+      }
+
+      /*
+       * Real-time charge preservation & speed-aware switch feasibility:
+       * Prevents abandoning a high-charge held direction for a marginal gain,
+       * and accounts for the exact ms required to charge a switched direction.
+       */
+      if (isSmartDifficulty && liveSelfDir && ownMove) {
+        if (ownMove.direction === liveSelfDir) {
+          tacticalRootBonus += 2.5 * (liveSelfCharge / 100);
+        } else if (action.key !== "DO_NOTHING") {
+          const neededMs = C.timeToChargeMs(
+            state[slot],
+            ownMove.direction,
+            action.charge,
+            0
+          );
+          if (neededMs > liveRemainingMs - 150) {
+            tacticalRootBonus -= 6;
+          }
         }
       }
 
@@ -1164,9 +1405,6 @@
 
     /*
      * Step 2: multi-turn Monte Carlo continuation.
-     * Iterates by sampleIndex across all finalists so every finalist
-     * shares the exact same rollout count and stops cleanly at deadlineMs
-     * once minRollouts has been guaranteed.
      */
     if (
       settings.horizon > 1 &&
@@ -1400,13 +1638,20 @@
           const move =
             state.moves[slot][randomBase.key];
 
+          const availMs =
+            selfConstraints &&
+            Number.isFinite(selfConstraints[move.direction]?.availableMs)
+              ? selfConstraints[move.direction].availableMs
+              : undefined;
+
           randomChoice = {
             key: randomBase.key,
             charge: Math.min(
               sampled,
               C.maxCharge(
                 state[slot],
-                move.direction
+                move.direction,
+                availMs
               )
             )
           };
@@ -1514,11 +1759,17 @@
       ) {
         const bestRow = finalists[0];
 
+        const minAllowedCharge =
+          liveSelfDir &&
+          bestRow.action.key.startsWith(liveSelfDir + "+")
+            ? Math.max(1, liveSelfCharge)
+            : 1;
+
         const shortenedCharge =
           bestRow.action.key === "DO_NOTHING"
             ? 0
             : Math.max(
-                1,
+                minAllowedCharge,
                 Math.round(
                   bestRow.action.charge * 0.5
                 )
@@ -1581,6 +1832,8 @@
         usingNeuralEvaluator:
           typeof evaluator === "function",
         isTraining,
+        liveSelfDir: liveSelfDir || null,
+        liveOppDir: (liveContext && liveContext.oppDirection) || null,
         selectedRank:
           candidates && orderedFinalists.length > 0
             ? finalists.indexOf(orderedFinalists[0]) + 1

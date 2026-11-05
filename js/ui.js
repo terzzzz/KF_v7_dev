@@ -1,7 +1,7 @@
 /* js/ui.js
  * Battle HUD and status presentation (Bilingual EN / JA).
  *
- * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock + 5-insect-tiers
+ * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock + 5-insect-tiers + stronger-dynamo
  */
 (function (g) {
   "use strict";
@@ -42,7 +42,10 @@
         bleeding: "Bleeding",
         lprecover: "LP Recovery",
         lpRecovery: "LP Recovery",
-        airborne_boost: "Airborne Boost"
+        airborne_boost: "Airborne Boost",
+        electro_coat: "Electro-Magnetic Field",
+        electro_dynamo: "Electro Dynamo",
+        paralyze_shock: "Paralyze Shock"
       },
       diffLabels: {
         easy: "Tree-hopper",
@@ -58,7 +61,8 @@
         v3: "Kamen Rider V3",
         riderman: "Riderman",
         x: "Kamen Rider X",
-        amazon: "Kamen Rider Amazon"
+        amazon: "Kamen Rider Amazon",
+        stronger: "Kamen Rider Stronger"
       },
       statLabels: {
         attack: "ATK",
@@ -72,6 +76,7 @@
         evsUnit: "pp",
         lpPerTurn: "LP/turn",
         breaksOnDmg: "breaks on LP damage",
+        enableSpecials: "S-Moves unlocked",
         turnShort: "t",
         durationDetail: (t) => `Engine duration remaining: ${t} turns.`,
         periodicDue: "Eligible for this turn's periodic payment.",
@@ -94,6 +99,9 @@
         highChiText: "HIGH CHI · ATK +20% · HIT +20pp",
         highChiTitle:
           "Above 14 CHI: the attack resolver can apply +20% damage and +20 percentage points of accuracy. The attack's CHI cost is paid before these checks.",
+        specialsLockedText: "S-MOVES LOCKED · Use Electro Dynamo (W+K)",
+        specialsLockedTitle:
+          "Stronger's S-stance finishers require Electro Dynamo (W+K) to be active.",
         p1PadLabel: "PLAYER 1 [W-A-S-D + I-J-K-L]",
         p2PadLabel: "PLAYER 2 [ARROWS + 1-2-3-5]",
         lockedFlag: "LOCKED!",
@@ -133,11 +141,14 @@
         rider_power_jump: "ライダーパワージャンプ",
         accelerator: "アクセラレーター",
         leap: "V3大ジャンプ",
-        jump: "Xジャンプ",
+        jump: "ジャンプ",
         bleeding: "出血",
         lprecover: "LP回復",
         lpRecovery: "LP回復",
-        airborne_boost: "空中強化"
+        airborne_boost: "空中強化",
+        electro_coat: "電磁フィールド",
+        electro_dynamo: "エレクトロダイナモ",
+        paralyze_shock: "電撃麻痺"
       },
       diffLabels: {
         easy: "ツノゼミ",
@@ -153,7 +164,8 @@
         v3: "仮面ライダーV3",
         riderman: "ライダーマン",
         x: "仮面ライダーX",
-        amazon: "仮面ライダーアマゾン"
+        amazon: "仮面ライダーアマゾン",
+        stronger: "仮面ライダーストロンガー"
       },
       statLabels: {
         attack: "攻撃力",
@@ -167,6 +179,7 @@
         evsUnit: "%",
         lpPerTurn: "LP/ターン",
         breaksOnDmg: "被ダメージで解除",
+        enableSpecials: "必殺技解放",
         turnShort: "T",
         durationDetail: (t) => `残り持続ターン: ${t}ターン`,
         periodicDue: "このターンに継続効果が発動します。",
@@ -189,6 +202,9 @@
         highChiText: "氣充満 · 攻撃力 +20% · 命中 +20%",
         highChiTitle:
           "氣が14超：攻撃時にダメージ+20%・命中率+20%のボーナスが適用されます（技の氣コスト消費後に判定）。",
+        specialsLockedText: "必殺技ロック中 · エレクトロダイナモ(W+K)で解放",
+        specialsLockedTitle:
+          "ストロンガーの必殺技（S系統）を使用するには、エレクトロダイナモ（W+K）の発動が必要です。",
         p1PadLabel: "プレイヤー 1 [W-A-S-D + I-J-K-L]",
         p2PadLabel: "プレイヤー 2 [矢印キー + 1-2-3-5]",
         lockedFlag: "確定！",
@@ -199,6 +215,7 @@
   });
 
   const EN_TO_JA_TERMS = Object.freeze([
+    ["Kamen Rider Stronger", "仮面ライダーストロンガー"],
     ["Kamen Rider Ichigo", "仮面ライダー1号"],
     ["Kamen Rider Nigo", "仮面ライダー2号"],
     ["Kamen Rider V3", "仮面ライダーV3"],
@@ -206,10 +223,17 @@
     ["Kamen Rider Amazon", "仮面ライダーアマゾン"],
     ["Riderman", "ライダーマン"],
 
+    ["Super Electronic Drill Kick", "超電子ドリルキック"],
+    ["Super Electron Drill Kick", "超電子ドリルキック"],
+    ["Kabuto Protector Tackle", "カブトプロテクター・タックル"],
+    ["Electro-Magnetic Field", "電磁フィールド"],
+    ["Stronger Electro Kick", "ストロンガー電キック"],
+    ["Mercury Fortification", "マーキュリー装甲強化"],
     ["Typhoon Power Break", "タイフーン・パワーブレイク"],
     ["Typhoon Red Shutter", "タイフーン・レッドシャッター"],
     ["Double Typhoon Blow", "ダブルタイフーン・ブロー"],
-    ["Mercury Fortification", "マーキュリー装甲強化"],
+    ["Electro Shock Chop", "エレクトロショック・チョップ"],
+    ["Electro Waterfall", "エレクトロウォーターフォール"],
     ["Mercury Overdrive", "マーキュリー・オーバードライブ"],
     ["Rider Head Crusher", "ライダー頭突き"],
     ["Rider Power Chop", "ライダーチョップ"],
@@ -223,6 +247,8 @@
     ["Ridol Whip Lash", "ライドルホイップ斬り"],
     ["Power Arm Strike", "パワーアーム・ストライク"],
     ["Drill Arm Break", "ドリルアーム・ブレイク"],
+    ["Electro Barrier", "エレクトロバリア"],
+    ["Electro Dynamo", "エレクトロダイナモ"],
     ["Hook Finisher", "スイングアーム・フィニッシャー"],
     ["Rope Arm Tie-Up", "ロープアーム拘束"],
     ["Rope Arm Hook", "ロープアーム・フック"],
@@ -246,6 +272,11 @@
     ["Riderman Kick", "ライダーマンキック"],
     ["Wild Instinct", "野生の本能"],
     ["Wild Tackle", "ワイルドタックル"],
+    ["Classic Combo", "連続コンビネーション"],
+    ["Electro Punch", "エレクトロパンチ"],
+    ["Electro Kick", "エレクトロキック"],
+    ["Electro Fire", "エレクトロファイヤー"],
+    ["Paralyze Shock", "電撃麻痺"],
     ["Amazon Kick", "アマゾンキック"],
     ["Mystic Kick", "ミスティックキック"],
     ["Claw Attack", "コンドルクローひっかき"],
@@ -253,7 +284,9 @@
     ["Daisetsudan", "大切断"],
     ["Mixed Combo", "コンビネーション攻撃"],
     ["Mixed Hits", "連続コンビネーション"],
+    ["Combo Punch", "連続パンチ"],
     ["Punch Combo", "連続パンチ"],
+    ["Combo Kick", "連続キック"],
     ["Kick Combo", "連続キック"],
     ["Chop Combo", "連続チョップ"],
     ["Rider Punch", "ライダーパンチ"],
@@ -263,6 +296,7 @@
     ["Target Lock", "ターゲットロック"],
     ["Gigi Focus", "ギギの腕輪・集中"],
     ["Battle Cry", "気合の咆哮"],
+    ["War Cry", "電撃の咆哮"],
     ["Wild Leap", "野生の大跳躍"],
     ["High Leap", "ハイジャンプ"],
     ["High Kick", "ハイキック"],
@@ -271,7 +305,7 @@
     ["Punches", "連続パンチ"],
     ["Chop", "V3チョップ"],
     ["Leap", "V3大ジャンプ"],
-    ["Jump", "Xジャンプ"]
+    ["Jump", "ジャンプ"]
   ]);
 
   const renderedTags = new WeakMap();
@@ -557,6 +591,10 @@
       const value = 100 * number(effects.evasion);
       parts.push(`${s.evs} ${signed(value)}${s.evsUnit}`);
       if (value < 0) harmful = true;
+    }
+
+    if (buff?.enableSpecials || effects.enableSpecials) {
+      parts.push(s.enableSpecials);
     }
 
     const regeneration = periodicAmount(buff, "lpRegen");
@@ -858,8 +896,14 @@
     }
 
     const tags = [];
+    let hasEnableSpecialsBuff = false;
+
     for (const buff of player.activeBuffs || []) {
       if (!(buff.roundsLeft > 0)) continue;
+
+      if (buff.enableSpecials || buff.effects?.enableSpecials || buff.id === "electro_dynamo") {
+        hasEnableSpecialsBuff = true;
+      }
 
       const description = describeStatus(buff);
 
@@ -867,6 +911,15 @@
         text: description.text,
         title: description.title,
         className: description.harmful ? "combat-debuff" : "combat-buff"
+      });
+    }
+
+    const riderId = String(player.id || player.riderId || "").toLowerCase();
+    if (riderId === "stronger" && !hasEnableSpecialsBuff) {
+      tags.push({
+        text: h.specialsLockedText,
+        title: h.specialsLockedTitle,
+        className: "debuff-low-power"
       });
     }
 
@@ -1796,7 +1849,7 @@
 
   g.UI = {
     ...(g.UI || {}),
-    PATCH: "numeric-status-hud-2-i18n-5tiers",
+    PATCH: "numeric-status-hud-2-i18n-5tiers-stronger",
     updatePlayerHUD,
     showDamagePopup,
     triggerGlassCrack,

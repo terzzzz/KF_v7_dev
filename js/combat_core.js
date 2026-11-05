@@ -461,6 +461,43 @@
     );
   }
 
+  /**
+   * Remaining milliseconds required for `player` to reach `targetCharge`
+   * on `direction`, accounting for active speed buffs/debuffs and `elapsedMs`
+   * already spent charging that direction.
+   */
+  function timeToChargeMs(
+    player,
+    direction,
+    targetCharge,
+    elapsedMs = 0
+  ) {
+    const key = String(direction || "").toUpperCase();
+    if (!["W", "A", "S", "D"].includes(key)) {
+      return 0;
+    }
+
+    const clampedTarget = K.clamp(
+      Math.floor(Number(targetCharge) || 1),
+      1,
+      100
+    );
+
+    if (clampedTarget <= 1) {
+      return 0;
+    }
+
+    const fullMs = chargeMs(player, key);
+    const requiredTotalMs = Math.ceil(
+      (clampedTarget / 100) * fullMs
+    );
+
+    return Math.max(
+      0,
+      requiredTotalMs - Math.max(0, Number(elapsedMs) || 0)
+    );
+  }
+
   function decisionLimitMs() {
     const seconds = Number(
       g.GAME_CONFIG?.ROUND_TIME_LIMIT ?? 8
@@ -642,7 +679,8 @@
   function actions(
     state,
     slot,
-    chargeOptions = [1, 35, 60, 90, 100]
+    chargeOptions = [1, 35, 60, 90, 100],
+    directionConstraints = null
   ) {
     if (state.winner || state[slot].isFainted) {
       return [{
@@ -668,18 +706,61 @@
       const move = state.moves[slot][key];
 
       if (key === "DO_NOTHING") {
+        if (directionConstraints?.allowDoNothing === false) {
+          continue;
+        }
         output.push({ key, charge: 0 });
         continue;
       }
 
       if (move.chiCost > state[slot].chi) continue;
 
-      const limit = maxCharge(
+      const dirConstraint =
+        directionConstraints &&
+        typeof directionConstraints === "object"
+          ? directionConstraints[move.direction]
+          : null;
+
+      if (dirConstraint && dirConstraint.allowed === false) {
+        continue;
+      }
+
+      const availableMs =
+        dirConstraint &&
+        Number.isFinite(dirConstraint.availableMs)
+          ? dirConstraint.availableMs
+          : typeof dirConstraint === "number" &&
+            Number.isFinite(dirConstraint)
+            ? dirConstraint
+            : undefined;
+
+      let limit = maxCharge(
         state[slot],
-        move.direction
+        move.direction,
+        availableMs
       );
 
+      if (
+        dirConstraint &&
+        Number.isFinite(dirConstraint.maxCharge)
+      ) {
+        limit = Math.min(
+          limit,
+          Math.floor(dirConstraint.maxCharge)
+        );
+      }
+
       if (limit < 1) continue;
+
+      const minReachable =
+        dirConstraint &&
+        Number.isFinite(dirConstraint.minCharge)
+          ? K.clamp(
+              Math.floor(dirConstraint.minCharge),
+              1,
+              limit
+            )
+          : 1;
 
       const choices = move.offensive
         ? positiveOptions
@@ -687,9 +768,17 @@
 
       const unique = new Set(
         choices.map(value =>
-          Math.floor(Math.min(limit, value))
+          K.clamp(
+            Math.floor(value),
+            minReachable,
+            limit
+          )
         )
       );
+
+      if (minReachable >= 1) {
+        unique.add(minReachable);
+      }
 
       for (const charge of unique) {
         const action = { key, charge };
@@ -698,6 +787,10 @@
           output.push(action);
         }
       }
+    }
+
+    if (!output.length) {
+      output.push({ key: "DO_NOTHING", charge: 0 });
     }
 
     return output;
@@ -1600,6 +1693,7 @@
     copyState,
     modifiers,
     chargeMs,
+    timeToChargeMs,
     maxCharge,
     isLegal,
     normalizeAction,

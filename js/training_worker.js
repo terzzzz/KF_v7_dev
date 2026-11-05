@@ -15,9 +15,9 @@ const EXPECTED_SCHEMA =
 
 const MIXED_CPU_SEQUENCE = [
   "easy",
-  "master",
   "balanced",
-  "soul"
+  "defensive",
+  "master"
 ];
 const MIXED_ROUND_SPAN = 30;
 
@@ -147,17 +147,29 @@ function validateJob(job) {
 
   const aliases = {
     novice: "easy",
+    "tree-hopper": "easy",
+    tree_hopper: "easy",
+    treehopper: "easy",
+    balance: "balanced",
+    cricket: "balanced",
+    defense: "defensive",
+    beetle: "defensive",
+    "bullet-ant": "master",
+    bullet_ant: "master",
+    bulletant: "master",
+    soul: "master",
     mcts: "rider"
   };
 
-  job.mode = aliases[job.mode] || job.mode;
+  job.mode = aliases[String(job.mode || "").toLowerCase()] || job.mode;
+  job.teacher = aliases[String(job.teacher || "master").toLowerCase()] || job.teacher;
 
   if (![
     "mixed",
     "easy",
     "balanced",
+    "defensive",
     "master",
-    "soul",
     "rider"
   ].includes(job.mode)) {
     throw new Error("Invalid opponent controller.");
@@ -199,7 +211,7 @@ function validateJob(job) {
     throw new Error("Invalid learner policy.");
   }
 
-  if (!["easy", "balanced", "master", "soul"].includes(job.teacher)) {
+  if (!["easy", "balanced", "defensive", "master"].includes(job.teacher)) {
     throw new Error("Invalid teacher difficulty.");
   }
 }
@@ -511,15 +523,23 @@ async function run(job) {
     ? contexts.get(targetOpponentRiders[0].id)
     : null;
 
+  const modeDisplayNames = {
+    easy: "Tree-hopper (easy)",
+    balanced: "Cricket (balanced)",
+    defensive: "Beetle (defensive)",
+    master: "Bullet Ant (master)",
+    rider: "Rider"
+  };
+
   const effectiveOpponent = job.mode === "rider"
     ? isMultiOpponent
-      ? "RIDER with per-matchup reverse active checkpoints (SOUL fallback)"
+      ? "Rider with per-matchup reverse active checkpoints (Bullet Ant fallback)"
       : singleCtx?.opponentNet
-        ? "RIDER with reverse-matchup active checkpoint"
-        : "SOUL fallback; reverse-matchup checkpoint unavailable"
+        ? "Rider with reverse-matchup active checkpoint"
+        : "Bullet Ant fallback; reverse-matchup checkpoint unavailable"
     : job.mode === "mixed"
-      ? "MIXED cycle (30 NOVICE -> 30 MASTER -> 30 BALANCED -> 30 SOUL)"
-      : job.mode;
+      ? "MIXED cycle (30 Tree-hopper -> 30 Cricket -> 30 Beetle -> 30 Bullet Ant)"
+      : modeDisplayNames[job.mode] || job.mode;
 
   function buildMatchupEvaluationReports(seconds) {
     if (training) return null;
@@ -926,8 +946,14 @@ async function run(job) {
     const matchOpponentLabel = job.mode === "mixed"
       ? `mixed:${
           matchOpponentMode === "easy"
-            ? "novice"
-            : matchOpponentMode
+            ? "tree-hopper"
+            : matchOpponentMode === "balanced"
+              ? "cricket"
+              : matchOpponentMode === "defensive"
+                ? "beetle"
+                : matchOpponentMode === "master"
+                  ? "bullet-ant"
+                  : matchOpponentMode
         }`
       : matchOpponentMode;
 

@@ -2,8 +2,12 @@
  * Kamen Fight
  * Neural-Guided Expectimax & Monte Carlo Horizon Search
  *
- * Fix: warmstart-history-loop-fix1 + rider-superset-timebudget-fix3 +
- *      ai-vs-s-doomed-fix4 + realtime-dynamic-charge-speed-fix5
+ * Tiers:
+ *   1. easy      -> Tree-hopper (Novice)
+ *   2. balanced  -> Cricket     (All-Balanced Tree)
+ *   3. defensive -> Beetle      (Two-Regime Defensive/Guard Tree)
+ *   4. master    -> Bullet Ant  (LP-Lead Tactical Tree + Diversified Top-4)
+ *   5. rider     -> Rider       (EV_Tree + EV_Matrix + EV_Live 8s Counter Engine)
  */
 (function (g) {
   "use strict";
@@ -14,11 +18,125 @@
 
   const DIRS = ["W", "A", "S", "D"];
 
+  const DEFAULT_LEVEL_SETTINGS = {
+    easy: {
+      horizon: 1,
+      rollouts: 0,
+      finalists: 4,
+      risk: 0.10,
+      nearBest: 12,
+      charges: [1, 25, 50, 75, 100]
+    },
+    balanced: {
+      horizon: 2,
+      rollouts: 16,
+      finalists: 6,
+      risk: 0.20,
+      nearBest: 8,
+      charges: [1, 25, 50, 75, 100]
+    },
+    defensive: {
+      horizon: 2,
+      rollouts: 28,
+      finalists: 8,
+      risk: 0.30,
+      nearBest: 0,
+      charges: [1, 25, 50, 75, 100]
+    },
+    master: {
+      horizon: 3,
+      rollouts: 48,
+      finalists: 8,
+      risk: 0.25,
+      nearBest: 0,
+      charges: [1, 25, 50, 75, 90, 100]
+    },
+    rider: {
+      horizon: 3,
+      rollouts: 80,
+      finalists: 10,
+      risk: 0.25,
+      nearBest: 0,
+      charges: [1, 25, 50, 75, 90, 100]
+    }
+  };
+
   function nowMs() {
     if (typeof performance !== "undefined" && typeof performance.now === "function") {
       return performance.now();
     }
     return Date.now();
+  }
+
+  function normalizeDifficulty(value) {
+    const raw = String(value || "balanced").trim().toLowerCase();
+    if (
+      raw === "easy" ||
+      raw === "novice" ||
+      raw === "tree-hopper" ||
+      raw === "tree_hopper" ||
+      raw === "treehopper"
+    ) {
+      return "easy";
+    }
+    if (
+      raw === "balanced" ||
+      raw === "balance" ||
+      raw === "cricket"
+    ) {
+      return "balanced";
+    }
+    if (
+      raw === "defensive" ||
+      raw === "defense" ||
+      raw === "beetle"
+    ) {
+      return "defensive";
+    }
+    if (
+      raw === "master" ||
+      raw === "bullet-ant" ||
+      raw === "bullet_ant" ||
+      raw === "bulletant" ||
+      raw === "soul"
+    ) {
+      return "master";
+    }
+    if (raw === "rider" || raw === "mcts") {
+      return "rider";
+    }
+    if (K && typeof K.difficulty === "function") {
+      const mapped = K.difficulty(raw);
+      if (mapped === "soul") return "master";
+      if (DEFAULT_LEVEL_SETTINGS[mapped]) return mapped;
+    }
+    return "balanced";
+  }
+
+  function getLevelSettings(difficulty) {
+    const norm = normalizeDifficulty(difficulty);
+    const base = DEFAULT_LEVEL_SETTINGS[norm] || DEFAULT_LEVEL_SETTINGS.balanced;
+    const fromKF =
+      (K && K.levels && (K.levels[norm] || (norm === "defensive" && K.levels.balanced))) ||
+      {};
+    return {
+      ...base,
+      ...fromKF,
+      charges: Array.isArray(fromKF.charges) && fromKF.charges.length > 0
+        ? [...fromKF.charges]
+        : [...base.charges]
+    };
+  }
+
+  function brainDifficultyKey(difficulty) {
+    const norm = normalizeDifficulty(difficulty);
+    if (norm === "defensive") {
+      return K && K.levels && K.levels.defensive ? "defensive" : "balanced";
+    }
+    if (norm === "rider") {
+      return K && K.levels && K.levels.rider ? "rider" : "master";
+    }
+    return norm;
   }
 
   function appendForecastHistory(
@@ -49,6 +167,20 @@
     ].slice(-24);
   }
 
+  function getMoveDirection(state, slot, key) {
+    if (!key || key === "DO_NOTHING") {
+      return "IDLE";
+    }
+    const move = state?.moves?.[slot]?.[key];
+    if (move?.direction) {
+      return move.direction;
+    }
+    if (typeof key === "string" && key.includes("+")) {
+      return key.split("+")[0];
+    }
+    return "IDLE";
+  }
+
   function isSMove(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
@@ -57,12 +189,56 @@
     return move?.direction === "S" || key.startsWith("S+");
   }
 
+  function isDMove(state, slot, key) {
+    if (!key || typeof key !== "string") {
+      return false;
+    }
+    const move = state?.moves?.[slot]?.[key];
+    return move?.direction === "D" || key.startsWith("D+");
+  }
+
+  function isWMove(state, slot, key) {
+    if (!key || typeof key !== "string") {
+      return false;
+    }
+    const move = state?.moves?.[slot]?.[key];
+    return move?.direction === "W" || key.startsWith("W+");
+  }
+
   function isAGuardMove(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
     const move = state?.moves?.[slot]?.[key];
     return move?.direction === "A" || key.startsWith("A+");
+  }
+
+  function isOmniGuardMove(state, slot, key) {
+    if (!key || typeof key !== "string") {
+      return false;
+    }
+    if (key === "A+I") {
+      return true;
+    }
+    const move = state?.moves?.[slot]?.[key];
+    return Boolean(
+      move &&
+      (move.guardKind === "all" || move.omniGuard === true)
+    );
+  }
+
+  function hasGuardTrait(state, slot, key) {
+    if (!key || typeof key !== "string") {
+      return false;
+    }
+    if (key === "A+I") {
+      return true;
+    }
+    const move = state?.moves?.[slot]?.[key];
+    return Boolean(
+      move &&
+      (move.direction === "A" || move.guardKind || move.omniGuard)
+    );
   }
 
   function minSChiCost(state, slot) {
@@ -119,6 +295,27 @@
       }
     }
     return false;
+  }
+
+  function countConsecutiveSD(history, slot) {
+    if (!Array.isArray(history) || history.length === 0) {
+      return 0;
+    }
+    let streak = 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const turn = history[i];
+      if (!turn || (turn.fainted && turn.fainted[slot])) {
+        break;
+      }
+      const act = turn[slot] || turn.actions?.[slot];
+      const key = String(act?.key || "");
+      if (key.startsWith("S+") || key.startsWith("D+")) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
   }
 
   /*
@@ -224,6 +421,57 @@
   }
 
   /*
+   * Evaluates active buff / status unit differential for Rider EV_Tree (w_Buff = 18.0).
+   */
+  function evaluateActiveBuffUnits(player) {
+    if (!player || player.lp <= 0) {
+      return 0;
+    }
+    const maxLp = Math.max(1, Number(player.maxLp || 1600));
+    let units = 0;
+
+    for (const buff of player.activeBuffs || []) {
+      const rounds = Math.max(0, Math.min(4, Number(buff.roundsLeft || 0)));
+      if (rounds <= 0) continue;
+      const eff = buff.effects || {};
+      const durScale = 0.55 + 0.25 * rounds;
+
+      if (Number(eff.evasion) > 0) {
+        units += Number(eff.evasion) * 1.25 * durScale;
+      }
+      const lpRegen = Number(buff.lpRegen ?? eff.lpRegen ?? 0);
+      if (lpRegen > 0) {
+        units += ((lpRegen * rounds) / maxLp) * 1.40;
+      }
+      const lpBleed = Number(buff.lpBleed ?? eff.lpBleed ?? 0);
+      if (lpBleed > 0) {
+        units -= ((lpBleed * rounds) / maxLp) * 1.40;
+      }
+      if (Number(eff.attack) > 1) {
+        units += (Number(eff.attack) - 1) * 0.85 * durScale;
+      }
+      if (Number(eff.dAttack) > 1) {
+        units += (Number(eff.dAttack) - 1) * 0.70 * durScale;
+      }
+      if (Number(eff.sAttack) > 1) {
+        units += (Number(eff.sAttack) - 1) * 0.70 * durScale;
+      }
+      if (eff.armor !== undefined && Number(eff.armor) < 1) {
+        units += (1 - Number(eff.armor)) * 0.90 * durScale;
+      }
+      if (eff.speed !== undefined && Number(eff.speed) !== 1) {
+        units += (Number(eff.speed) - 1) * 0.60 * durScale;
+      }
+    }
+
+    if (Number(player.airborneTicks) > 0) {
+      units += 0.20 * Math.min(2, Number(player.airborneTicks));
+    }
+
+    return K.clamp(units, -2.5, 2.5);
+  }
+
+  /*
    * Evaluates "Doomed Status" (Resource Lock, Asymmetric S-Threat, and
    * Faint-Lock Vulnerability) that exists even when LP has not changed yet.
    */
@@ -252,7 +500,7 @@
 
     let score = 0;
 
-    // 1. Asymmetric S-Move Capability (One fighter can threaten S while the other cannot)
+    // 1. Asymmetric S-Move Capability
     if (ownHasS && !enemyHasS) {
       score += 22;
       if (enemyChi <= 2 && ownChi >= ownMinS + 2) {
@@ -265,21 +513,20 @@
       }
     }
 
-    // 2. Non-linear Chi Dominance / Resource Starvation ("Doomed Status")
+    // 2. Non-linear Chi Dominance / Resource Starvation
     if (Math.abs(chiDiff) >= 3) {
       const sign = chiDiff > 0 ? 1 : -1;
       const excess = Math.min(12, Math.abs(chiDiff) - 2);
       score += sign * (excess * 3.5 + excess * excess * 0.35);
     }
 
-    // Severe Chi lock: one side is nearly empty (<= 1 Chi) while the other is loaded (>= 7 Chi)
     if (ownChi <= 1 && enemyChi >= 7) {
       score -= 28;
     } else if (enemyChi <= 1 && ownChi >= 7) {
       score += 28;
     }
 
-    // 3. Faint-Doomed Setup (High faint + low Chi vs armed opponent)
+    // 3. Faint-Doomed Setup
     const faintThreshold = Math.max(
       1,
       Number(g.COMBAT_RULES?.FAINT_THRESHOLD || 100)
@@ -298,18 +545,16 @@
   }
 
   /*
-   * Evaluates transition-level tactics between `before` and `after`,
-   * specifically capturing:
-   * - A+I (or A-guard) stuffing an opponent's S move for a guaranteed Chi win
-   * - Throwing an S move into an opponent's A+I (0 LP dealt, losing Chi)
-   * - Zero-LP turns where one player wins a decisive Chi advantage
+   * Evaluates transition-level tactics between `before` and `after`.
+   * Includes Beetle's 2.2x CHI weighting when myCHI < oppCHI and Rider's +24 Guard bonus.
    */
   function evaluateTransitionTactics(
     before,
     after,
     slot,
     ownAction,
-    opponentAction
+    opponentAction,
+    difficulty = "balanced"
   ) {
     if (!before || !after || after.winner) {
       return 0;
@@ -340,6 +585,7 @@
     const enemyIsAGuard = isAGuardMove(before, enemySlot, enemyKey);
     const ownIsS = isSMove(before, slot, ownKey);
     const enemyIsS = isSMove(before, enemySlot, enemyKey);
+    const enemyMove = before.moves?.[enemySlot]?.[enemyKey];
 
     let tacticalDelta = 0;
 
@@ -356,6 +602,13 @@
       if (beforeEnemy.chi >= enemyMinS && afterEnemy.chi < enemyMinS) {
         tacticalDelta += 26;
       }
+    } else if (
+      (ownIsAI || ownIsAGuard) &&
+      enemyMove?.offensive &&
+      ownLpDelta >= -15
+    ) {
+      // Clean Guard / Omni Guard mitigation bonus (+24 pts base)
+      tacticalDelta += 24;
     }
 
     // Case 2: We used an S move into opponent's A+I (or A-guard), dealt 0 LP damage, and lost Chi
@@ -378,16 +631,32 @@
       tacticalDelta += 6.5 * netChiDelta;
     }
 
+    // Case 4: Beetle (defensive) Regime 1 (myCHI < oppCHI) 2.2x CHI differential boost
+    if (difficulty === "defensive" && Number(beforeOwn.chi || 0) < Number(beforeEnemy.chi || 0)) {
+      tacticalDelta += 5.5 * netChiDelta;
+      if (ownChiDelta > 0 && ownLpDelta >= -10) {
+        tacticalDelta += 4.0 * ownChiDelta;
+      }
+    }
+
     return tacticalDelta;
   }
 
   let evaluatorWarningShown = false;
 
+  /*
+   * Position evaluation with Rider's explicit EV point scale:
+   * - w_LP = 1.40 per % Max LP
+   * - w_CHI = 0.55 to 0.85 per % Max CHI
+   * - w_Buff = 18.0 per active buff/status unit
+   * - Terminal = +/- 120.0 (plus decisive KO dominance)
+   */
   function evaluatePosition(
     state,
     slot,
     history,
-    evaluator
+    evaluator,
+    isRider = false
   ) {
     let baseScore;
 
@@ -418,7 +687,48 @@
       baseScore = B.evaluate(state, slot);
     }
 
-    return baseScore + evaluateDoomedStatus(state, slot);
+    let riderCalibration = 0;
+    if (isRider && state) {
+      const enemySlot = C.other(slot);
+      const own = state[slot];
+      const enemy = state[enemySlot];
+      if (state.winner) {
+        if (state.winner === slot) {
+          riderCalibration += 120;
+        } else if (state.winner !== "draw") {
+          riderCalibration -= 120;
+        }
+      } else if (own && enemy) {
+        const ownMaxLp = Math.max(1, Number(own.maxLp || 1600));
+        const enemyMaxLp = Math.max(1, Number(enemy.maxLp || 1600));
+        const lpPctDiff = (own.lp / ownMaxLp - enemy.lp / enemyMaxLp) * 100;
+
+        const ownMaxChi = Math.max(1, Number(own.maxChi || 16));
+        const enemyMaxChi = Math.max(1, Number(enemy.maxChi || 16));
+        const ownMinS = minSChiCost(state, slot);
+        const enemyMinS = minSChiCost(state, enemySlot);
+        const nearCriticalChi =
+          own.chi <= Math.max(3, ownMinS) ||
+          enemy.chi <= Math.max(3, enemyMinS) ||
+          own.chi / ownMaxChi < 0.30 ||
+          enemy.chi / enemyMaxChi < 0.30;
+        const wChi = nearCriticalChi ? 0.85 : 0.55;
+        const chiPctDiff = (own.chi / ownMaxChi - enemy.chi / enemyMaxChi) * 100;
+
+        const buffDiff =
+          evaluateActiveBuffUnits(own) - evaluateActiveBuffUnits(enemy);
+
+        const explicitEv =
+          1.40 * lpPctDiff +
+          wChi * chiPctDiff +
+          18.0 * buffDiff;
+
+        // Blend explicit EV point calibration with RiderBrains positional evaluation
+        baseScore = 0.50 * baseScore + 0.50 * explicitEv;
+      }
+    }
+
+    return baseScore + riderCalibration + evaluateDoomedStatus(state, slot);
   }
 
   function actionId(action) {
@@ -437,9 +747,8 @@
   }
 
   /*
-   * Preserves SOUL's top 8 highest-scoring (move, charge) finalists intact
-   * first so RIDER never loses optimal charge variations, then uses RIDER's
-   * extra finalist slots to test Matrix-advised moves and diverse options.
+   * RIDER finalist selector: preserves top 8 highest-scoring (move, charge) finalists
+   * intact first, then uses extra slots to test Matrix-advised and diverse moves.
    */
   function selectDiverseFinalists(sortedRows, limit, advisedKeys = null) {
     if (sortedRows.length <= limit) {
@@ -451,7 +760,6 @@
     const chosenIds = new Set(chosen.map(row => actionId(row.action)));
     const seenKeys = new Set(chosen.map(row => row.action.key));
 
-    // First priority for extra slots: top moves advised by the Neural Matrix / tactical counters
     if (Array.isArray(advisedKeys)) {
       for (const advisedKey of advisedKeys) {
         if (chosen.length >= limit) break;
@@ -468,7 +776,6 @@
       }
     }
 
-    // Second priority: other unseen move keys in score order
     for (let i = baseCount; i < sortedRows.length && chosen.length < limit; i++) {
       const row = sortedRows[i];
       const id = actionId(row.action);
@@ -479,7 +786,6 @@
       }
     }
 
-    // Fill any remaining slots by raw score order
     for (let i = baseCount; i < sortedRows.length && chosen.length < limit; i++) {
       const row = sortedRows[i];
       const id = actionId(row.action);
@@ -490,6 +796,236 @@
     }
 
     return chosen;
+  }
+
+  /*
+   * BEETLE (defensive) finalist selector:
+   * Guarantees DO_NOTHING (IDLE) and all legal A-guard moves (especially Omni Guard / A+I)
+   * are present in the finalist pool before Monte Carlo rollouts run.
+   */
+  function selectBeetleFinalists(sortedRows, limit, state, slot) {
+    if (sortedRows.length <= limit) {
+      return sortedRows.map(row => ({ ...row }));
+    }
+
+    const chosen = [];
+    const chosenIds = new Set();
+    const seenKeys = new Set();
+
+    function addRow(row) {
+      if (!row || chosen.length >= limit) return;
+      const id = actionId(row.action);
+      if (chosenIds.has(id)) return;
+      chosen.push({ ...row });
+      chosenIds.add(id);
+      seenKeys.add(row.action.key);
+    }
+
+    // Always seed top 3 raw rows first
+    for (let i = 0; i < Math.min(3, sortedRows.length); i++) {
+      addRow(sortedRows[i]);
+    }
+
+    // Force best variant of each legal A move (Omni Guard / Guard) into finalists
+    for (const row of sortedRows) {
+      if (chosen.length >= limit - 1) break;
+      if (isAGuardMove(state, slot, row.action.key) && !seenKeys.has(row.action.key)) {
+        addRow(row);
+      }
+    }
+
+    // Force DO_NOTHING (IDLE) into finalists
+    const idleRow = sortedRows.find(r => r.action.key === "DO_NOTHING");
+    if (idleRow) {
+      addRow(idleRow);
+    }
+
+    // Fill remaining finalist slots by score order
+    for (const row of sortedRows) {
+      if (chosen.length >= limit) break;
+      addRow(row);
+    }
+
+    return chosen;
+  }
+
+  /*
+   * BULLET ANT (master) Top-4 Directional Diversity Cap:
+   * Prevents 4 charge variations of S or D from monopolizing all 4 selection slots,
+   * capping any single offensive direction (S or D) to at most 2 slots in the Top 4
+   * when competitive W, A, or IDLE options exist.
+   */
+  function diversifyMasterTop4(sortedFinalists, allSortedRows, state, slot) {
+    if (!sortedFinalists || sortedFinalists.length <= 1) {
+      return sortedFinalists;
+    }
+
+    // Merge finalists + remaining root rows in score order
+    const seenIds = new Set(sortedFinalists.map(r => actionId(r.action)));
+    const pool = [
+      ...sortedFinalists,
+      ...allSortedRows.filter(r => !seenIds.has(actionId(r.action)))
+    ];
+
+    const bestScore = pool[0]?.score ?? 0;
+    const top4 = [];
+    const usedIds = new Set();
+    const usedKeys = new Set();
+    const dirCounts = { W: 0, A: 0, S: 0, D: 0, IDLE: 0 };
+
+    // Pass 1: Pick up to 4 unique move keys respecting max 2 per S/D direction
+    // as long as the candidate is within a competitive window (38 pts of best)
+    for (const row of pool) {
+      if (top4.length >= 4) break;
+      const key = row.action.key;
+      const id = actionId(row.action);
+      if (usedKeys.has(key)) continue;
+
+      const dir = getMoveDirection(state, slot, key);
+      const isOffensiveDir = dir === "S" || dir === "D";
+      const maxForDir = isOffensiveDir ? 2 : 2;
+
+      if ((dirCounts[dir] || 0) >= maxForDir) {
+        continue;
+      }
+
+      if (top4.length > 0 && bestScore - row.score > 38) {
+        continue;
+      }
+
+      top4.push(row);
+      usedIds.add(id);
+      usedKeys.add(key);
+      dirCounts[dir] = (dirCounts[dir] || 0) + 1;
+    }
+
+    // Pass 2: If fewer than 4 unique move keys fit Pass 1, fill up to 4 with unique move keys
+    for (const row of pool) {
+      if (top4.length >= 4) break;
+      const key = row.action.key;
+      const id = actionId(row.action);
+      if (usedKeys.has(key) || usedIds.has(id)) continue;
+
+      top4.push(row);
+      usedIds.add(id);
+      usedKeys.add(key);
+    }
+
+    // Pass 3: Fill any still-open Top-4 slots + append remaining rows in score order
+    for (const row of pool) {
+      const id = actionId(row.action);
+      if (!usedIds.has(id)) {
+        top4.push(row);
+        usedIds.add(id);
+      }
+    }
+
+    return top4;
+  }
+
+  /*
+   * RIDER Live 8-Second Counter-Adaptation EV (EV_Live):
+   * Uses opponent direction & charge telemetry + anti-reset hysteresis.
+   */
+  function computeRiderLiveEV(state, slot, action, liveContext) {
+    if (!liveContext || typeof liveContext !== "object" || liveContext.isInitial) {
+      return 0;
+    }
+
+    const enemySlot = C.other(slot);
+    const ownMove = state?.moves?.[slot]?.[action.key];
+    const ownDir = getMoveDirection(state, slot, action.key);
+
+    const liveSelfDir = String(liveContext.selfDirection || "").toUpperCase();
+    const liveSelfCharge = K.clamp(Number(liveContext.selfCharge) || 0, 0, 100);
+    const liveOppDir = String(liveContext.oppDirection || "").toUpperCase();
+    const liveOppCharge = K.clamp(Number(liveContext.oppCharge) || 0, 0, 100);
+    const liveOppElapsedMs = Math.max(0, Number(liveContext.oppElapsedMs) || 0);
+    const liveRemainingMs = Number.isFinite(liveContext.remainingMs)
+      ? Math.max(0, Number(liveContext.remainingMs))
+      : 7700;
+    const liveOppSwitchCount = Math.max(0, Number(liveContext.oppSwitchCount) || 0);
+
+    const feintDampener =
+      liveOppSwitchCount >= 2 && liveOppElapsedMs < 600
+        ? 0.55
+        : 1.0;
+
+    let evLive = 0;
+
+    // Case A: Opponent is charging an Attack (S or D) with >= 20% charge
+    if ((liveOppDir === "S" || liveOppDir === "D") && liveOppCharge >= 20) {
+      const chargeScale = K.clamp(liveOppCharge / 100, 0.20, 1.0) * feintDampener;
+
+      if (ownDir === "A") {
+        const omniMult = isOmniGuardMove(state, slot, action.key) ? 1.35 : 1.0;
+        evLive += 28 * chargeScale * omniMult;
+      } else if (ownMove?.offensive) {
+        // Check if our action can beat the opponent's probable attack in priority
+        const oppSampleKey = liveOppDir + "+K";
+        const oppSampleAction = {
+          key: state?.moves?.[enemySlot]?.[oppSampleKey] ? oppSampleKey : liveOppDir + "+J",
+          charge: Math.min(100, Math.max(liveOppCharge, 50))
+        };
+        const priorityCmp =
+          C.comparePriority(
+            state,
+            slot === "p1" ? action : oppSampleAction,
+            slot === "p1" ? oppSampleAction : action
+          ) * (slot === "p1" ? 1 : -1);
+
+        if (priorityCmp > 0) {
+          evLive += 22 * chargeScale;
+        } else {
+          evLive -= 16 * chargeScale;
+        }
+      } else if (action.key === "DO_NOTHING" || ownDir === "W") {
+        evLive -= 24 * chargeScale;
+      }
+    }
+    // Case B: Opponent is holding Guard / Counter (A)
+    else if (liveOppDir === "A" && liveOppCharge >= 10) {
+      const guardScale = K.clamp(liveOppCharge / 100, 0.25, 1.0) * feintDampener;
+      if (ownDir === "S") {
+        evLive -= 35 * guardScale;
+      } else if (ownDir === "W" || action.key === "DO_NOTHING") {
+        evLive += 20 * guardScale;
+      } else if (ownDir === "D" && Number(ownMove?.chiCost || 0) <= 1) {
+        evLive += 14 * guardScale;
+      }
+    }
+    // Case C: Opponent is holding Buff (W) or IDLE (no direction)
+    else if (liveOppDir === "W" || (!liveOppDir && liveRemainingMs < 5000)) {
+      if (ownMove?.offensive && (ownDir === "D" || ownDir === "S")) {
+        evLive += 20;
+      } else if (ownDir === "W") {
+        evLive += 14;
+      }
+    }
+
+    // Anti-Reset Hysteresis: switching away from a held direction resets charge to 1%
+    if (liveSelfDir && liveSelfCharge >= 5) {
+      if (ownDir === liveSelfDir) {
+        evLive += 3.0 * (liveSelfCharge / 100);
+      } else {
+        const deltaSwitch = 12 + 0.25 * liveSelfCharge;
+        evLive -= deltaSwitch;
+
+        if (action.key !== "DO_NOTHING" && ownMove) {
+          const neededMs = C.timeToChargeMs(
+            state[slot],
+            ownMove.direction,
+            action.charge,
+            0
+          );
+          if (neededMs > liveRemainingMs - 150) {
+            evLive -= 18;
+          }
+        }
+      }
+    }
+
+    return evLive;
   }
 
   function sample(entries, rng) {
@@ -532,7 +1068,6 @@
     const bestRow = rows[0];
     const candidateRow = rows[safeIndex];
 
-    // Never blunder into a significantly worse or doomed move when sampling ranks
     if (
       bestRow &&
       candidateRow &&
@@ -688,22 +1223,25 @@
     dirConstraints = null,
     liveContext = null
   ) {
+    const normDiff = normalizeDifficulty(difficulty);
+    const brainDiff = brainDifficultyKey(normDiff);
     const otherSlot = C.other(slot);
     const observed = observations(history || [], slot);
     const otherObserved = observations(history || [], otherSlot);
 
     const isSmartTier =
       counterRead ||
-      difficulty === "master" ||
-      difficulty === "soul" ||
-      difficulty === "rider";
+      normDiff === "defensive" ||
+      normDiff === "master" ||
+      normDiff === "rider";
 
     const ownCanUseS = canUseSMove(state, slot, dirConstraints);
     const otherCanUseS = canUseSMove(state, otherSlot);
     const otherCanUseAI = canUseMoveKey(state, otherSlot, "A+I");
 
+    const masterSettings = getLevelSettings("master");
     const chargeChoices = [
-      ...K.levels.master.charges
+      ...masterSettings.charges
     ];
 
     for (const item of observed.charges.slice(-3)) {
@@ -738,7 +1276,7 @@
     const tree = B.intent(
       state,
       slot,
-      difficulty
+      brainDiff
     ) || {};
 
     const preferredMoves = Array.isArray(tree.preferred)
@@ -786,7 +1324,7 @@
           state,
           slot,
           group[0],
-          difficulty
+          brainDiff
         ) +
         (observed.counts[key] || 0);
 
@@ -797,12 +1335,21 @@
         keyWeight *= 3;
       }
 
-      /*
-       * Real-time opponent direction telemetry weighting:
-       * Reflects the direction the opponent is currently holding, scaled by
-       * how much charge/time they have invested and their speed buffs/debuffs,
-       * while still keeping switch possibilities alive if time remains.
-       */
+      // Beetle (defensive) rollout self-policy favors A-guards and IDLE when behind in CHI
+      if (
+        rolloutSelf &&
+        normDiff === "defensive" &&
+        Number(state[slot]?.chi || 0) < Number(state[otherSlot]?.chi || 0)
+      ) {
+        if (isAGuardMove(state, slot, key)) {
+          keyWeight *= isOmniGuardMove(state, slot, key) ? 2.8 : 2.1;
+        } else if (key === "DO_NOTHING" || isWMove(state, slot, key)) {
+          keyWeight *= 1.65;
+        } else if (isSMove(state, slot, key) || isDMove(state, slot, key)) {
+          keyWeight *= 0.65;
+        }
+      }
+
       if (!rolloutSelf && liveOppDir && move) {
         const timeFraction = K.clamp(1 - liveRemainingMs / 7700, 0, 1);
         const chargeProgress = K.clamp(liveOppCharge / 100, 0, 1);
@@ -835,12 +1382,6 @@
         }
       }
 
-      /*
-       * Tactical A+I vs S and counter-read awareness for Master / Soul / Rider:
-       * 1. Recognize when A+I is a guaranteed Chi win against an opponent capable of S.
-       * 2. Accurately model a human opponent who uses A+I when we have S available.
-       * 3. Avoid spamming S into an opponent's A+I trap during rollouts, favoring D/W mixups.
-       */
       if (isSmartTier && move) {
         const isKeyAI = key === "A+I";
         const isKeyS = isSMove(state, slot, key);
@@ -991,7 +1532,9 @@
     ownAction,
     opponentAction,
     evaluator = null,
-    history = []
+    history = [],
+    difficulty = "balanced",
+    isRider = false
   ) {
     const [a1, a2] = orderedActions(
       slot,
@@ -1015,14 +1558,16 @@
             result.state,
             slot,
             nextHistory,
-            evaluator
+            evaluator,
+            isRider
           ) +
           evaluateTransitionTactics(
             state,
             result.state,
             slot,
             ownAction,
-            opponentAction
+            opponentAction,
+            difficulty
           )
         ),
       0
@@ -1050,6 +1595,20 @@
     const usingNeural = typeof evaluator === "function";
     const isRider = Boolean(context.isRider) || usingNeural;
 
+    const difficulty = isRider
+      ? "rider"
+      : normalizeDifficulty(context.difficulty);
+    const brainDiff = brainDifficultyKey(difficulty);
+
+    const isBeetle = difficulty === "defensive";
+    const isBulletAnt = difficulty === "master" && !isRider;
+
+    const isSmartDifficulty =
+      isRider ||
+      isBeetle ||
+      difficulty === "master" ||
+      difficulty === "rider";
+
     const requestedBudgetMs = Number(
       context.timeBudgetMs ?? context.timeLimitMs ?? context.maxTimeMs ?? 0
     );
@@ -1069,22 +1628,11 @@
       s,
       sl,
       branchHistory,
-      evaluator
+      evaluator,
+      isRider
     );
 
-    const difficulty = K.difficulty(
-      context.difficulty
-    );
-
-    const isSmartDifficulty =
-      isRider ||
-      difficulty === "master" ||
-      difficulty === "soul" ||
-      difficulty === "rider";
-
-    const settings = {
-      ...K.levels[difficulty]
-    };
+    const settings = getLevelSettings(difficulty);
 
     let minRollouts = settings.rollouts;
     let maxRollouts = settings.rollouts;
@@ -1108,11 +1656,7 @@
       minRollouts = settings.rollouts;
       maxRollouts = settings.rollouts;
     } else if (isRider) {
-      /*
-       * RIDER gets a strict superset of SOUL's search:
-       * - 10 finalists (SOUL's top 8 + 2 Matrix-advised / diverse moves)
-       * - Guaranteed minimum rollouts per finalist, scaling up within timeBudgetMs.
-       */
+      settings.risk = 0.25; // 0.75 * Mean + 0.25 * WorstCase
       settings.finalists = Math.max(settings.finalists, 10);
       const isLiveReplan = Boolean(liveContext && !liveContext.isInitial);
       minRollouts = isLiveReplan
@@ -1200,9 +1744,12 @@
         if (isSmartDifficulty) {
           const existingIds = new Set(ownActions.map(actionId));
 
-          if (enemyCanUseS) {
+          if (enemyCanUseS || isBeetle) {
             for (const act of allOwnActions) {
-              if (act.key === "A+I" && !existingIds.has(actionId(act))) {
+              if (
+                (act.key === "A+I" || (isBeetle && (isAGuardMove(state, slot, act.key) || act.key === "DO_NOTHING"))) &&
+                !existingIds.has(actionId(act))
+              ) {
                 ownActions.push(act);
                 existingIds.add(actionId(act));
               }
@@ -1226,7 +1773,6 @@
       }
     }
 
-    // Model the opponent with real-time direction & speed constraints.
     const opponentPolicy = policy(
       state,
       opponentSlot,
@@ -1249,6 +1795,12 @@
         enemySProb += entry.probability;
       }
     }
+
+    // Query Rider Matrix EV (30 * P_Matrix + 45 * V_Matrix) or fallback actionBonuses
+    const rootMatrixMetrics =
+      usingNeural && typeof evaluator.matrixMetrics === "function"
+        ? evaluator.matrixMetrics(state, slot, history)
+        : null;
 
     const rootNeuralBonuses =
       usingNeural && typeof evaluator.actionBonuses === "function"
@@ -1276,14 +1828,18 @@
       liveContext && !liveContext.isInitial
         ? K.clamp(Number(liveContext.selfCharge) || 0, 0, 100)
         : 0;
-    const liveSelfElapsedMs =
-      liveContext && !liveContext.isInitial
-        ? Math.max(0, Number(liveContext.selfElapsedMs) || 0)
-        : 0;
     const liveRemainingMs =
       liveContext && !liveContext.isInitial && Number.isFinite(liveContext.remainingMs)
         ? Math.max(0, Number(liveContext.remainingMs))
         : 7700;
+
+    const myChi = Number(state[slot]?.chi || 0);
+    const oppChi = Number(state[opponentSlot]?.chi || 0);
+    const myMaxChi = Math.max(1, Number(state[slot]?.maxChi || 16));
+    const myLp = Number(state[slot]?.lp || 0);
+    const oppLp = Number(state[opponentSlot]?.lp || 0);
+    const oppMinS = minSChiCost(state, opponentSlot);
+    const consecutiveSD = countConsecutiveSD(history, slot);
 
     const rows = [];
 
@@ -1301,23 +1857,27 @@
           action,
           opponent.action,
           evalFn,
-          history
+          history,
+          difficulty,
+          isRider
         );
 
         expected += opponent.probability * value;
         worst = Math.min(worst, value);
       }
 
-      const neuralBonus =
-        rootNeuralBonuses && Number.isFinite(rootNeuralBonuses[action.key])
-          ? rootNeuralBonuses[action.key]
-          : 0;
+      const evMatrix =
+        rootMatrixMetrics && Number.isFinite(rootMatrixMetrics[action.key]?.evMatrix)
+          ? rootMatrixMetrics[action.key].evMatrix
+          : rootNeuralBonuses && Number.isFinite(rootNeuralBonuses[action.key])
+            ? rootNeuralBonuses[action.key]
+            : 0;
 
       let baseMoveBonus = B.bonus(
         state,
         slot,
         action,
-        difficulty
+        brainDiff
       );
 
       let tacticalRootBonus = 0;
@@ -1328,7 +1888,7 @@
           tacticalRootBonus +=
             36 * enemySProb +
             8 * Math.min(2.5, enemyObserved.dirCounts.S) +
-            (state[opponentSlot].chi >= minSChiCost(state, opponentSlot) + 2 ? 10 : 0);
+            (oppChi >= oppMinS + 2 ? 10 : 0);
         } else if (isSMove(state, slot, action.key)) {
           if (
             enemyAIProb >= 0.16 ||
@@ -1364,11 +1924,76 @@
       }
 
       /*
-       * Real-time charge preservation & speed-aware switch feasibility:
-       * Prevents abandoning a high-charge held direction for a marginal gain,
-       * and accounts for the exact ms required to charge a switched direction.
+       * BEETLE (defensive) Two-Regime Evaluation:
+       * - Regime 1 (myChi < oppChi): Guard/OmniGuard priority bonus (1.35x for Guard trait),
+       *   50% A-skill CHI cost discount, IDLE/W recovery boost, 0.65x S/D attack restraint.
+       * - Regime 2 (myChi >= oppChi): Normal balanced-offensive evaluation.
        */
-      if (isSmartDifficulty && liveSelfDir && ownMove) {
+      if (isBeetle && myChi < oppChi) {
+        const chiDeficit = Math.min(6, oppChi - myChi);
+        if (isAGuardMove(state, slot, action.key)) {
+          const rawGuardBonus =
+            28 +
+            8 * chiDeficit +
+            (oppChi >= oppMinS ? 25 : 0);
+          const traitMultiplier = hasGuardTrait(state, slot, action.key) ? 1.35 : 1.0;
+          const chiDiscountCompensation = 4.5 * Math.max(0, Number(ownMove?.chiCost || 0));
+          tacticalRootBonus += rawGuardBonus * traitMultiplier + chiDiscountCompensation;
+        } else if (action.key === "DO_NOTHING") {
+          tacticalRootBonus += enemySProb < 0.25 ? 24 : 18;
+        } else if (isWMove(state, slot, action.key)) {
+          tacticalRootBonus += 20;
+        } else if (
+          (isSMove(state, slot, action.key) || isDMove(state, slot, action.key)) &&
+          !state[opponentSlot]?.isFainted &&
+          oppLp > 220
+        ) {
+          if (baseMoveBonus > 0) {
+            baseMoveBonus *= 0.65;
+          }
+          tacticalRootBonus -= 14;
+        }
+      }
+
+      /*
+       * BULLET ANT (master) State-Aware Tactical Shift (myLp > oppLp) & Anti-Spam:
+       * Promotes W buffs, A guards, and low-CHI IDLE into the Top 4 when holding an LP lead.
+       */
+      if (isBulletAnt) {
+        if (myLp > oppLp) {
+          if (isWMove(state, slot, action.key)) {
+            const buffId = ownMove?.buff?.id || action.key;
+            const alreadyActive = (state[slot]?.activeBuffs || []).some(
+              b => b.id === buffId && Number(b.roundsLeft) > 1
+            );
+            if (!alreadyActive) {
+              tacticalRootBonus += 22;
+            }
+          } else if (isAGuardMove(state, slot, action.key)) {
+            tacticalRootBonus += (action.key === "A+I" && enemyCanUseS) ? 30 : 18;
+          } else if (action.key === "DO_NOTHING" && myChi < 0.60 * myMaxChi) {
+            tacticalRootBonus += 20 + 2.5 * Math.max(0, 0.60 * myMaxChi - myChi);
+          }
+        }
+
+        if (
+          (isSMove(state, slot, action.key) || isDMove(state, slot, action.key)) &&
+          !state[opponentSlot]?.isFainted &&
+          (consecutiveSD >= 2 || myChi <= 3)
+        ) {
+          tacticalRootBonus -= 16 + 6 * Math.max(0, consecutiveSD - 1);
+        }
+      }
+
+      /*
+       * Real-time 8s window evaluation:
+       * - Rider uses the full EV_Live counter-adaptation & hysteresis model.
+       * - Other smart tiers preserve charge and avoid unreachable switches.
+       */
+      let evLive = 0;
+      if (isRider) {
+        evLive = computeRiderLiveEV(state, slot, action, liveContext);
+      } else if (isSmartDifficulty && liveSelfDir && ownMove) {
         if (ownMove.direction === liveSelfDir) {
           tacticalRootBonus += 2.5 * (liveSelfCharge / 100);
         } else if (action.key !== "DO_NOTHING") {
@@ -1384,16 +2009,20 @@
         }
       }
 
+      const evTree =
+        (1 - settings.risk) * expected +
+        settings.risk * worst +
+        baseMoveBonus +
+        tacticalRootBonus;
+
       rows.push({
         action,
         expected,
         worst,
-        score:
-          (1 - settings.risk) * expected +
-          settings.risk * worst +
-          baseMoveBonus +
-          tacticalRootBonus +
-          neuralBonus
+        evTree,
+        evMatrix,
+        evLive,
+        score: evTree + evMatrix + evLive
       });
     }
 
@@ -1413,6 +2042,8 @@
     ) {
       if (isRider) {
         finalists = selectDiverseFinalists(rows, settings.finalists, advisedKeys);
+      } else if (isBeetle) {
+        finalists = selectBeetleFinalists(rows, settings.finalists, state, slot);
       } else {
         finalists = rows.slice(0, settings.finalists).map(row => ({ ...row }));
         if (
@@ -1554,7 +2185,8 @@
                 future,
                 slot,
                 ownNext,
-                enemyNext
+                enemyNext,
+                difficulty
               );
           }
 
@@ -1573,8 +2205,9 @@
 
       if (completedRollouts > 0) {
         for (let fIdx = 0; fIdx < finalists.length; fIdx++) {
-          finalists[fIdx].score +=
-            continuationSums[fIdx] / completedRollouts;
+          const rolloutDelta = continuationSums[fIdx] / completedRollouts;
+          finalists[fIdx].evTree = (finalists[fIdx].evTree || 0) + rolloutDelta;
+          finalists[fIdx].score += rolloutDelta;
         }
       }
 
@@ -1582,210 +2215,67 @@
       completedHorizon = settings.horizon;
     }
 
-    /*
-     * Difficulty-specific overrides.
-     */
+    // Preserve all evaluated rows after finalists so Cricket (5th best / W / A) and Bullet Ant have full pool access
+    const finalistIds = new Set(finalists.map(r => actionId(r.action)));
+    let orderedFinalists = [
+      ...finalists,
+      ...rows.filter(r => !finalistIds.has(actionId(r.action)))
+    ];
+
+    // Bullet Ant (master): Apply Top-4 Directional Slot Cap
+    if (isBulletAnt) {
+      orderedFinalists = diversifyMasterTop4(
+        finalists,
+        rows,
+        state,
+        slot
+      );
+    }
+
+    // Tree-hopper (easy): Direct ForeseeEngine callers also get the 40% random / 10% IDLE / 30% D / 20% S distribution at rows[0]
     if (difficulty === "easy") {
       const rng = K.rng(
-        K.hash(seed, "novice_blunder")
+        K.hash(seed, "tree_hopper_foresee", history.length + 1, slot)
       );
-
       const roll = rng();
+      const legalD = ownActions.filter(a => isDMove(state, slot, a.key));
+      const legalS = ownActions.filter(a => isSMove(state, slot, a.key));
+      let chosenAction = null;
+      let strategyTag = "Tree-hopper 40% random legal";
 
       if (roll < 0.10) {
-        return {
-          rows: [{
-            action: {
-              key: "DO_NOTHING",
-              charge: 0
-            },
-            score: 0
-          }],
-          debug: {
-            difficulty,
-            strategy: "Novice 10% explicit idle",
-            rootActions: ownActions.length,
-            completedHorizon: 1
-          }
-        };
-      }
-
-      if (roll < 0.50) {
-        const randomBase = ownActions[
-          Math.floor(rng() * ownActions.length)
-        ];
-
-        let randomChoice;
-
-        if (randomBase.key === "DO_NOTHING") {
-          randomChoice = {
-            key: "DO_NOTHING",
-            charge: 0
-          };
-        } else {
-          const chargesPool = [
-            1,
-            25,
-            50,
-            75,
-            100
-          ];
-
-          const sampled = chargesPool[
-            Math.floor(rng() * chargesPool.length)
-          ];
-
-          const move =
-            state.moves[slot][randomBase.key];
-
-          const availMs =
-            selfConstraints &&
-            Number.isFinite(selfConstraints[move.direction]?.availableMs)
-              ? selfConstraints[move.direction].availableMs
-              : undefined;
-
-          randomChoice = {
-            key: randomBase.key,
-            charge: Math.min(
-              sampled,
-              C.maxCharge(
-                state[slot],
-                move.direction,
-                availMs
-              )
-            )
-          };
-        }
-
-        if (!C.isLegal(state, slot, randomChoice)) {
-          throw new Error(
-            "Novice random generator produced an illegal action."
-          );
-        }
-
-        return {
-          rows: [{
-            action: randomChoice,
-            score: 0
-          }],
-          debug: {
-            difficulty,
-            strategy: "Novice 40% random legal move",
-            rootActions: ownActions.length,
-            completedHorizon: 1
-          }
-        };
-      }
-
-      let noviceRows = [];
-
-      if (rows.length >= 3) {
-        const choiceIdx = rng() < 0.5
-          ? 1
-          : 2;
-
-        noviceRows = [
-          rows[choiceIdx],
-          rows[choiceIdx === 1 ? 2 : 1]
-        ];
-      } else if (rows.length === 2) {
-        noviceRows = [rows[1]];
+        chosenAction = { key: "DO_NOTHING", charge: 0 };
+        strategyTag = "Tree-hopper 10% explicit IDLE";
+      } else if (roll < 0.40 && legalD.length > 0) {
+        chosenAction = legalD[Math.floor(rng() * legalD.length)];
+        strategyTag = "Tree-hopper 30% legal D";
+      } else if (roll < 0.60 && legalS.length > 0) {
+        chosenAction = legalS[Math.floor(rng() * legalS.length)];
+        strategyTag = "Tree-hopper 20% legal S";
       } else {
-        noviceRows = [rows[0]];
+        chosenAction = ownActions[Math.floor(rng() * ownActions.length)];
       }
 
-      return {
-        rows: noviceRows,
-        debug: {
-          difficulty,
-          strategy: "Novice 2nd/3rd Best Selection",
-          rootActions: ownActions.length,
-          completedHorizon: 1
-        }
-      };
-    } else if (difficulty === "balanced") {
-      const turnIndex = history.length + 1;
-
-      const rng = K.rng(
-        K.hash(
-          seed,
-          "balanced_variation",
-          turnIndex
-        )
-      );
-
-      if (
-        turnIndex % 5 === 0 ||
-        turnIndex % 6 === 0 ||
-        rng() < 0.18
-      ) {
-        const randomChoice = ownActions[
-          Math.floor(rng() * ownActions.length)
+      if (chosenAction && C.isLegal(state, slot, chosenAction)) {
+        const chosenRow = {
+          action: { ...chosenAction },
+          score: orderedFinalists[0]?.score ?? 0
+        };
+        orderedFinalists = [
+          chosenRow,
+          ...orderedFinalists.filter(r => actionId(r.action) !== actionId(chosenAction))
         ];
-
         return {
-          rows: [{
-            action: randomChoice,
-            score: 0
-          }],
+          rows: orderedFinalists,
           debug: {
             difficulty,
-            strategy:
-              `Balanced Periodic Random Move (Turn ${turnIndex})`,
+            strategy: strategyTag,
             rootActions: ownActions.length,
-            completedHorizon
-          }
-        };
-      }
-    } else if (
-      difficulty === "master" ||
-      difficulty === "soul"
-    ) {
-      const turnIndex = history.length + 1;
-
-      const rng = K.rng(
-        K.hash(
-          seed,
-          "master_charge_shortening",
-          turnIndex
-        )
-      );
-
-      if (
-        !isRider &&
-        typeof evaluator !== "function" &&
-        finalists.length > 0 &&
-        rng() < 0.15
-      ) {
-        const bestRow = finalists[0];
-
-        const minAllowedCharge =
-          liveSelfDir &&
-          bestRow.action.key.startsWith(liveSelfDir + "+")
-            ? Math.max(1, liveSelfCharge)
-            : 1;
-
-        const shortenedCharge =
-          bestRow.action.key === "DO_NOTHING"
-            ? 0
-            : Math.max(
-                minAllowedCharge,
-                Math.round(
-                  bestRow.action.charge * 0.5
-                )
-              );
-
-        finalists[0] = {
-          ...bestRow,
-          action: {
-            ...bestRow.action,
-            charge: shortenedCharge
+            completedHorizon: 1
           }
         };
       }
     }
-
-    let orderedFinalists = finalists;
 
     if (
       Array.isArray(candidates) &&
@@ -1800,14 +2290,14 @@
       );
 
       const chosenRow = sampleRankedAction(
-        finalists,
+        orderedFinalists,
         selectionRng
       );
 
-      if (chosenRow && finalists.length > 0) {
+      if (chosenRow && orderedFinalists.length > 0) {
         orderedFinalists = [
           chosenRow,
-          ...finalists.filter(
+          ...orderedFinalists.filter(
             row => row !== chosenRow
           )
         ];
@@ -1820,9 +2310,17 @@
       rows: orderedFinalists,
       debug: {
         difficulty,
-        strategy:
-          (B.intent(state, slot, difficulty) || {}).name ||
-          "default",
+        strategy: isBeetle
+          ? myChi < oppChi
+            ? "Beetle: Defensive CHI-Recovery Regime (myCHI < oppCHI)"
+            : "Beetle: Balanced-Offensive Regime (myCHI >= oppCHI)"
+          : isBulletAnt
+            ? myLp > oppLp
+              ? "Bullet Ant: LP-Lead Tactical Shift + Diversified Top-4"
+              : "Bullet Ant: Diversified Top-4 Master Search"
+            : isRider
+              ? "Rider: EV_Tree + EV_Matrix + EV_Live Counter Search"
+              : (B.intent(state, slot, brainDiff) || {}).name || "Cricket: All-Balanced Search",
         rootActions: ownActions.length,
         opponentActions: opponentPolicy.length,
         completedHorizon,
@@ -1843,7 +2341,10 @@
           .map(row => ({
             key: row.action.key,
             charge: row.action.charge,
-            score: Number(row.score.toFixed(2))
+            score: Number(row.score.toFixed(2)),
+            evTree: Number((row.evTree ?? row.score).toFixed(2)),
+            evMatrix: Number((row.evMatrix ?? 0).toFixed(2)),
+            evLive: Number((row.evLive ?? 0).toFixed(2))
           }))
       }
     };
@@ -1854,6 +2355,7 @@
     policy,
     sample,
     sampleRankedAction,
-    pairValue
+    pairValue,
+    computeRiderLiveEV
   };
 })(globalThis);

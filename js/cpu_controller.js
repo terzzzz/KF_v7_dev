@@ -169,7 +169,6 @@
     }
 
     function requirePositiveMoveCharge(action) {
-      // Explicit idle is separate from all sixteen moves.
       if (action.key === "DO_NOTHING") return;
 
       if (
@@ -184,8 +183,6 @@
       }
     }
 
-    // Validate before normalization so an invalid proposal
-    // cannot silently be converted into a different action.
     requirePositiveMoveCharge(result.action);
 
     if (
@@ -268,9 +265,7 @@
     }
 
     const usesCheckpoint =
-      difficulty === "soul" ||
       difficulty === "rider" ||
-      opponentDifficulty === "soul" ||
       opponentDifficulty === "rider";
 
     if (!usesCheckpoint) {

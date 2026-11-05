@@ -65,5 +65,16 @@
     "videoFolder": "assets/videos/amazon/",
     "finisher": "Daisetsudan / Amazon Kick",
     "active": true
-  }
+  },
+  {
+  "id": "stronger",
+  "name": "Kamen Rider Stronger",
+  "sourceFacing": "right",
+  "maxLp": 3100,
+  "archetype": "Electro-Cyborg / High Voltage Burst",
+  "icon": "assets/images/icons/stronger.png",
+  "videoFolder": "assets/videos/stronger/",
+  "finisher": "Super Electron Drill Kick / Stronger Electro Kick",
+  "active": true
+   }
 ]

@@ -1,7 +1,7 @@
 /* js/rider_brains.js
  * Kamen Fight
  * Rider Tactical Brains, Heuristic Evaluator & Move Priors
- * Build: v5-state256-action17 (charge1-reset1 compatible)
+ * Build: v5-state256-action17 (charge1-reset1 + stronger-dynamo compatible)
  */
 (function (g) {
   "use strict";
@@ -24,11 +24,12 @@
   }
 
   function getMaxLp(fighter) {
-    return Math.max(1, Number(fighter?.maxLp || g.COMBAT_RULES?.MAX_LP || 1600));
+    return Math.max(1, Number(fighter?.maxLp || g.COMBAT_RULES?.MAX_LP || 3000));
   }
 
   function getEffects(fighter) {
     if (!fighter) return [];
+    if (Array.isArray(fighter.activeBuffs)) return fighter.activeBuffs;
     if (Array.isArray(fighter.statusEffects)) return fighter.statusEffects;
     if (Array.isArray(fighter.statuses)) return fighter.statuses;
     if (Array.isArray(fighter.effects)) return fighter.effects;
@@ -38,9 +39,23 @@
     return [];
   }
 
+  function kitRequiresEnableSpecials(movesForSlot) {
+    if (!movesForSlot) return false;
+    for (const mv of Object.values(movesForSlot)) {
+      if (
+        mv?.requiresSpecialsEnabled ||
+        mv?.buff?.enableSpecials ||
+        mv?.buff?.effects?.enableSpecials
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /*
    * Summarizes active buffs/debuffs on a fighter across all status formats
-   * used by CombatCore.
+   * used by CombatCore (including activeBuffs[].effects).
    */
   function summarizeStatuses(fighter) {
     const summary = {
@@ -48,15 +63,25 @@
       evade: 0,
       guard: 0,
       utility: 0,
+      regen: 0,
       debuff: 0,
       positiveCount: 0,
       hasPowerBuff: false,
-      hasDefenseBuff: false
+      hasDefenseBuff: false,
+      hasSpeedBuff: false,
+      hasRegenBuff: false,
+      hasSpecialsEnabled: false,
+      specialsRoundsLeft: 0
     };
 
     if (!fighter) return summary;
 
-    // Direct fighter properties if present
+    if (Number(fighter.airborneTicks) > 0) {
+      summary.evade += Number(fighter.airborneTicks) * 28;
+      summary.hasDefenseBuff = true;
+    }
+
+    // Legacy direct fighter properties if present
     if (Number(fighter.nextAttackMult) > 1.02) {
       summary.power += (Number(fighter.nextAttackMult) - 1) * 240;
       summary.hasPowerBuff = true;
@@ -84,81 +109,106 @@
     for (const ef of effects) {
       if (!ef || typeof ef !== "object") continue;
 
-      const turns = Math.max(1, Number(ef.turns ?? ef.duration ?? ef.remainingTurns ?? 1));
-      const turnFactor = Math.min(1.65, 0.78 + turns * 0.25);
+      const roundsLeft = Number(
+        ef.roundsLeft ?? ef.turns ?? ef.duration ?? ef.remainingTurns ?? 1
+      );
+      if (roundsLeft <= 0) continue;
 
-      const atkMult = Number(ef.attackMultiplier ?? ef.damageMultiplier ?? ef.mult ?? 1);
-      const atkBonus = Number(ef.nextAttackBonus ?? ef.attackBonus ?? ef.damageBonus ?? 0);
-      const evadeBonus = Number(ef.evadeBonus ?? ef.evasionBonus ?? ef.dodgeBonus ?? 0);
-      const guardBonus = Number(ef.guardBonus ?? ef.defenseBonus ?? ef.damageReduction ?? 0);
-      const chiBonus = Number(ef.chiGainBonus ?? ef.chiBonus ?? ef.chiRegen ?? 0);
-      const accBonus = Number(ef.accuracyBonus ?? ef.hitBonus ?? 0);
+      const turns = Math.max(1, roundsLeft);
+      const turnFactor = Math.min(1.75, 0.78 + Math.min(turns, 5) * 0.22);
+      const mods = ef.effects && typeof ef.effects === "object" ? ef.effects : ef;
 
       let isPositive = false;
 
-      if (atkMult > 1.01) {
-        summary.power += (atkMult - 1) * 235 * turnFactor;
+      // 1. Check enableSpecials (Stronger's Electro Dynamo)
+      if (ef.enableSpecials || mods.enableSpecials) {
+        summary.hasSpecialsEnabled = true;
+        summary.specialsRoundsLeft = Math.max(summary.specialsRoundsLeft, turns);
+        summary.utility += 95;
+        isPositive = true;
+      }
+
+      // 2. Multiplicative Attack / D-Attack / S-Attack modifiers
+      const atkMult = Number(mods.attack ?? ef.attackMultiplier ?? ef.damageMultiplier ?? ef.mult ?? 1);
+      const dAtkMult = Number(mods.dAttack ?? 1);
+      const sAtkMult = Number(mods.sAttack ?? 1);
+
+      const combinedAtkGain =
+        Math.max(0, atkMult - 1) +
+        Math.max(0, dAtkMult - 1) * 0.65 +
+        Math.max(0, sAtkMult - 1) * 0.85;
+
+      if (combinedAtkGain > 0.01) {
+        summary.power += combinedAtkGain * 235 * turnFactor;
         summary.hasPowerBuff = true;
         isPositive = true;
       } else if (atkMult > 0 && atkMult < 0.99) {
         summary.debuff += (1 - atkMult) * 190 * turnFactor;
       }
 
-      if (atkBonus > 0) {
-        summary.power += (atkBonus > 2 ? atkBonus * 1.2 : atkBonus * 210) * turnFactor;
-        summary.hasPowerBuff = true;
+      // 3. Speed modifiers
+      const speedMult = Number(mods.speed ?? 1);
+      if (speedMult > 1.01) {
+        summary.utility += (speedMult - 1) * 145 * turnFactor;
+        summary.hasSpeedBuff = true;
         isPositive = true;
-      } else if (atkBonus < 0) {
-        summary.debuff += Math.abs(atkBonus > -2 ? atkBonus * 190 : atkBonus) * turnFactor;
+      } else if (speedMult > 0 && speedMult < 0.99) {
+        summary.debuff += (1 - speedMult) * 185 * turnFactor;
       }
 
+      // 4. Armor / Damage Taken modifiers (armor < 1 means reduced incoming damage)
+      const armorMult = Number(mods.armor ?? 1);
+      if (armorMult > 0 && armorMult < 0.99) {
+        summary.guard += (1 - armorMult) * 240 * turnFactor;
+        summary.hasDefenseBuff = true;
+        isPositive = true;
+      } else if (armorMult > 1.01) {
+        summary.debuff += (armorMult - 1) * 210 * turnFactor;
+      }
+
+      // 5. Evasion & Accuracy modifiers
+      const evadeBonus = Number(mods.evasion ?? ef.evadeBonus ?? ef.evasionBonus ?? ef.dodgeBonus ?? 0);
       if (evadeBonus > 0) {
-        summary.evade += (evadeBonus > 1 ? evadeBonus * 2.2 : evadeBonus * 175) * turnFactor;
+        summary.evade += (evadeBonus > 1 ? evadeBonus * 2.2 : evadeBonus * 210) * turnFactor;
         summary.hasDefenseBuff = true;
         isPositive = true;
       } else if (evadeBonus < 0) {
-        summary.debuff += Math.abs(evadeBonus > -1 ? evadeBonus * 160 : evadeBonus * 2) * turnFactor;
+        summary.debuff += Math.abs(evadeBonus > -1 ? evadeBonus * 180 : evadeBonus * 2) * turnFactor;
       }
 
-      if (guardBonus > 0) {
-        summary.guard += (guardBonus > 1 ? guardBonus * 2.0 : guardBonus * 165) * turnFactor;
-        summary.hasDefenseBuff = true;
-        isPositive = true;
-      } else if (guardBonus < 0) {
-        summary.debuff += Math.abs(guardBonus > -1 ? guardBonus * 160 : guardBonus * 2) * turnFactor;
-      }
-
-      if (chiBonus > 0) {
-        summary.utility += chiBonus * 28 * turnFactor;
-        isPositive = true;
-      }
-
+      const accBonus = Number(mods.accuracy ?? ef.accuracyBonus ?? ef.hitBonus ?? 0);
       if (accBonus > 0) {
-        summary.utility += (accBonus > 1 ? accBonus * 1.8 : accBonus * 145) * turnFactor;
+        summary.utility += (accBonus > 1 ? accBonus * 2.1 : accBonus * 150) * turnFactor;
         isPositive = true;
       } else if (accBonus < 0) {
         summary.debuff += Math.abs(accBonus > -1 ? accBonus * 145 : accBonus * 1.8) * turnFactor;
       }
 
-      // Fallback by effect type/id/name if numeric fields use custom keys
-      const tag = String(ef.id || ef.type || ef.kind || ef.name || "").toLowerCase();
-      if (!isPositive && summary.debuff === 0 && tag) {
-        if (tag.includes("power") || tag.includes("focus") || tag.includes("charge") || tag.includes("atk") || tag.includes("instinct") || tag.includes("kingstone")) {
-          summary.power += 52 * turnFactor;
-          summary.hasPowerBuff = true;
-          isPositive = true;
-        } else if (tag.includes("jump") || tag.includes("evade") || tag.includes("sky") || tag.includes("dodge") || tag.includes("illusion")) {
-          summary.evade += 44 * turnFactor;
-          summary.hasDefenseBuff = true;
-          isPositive = true;
-        } else if (tag.includes("guard") || tag.includes("shield") || tag.includes("armor") || tag.includes("barrier")) {
-          summary.guard += 40 * turnFactor;
-          summary.hasDefenseBuff = true;
-          isPositive = true;
-        } else if (tag.includes("chi") || tag.includes("flow")) {
-          summary.utility += 36 * turnFactor;
-          isPositive = true;
-        }
+      // 6. Periodic LP Regeneration & Bleeding (DoT)
+      const lpRegen = Number(ef.lpRegen ?? mods.lpRegen ?? 0);
+      if (lpRegen > 0) {
+        summary.regen += lpRegen * Math.min(turns, 4) * 0.78;
+        summary.hasRegenBuff = true;
+        isPositive = true;
+      }
+
+      const lpBleed = Number(ef.lpBleed ?? mods.lpBleed ?? 0);
+      if (lpBleed > 0) {
+        summary.debuff += lpBleed * Math.min(turns, 4) * 0.85;
+      }
+
+      // Legacy flat bonuses if present
+      const atkBonus = Number(ef.nextAttackBonus ?? ef.attackBonus ?? ef.damageBonus ?? 0);
+      if (atkBonus > 0) {
+        summary.power += (atkBonus > 2 ? atkBonus * 1.2 : atkBonus * 210) * turnFactor;
+        summary.hasPowerBuff = true;
+        isPositive = true;
+      }
+      const guardBonus = Number(ef.guardBonus ?? ef.defenseBonus ?? ef.damageReduction ?? 0);
+      if (guardBonus > 0) {
+        summary.guard += (guardBonus > 1 ? guardBonus * 2.0 : guardBonus * 165) * turnFactor;
+        summary.hasDefenseBuff = true;
+        isPositive = true;
       }
 
       if (isPositive) {
@@ -184,28 +234,58 @@
 
   function getMoveChiGain(move) {
     if (!move) return 0;
-    return Math.max(0, Number(move.chiGain ?? move.gainChi ?? move.chiRestore ?? 0));
+    return Math.max(
+      0,
+      Number(
+        move.chiGain ??
+        move.chiRefundOnHit ??
+        move.gainChi ??
+        move.chiRestore ??
+        0
+      )
+    );
   }
 
-  // Checks if a W move provides an INSTANT survival benefit (LP heal or immediate shield)
-  // rather than a delayed buff that needs future turns to pay off.
+  function isEnableSpecialsMove(move) {
+    if (!move) return false;
+    return Boolean(
+      move.buff?.enableSpecials ||
+      move.buff?.effects?.enableSpecials
+    );
+  }
+
+  // Checks if a W move provides an INSTANT survival benefit (LP heal or Regen)
+  // rather than purely an offensive/speed buff.
   function isInstantSurvivalW(move) {
     if (!move) return false;
     const dir = move.direction || move.dir || "";
     if (dir !== "W") return false;
 
-    const heal = Number(move.heal ?? move.selfHeal ?? move.recoverLp ?? move.lpHeal ?? 0);
+    const heal = Number(
+      move.lpRecovery ??
+      move.heal ??
+      move.selfHeal ??
+      move.recoverLp ??
+      move.lpHeal ??
+      0
+    );
+    const regen = Number(
+      move.buff?.lpRegen ??
+      move.buff?.effects?.lpRegen ??
+      0
+    );
     const shield = Number(move.shield ?? move.barrier ?? 0);
-    if (heal > 0 || shield > 0) return true;
+    if (heal > 0 || regen > 0 || shield > 0) return true;
 
     const desc = String(move.description || move.effect || move.name || "").toLowerCase();
-    return desc.includes("heal") || desc.includes("recover lp") || desc.includes("restore lp");
+    return desc.includes("heal") || desc.includes("vitality") || desc.includes("blessing");
   }
 
   // Estimates how much self-faint / dizzy relief a move provides
-  function getSelfFaintRelief(move, key) {
+  function getSelfFaintRelief(move) {
     if (!move) return 0;
     const explicitRelief = Number(
+      move.faintRecovery ??
       move.faintHeal ??
       move.faintRelief ??
       move.recoverFaint ??
@@ -218,15 +298,6 @@
     const selfFaint = Number(move.selfFaint ?? move.selfDizzy ?? move.faintDelta ?? 0);
     if (selfFaint < 0) return Math.abs(selfFaint);
 
-    const desc = String(move.description || move.effect || "").toLowerCase();
-    if (desc.includes("faint") || desc.includes("dizzy")) {
-      if (desc.includes("reduce") || desc.includes("recover") || desc.includes("clear") || desc.includes("-")) {
-        return 35;
-      }
-    }
-
-    if (key === "W+L") return 32;
-    if (key === "A+L") return 26;
     return 0;
   }
 
@@ -234,6 +305,7 @@
   function getInflictedFaint(move) {
     if (!move) return 0;
     const explicit = Number(
+      move.baseFaintDamage ??
       move.faint ??
       move.faintDamage ??
       move.enemyFaint ??
@@ -245,9 +317,9 @@
     if (explicit > 0) return explicit;
 
     const dmg = getMoveDamage(move);
-    const dir = move.direction || move.dir || "";
-    if (dir === "S" && dmg > 0) return Math.round(dmg * 0.055);
-    if (dir === "D" && dmg > 0) return Math.round(dmg * 0.045);
+    if (dmg > 0) {
+      return Number(g.COMBAT_RULES?.HIT_BUILDUP || 20);
+    }
     return 0;
   }
 
@@ -255,7 +327,7 @@
    * Evaluates a single fighter's board state including LP, Chi, Faint danger curve,
    * and Delayed-Reward Buffs scaled by Chi Readiness & Time Horizon.
    */
-  function evaluateFighter(fighter, opponent) {
+  function evaluateFighter(fighter, opponent, ownMoves) {
     if (!fighter) return 0;
 
     const lp = Number(fighter.lp || 0);
@@ -266,14 +338,13 @@
     const oppIsFainted = Boolean(opponent?.isFainted || Number(opponent?.stunned) > 0);
 
     const status = summarizeStatuses(fighter);
+    const needsDynamo = kitRequiresEnableSpecials(ownMoves);
 
     // 1. CHI READINESS FACTOR: Delayed offensive buffs need leftover Chi to cash out!
     const chiReadyFactor =
       chi >= 5 ? 1.0 : chi >= 3 ? 0.55 : 0.22;
 
     // 2. TIME HORIZON FACTOR: Delayed buffs take future turns to pay off!
-    // If either fighter is at low LP (e.g. <= 420 LP, 1 hit from match end),
-    // delayed buffs have almost no time left to be cashed out.
     const minLp = Math.min(lp, oppLp);
     const timeHorizonFactor =
       minLp <= 260
@@ -292,9 +363,17 @@
     score += lp * 1.0;
     score += chi * 15.5;
 
+    // Stronger's Electro Dynamo state value:
+    // Having S-Moves unlocked for 20 turns is essential for Stronger's offense.
+    if (needsDynamo) {
+      if (status.hasSpecialsEnabled) {
+        score += 95 * Math.min(1.0, timeHorizonFactor + 0.35);
+      } else {
+        score -= 75 * timeHorizonFactor;
+      }
+    }
+
     // 3. NON-LINEAR FAINT / DIZZY DANGER CURVE:
-    // Going from 60 -> 20 faint (-40 pts) is vastly more important than 30 -> 0,
-    // because reaching 100 faint = FAINTED (free unguarded 100%-charge S finisher for opponent!).
     const faintThreshold = getFaintThreshold();
     const faintPct = clamp((faint / faintThreshold) * 100, 0, 100);
 
@@ -311,9 +390,10 @@
       score -= 135;
     }
 
-    // 4. DELAYED-REWARD BUFFS (Scaled by Chi Readiness & Time Horizon)
+    // 4. DELAYED-REWARD BUFFS & REGEN/BLEED (Scaled by Chi Readiness & Time Horizon)
     score += status.power * delayedBuffMultiplier;
     score += status.utility * delayedBuffMultiplier;
+    score += status.regen * timeHorizonFactor;
 
     const oppTimeFactor = oppLp <= 320 ? 0.25 : oppLp <= 520 ? 0.60 : 1.0;
     score += status.evade * oppTimeFactor;
@@ -329,8 +409,6 @@
     if (chi >= 11) score += 24;
 
     // 5. EXECUTE / KILL-CONFIRM URGENCY:
-    // Strongly reward pushing opponent into low LP so the search tree prefers dealing
-    // damage now over casting unnecessary W buffs!
     if (opponent) {
       if (oppLp <= 720) {
         score += ((720 - oppLp) / 720) * 68;
@@ -368,7 +446,13 @@
       return 0;
     }
 
-    return evaluateFighter(own, enemy) - evaluateFighter(enemy, own);
+    const ownMoves = state.moves?.[slot];
+    const enemyMoves = state.moves?.[enemySlot];
+
+    return (
+      evaluateFighter(own, enemy, ownMoves) -
+      evaluateFighter(enemy, own, enemyMoves)
+    );
   }
 
   /*
@@ -393,18 +477,47 @@
     const enemyFainted = Boolean(enemy.isFainted || Number(enemy.stunned) > 0);
 
     const status = summarizeStatuses(own);
+    const needsDynamo = kitRequiresEnableSpecials(moves);
     const preferred = [];
 
     const legalKey = (k) => {
       const mv = moves[k];
       if (!mv) return false;
+      if (C && typeof C.isLegal === "function") {
+        return C.isLegal(state, slot, { key: k, charge: 100 });
+      }
+      if (mv.requiresSpecialsEnabled && !status.hasSpecialsEnabled) {
+        return false;
+      }
       return getMoveChiCost(mv) <= ownChi;
     };
 
+    // Case 0: Stronger's Electro Dynamo (W+K) unlock priority when S-moves are locked!
+    // Unless enemy can be finished off right now with a D-move (<= 110 LP) or we are in critical faint danger:
+    if (
+      needsDynamo &&
+      !status.hasSpecialsEnabled &&
+      enemyLp > 110 &&
+      ownLp > 280 &&
+      ownFaint < 78 &&
+      legalKey("W+K")
+    ) {
+      preferred.push("W+K");
+      for (const k of ["D+L", "D+I", "A+I", "D+K"]) {
+        if (legalKey(k)) preferred.push(k);
+      }
+      return {
+        name: "unlock_dynamo_specials",
+        preferred: preferred.slice(0, 4)
+      };
+    }
+
     // Case 1: Opponent is Fainted or in 1-hit Execute range -> All-out Finish!
     if (enemyFainted || enemyLp <= 420) {
-      for (const k of ["S+I", "S+L", "S+K", "S+J", "D+I", "D+K", "D+L", "D+J"]) {
-        if (legalKey(k)) preferred.push(k);
+      for (const k of ["S+I", "S+L", "S+K", "S+J", "W+L", "D+I", "D+L", "D+K", "D+J"]) {
+        if (legalKey(k) && getMoveDamage(moves[k]) > 0) {
+          preferred.push(k);
+        }
       }
       return {
         name: enemyFainted ? "punish_fainted" : "kill_confirm",
@@ -412,9 +525,22 @@
       };
     }
 
-    // Case 2: We have an active Power Buff -> Cash it out with S or heavy D!
+    // Case 2: High self-faint danger (>= 65) -> prioritize actual faint relief move or omni guard/poke
+    if (ownFaint >= 65) {
+      for (const k of ["W+L", "W+K", "A+I", "D+J", "D+K"]) {
+        if (!legalKey(k)) continue;
+        if ((k === "W+L" || k === "W+K") && getSelfFaintRelief(moves[k]) <= 0) continue;
+        preferred.push(k);
+      }
+      return {
+        name: "faint_recovery",
+        preferred: preferred.slice(0, 4)
+      };
+    }
+
+    // Case 3: We have an active Power Buff -> Cash it out with S or heavy D!
     if (status.hasPowerBuff && ownChi >= 4) {
-      for (const k of ["S+L", "S+I", "S+K", "S+J", "D+K", "D+I"]) {
+      for (const k of ["S+L", "S+I", "S+K", "S+J", "D+L", "D+I", "D+K"]) {
         if (legalKey(k)) preferred.push(k);
       }
       return {
@@ -423,20 +549,9 @@
       };
     }
 
-    // Case 3: High self-faint danger (>= 65) -> prioritize faint relief or safe guard/poke
-    if (ownFaint >= 65) {
-      for (const k of ["W+L", "A+L", "A+I", "D+J", "D+I"]) {
-        if (legalKey(k)) preferred.push(k);
-      }
-      return {
-        name: "faint_recovery",
-        preferred: preferred.slice(0, 4)
-      };
-    }
-
     // Case 4: Opponent has high Chi (>= 7) and threatens S finishers -> Counter-guard / Evasion
     if (enemyChi >= 7 && ownLp <= enemyLp + 250) {
-      for (const k of ["A+I", "A+K", "D+I", "S+J"]) {
+      for (const k of ["A+I", "A+L", "A+K", "D+I", "S+J"]) {
         if (legalKey(k)) preferred.push(k);
       }
       if (enemyChi >= 9 && !status.hasDefenseBuff && ownLp >= 550 && enemyLp >= 550 && legalKey("W+I")) {
@@ -459,9 +574,9 @@
       };
     }
 
-    // Case 6: Low Chi (<= 4) -> Build Chi with D attacks / A+L
+    // Case 6: Low Chi (<= 4) -> Build Chi with D attacks
     if (ownChi <= 4) {
-      for (const k of ["D+I", "D+L", "D+K", "D+J", "A+L"]) {
+      for (const k of ["D+I", "D+L", "D+K", "D+J"]) {
         if (legalKey(k)) preferred.push(k);
       }
       return {
@@ -471,7 +586,7 @@
     }
 
     // Default balanced pressure
-    for (const k of ["D+I", "S+J", "S+L", "D+K", "A+I"]) {
+    for (const k of ["D+I", "D+L", "S+J", "S+K", "S+L", "D+K", "A+I"]) {
       if (legalKey(k)) preferred.push(k);
     }
 
@@ -499,8 +614,21 @@
       return own.isFainted ? 1.0 : -28;
     }
 
-    const move = state.moves?.[slot]?.[key];
+    const slotMoves = state.moves?.[slot] || {};
+    const move = slotMoves[key];
     if (!move) return -20;
+
+    const status = summarizeStatuses(own);
+    const enemyStatus = summarizeStatuses(enemy);
+    const needsDynamo = kitRequiresEnableSpecials(slotMoves);
+
+    // Hard safety: never score locked S-moves positively if Electro Dynamo is not active
+    if (
+      (move.requiresSpecialsEnabled || (needsDynamo && move.direction === "S")) &&
+      !status.hasSpecialsEnabled
+    ) {
+      return -100;
+    }
 
     const dir = move.direction || move.dir || key.split("+")[0] || "";
     const cost = getMoveChiCost(move);
@@ -520,9 +648,9 @@
     const enemyFaintPct = (enemyFaint / faintThreshold) * 100;
     const enemyFainted = Boolean(enemy.isFainted || Number(enemy.stunned) > 0);
 
-    const status = summarizeStatuses(own);
     const instantHealW = isInstantSurvivalW(move);
-    const faintRelief = getSelfFaintRelief(move, key);
+    const enablesSpecials = isEnableSpecialsMove(move);
+    const faintRelief = getSelfFaintRelief(move);
     const inflictedFaint = getInflictedFaint(move);
 
     // Are we in Sudden Death / Low Time Horizon where delayed W buffs cannot pay off?
@@ -531,6 +659,21 @@
     const lowTimeHorizon = suddenDeathSelf || suddenDeathEnemy;
 
     let points = 0;
+
+    // 0. STRONGER'S ELECTRO DYNAMO (enableSpecials: true) TACTICAL GATE:
+    if (enablesSpecials) {
+      if (!status.hasSpecialsEnabled) {
+        if (enemyLp > 120 && ownLp > 280) {
+          // Top priority: Unlock Stronger's S-moves for the next 20 turns!
+          points += 64 + Math.min(20, ownChi * 2.5);
+        } else {
+          points -= 20;
+        }
+      } else if (status.specialsRoundsLeft > 2) {
+        // Already unlocked with plenty of turns remaining; do not waste a turn re-casting!
+        points -= 55;
+      }
+    }
 
     // 1. LETHAL / KILL-CONFIRM CHECK:
     const effectiveDmg = damage * (status.hasPowerBuff ? 1.30 : 1.0) * (0.65 + 0.35 * (charge / 100));
@@ -541,7 +684,7 @@
     }
 
     // 2. FAINT / DIZZY TACTICS (Inflicting Faint on Enemy & Relieving Own Faint):
-    if (inflictedFaint > 0 && !enemyFainted) {
+    if (inflictedFaint > 0 && !enemyFainted && damage > 0) {
       points += inflictedFaint * 0.22;
       if (enemyFaintPct >= 55) {
         points += inflictedFaint * 0.42;
@@ -551,55 +694,74 @@
       }
     }
 
-    if (faintRelief > 0 && ownFaintPct >= 42) {
-      points += faintRelief * 0.32;
-      if (ownFaintPct >= 62) {
-        points += faintRelief * 0.55;
-      }
-      if (ownFaintPct >= 78) {
-        points += faintRelief * 0.75 + 18; // Emergency faint prevention!
+    if (faintRelief > 0) {
+      if (ownFaintPct >= 42) {
+        points += faintRelief * 0.35;
+        if (ownFaintPct >= 62) {
+          points += faintRelief * 0.58;
+        }
+        if (ownFaintPct >= 78) {
+          points += faintRelief * 0.80 + 22; // Emergency faint prevention!
+        }
+      } else if (ownFaintPct < 20 && !instantHealW && damage === 0) {
+        // Don't waste a pure faint-recovery move when faint meter is nearly empty
+        points -= 32;
       }
     }
 
-    // 3. FAINTED OPPONENT PUNISH: Never waste a free punish turn on W or A!
+    // 3. DEBUFF APPLICATION VALUE (e.g. Amazon Bleed, Stronger Paralyze Shock, Riderman Rope Bind):
+    if (move.debuff && !enemyFainted) {
+      const debuffId = String(move.debuff.id || "");
+      const enemyAlreadyHas = (enemy.activeBuffs || []).some(
+        b => b.id === debuffId && b.roundsLeft > 1 && !b.refreshable
+      );
+      if (!enemyAlreadyHas && enemyLp >= 450) {
+        if (move.debuff.effects?.lpBleed) {
+          points += 22;
+        } else if (move.debuff.effects?.speed && move.debuff.effects.speed < 1) {
+          points += 18;
+        }
+      }
+    }
+
+    // 4. FAINTED OPPONENT PUNISH: Never waste a free punish turn on W or A (unless Stronger has 0 S-moves unlocked and high Chi)!
     if (enemyFainted) {
       if (dir === "S") {
         points += 48 + damage * 0.05 + (charge === 100 ? 18 : 0);
-      } else if (dir === "D") {
+      } else if (dir === "D" || damage > 0) {
         points += 18 + damage * 0.03;
       } else {
         points -= 45;
       }
     }
 
-    // 4. DIRECTION-SPECIFIC TACTICAL DISCIPLINE (W / A / S / D)
-    if (dir === "W") {
+    // 5. DIRECTION-SPECIFIC TACTICAL DISCIPLINE (W / A / S / D)
+    if (dir === "W" && !enablesSpecials && damage === 0) {
       // CRITICAL RULE: Delayed W buffs need future turns!
-      // If either fighter is at low LP (no time left!), heavily penalize W UNLESS it heals LP
-      // or clears critical faint danger.
       if (lowTimeHorizon && !instantHealW && !(faintRelief >= 25 && ownFaintPct >= 72)) {
         points -= 48;
-      } else if (instantHealW && ownLp <= getMaxLp(own) * 0.62) {
-        points += 28 + ((getMaxLp(own) - ownLp) / getMaxLp(own)) * 24;
-      } else if (status.positiveCount >= 2) {
+      } else if (instantHealW && ownLp <= getMaxLp(own) * 0.68 && !status.hasRegenBuff) {
+        points += 30 + ((getMaxLp(own) - ownLp) / getMaxLp(own)) * 26;
+      } else if (instantHealW && (ownLp > getMaxLp(own) * 0.85 || status.hasRegenBuff)) {
+        points -= 36;
+      } else if (status.positiveCount >= 2 && faintRelief === 0) {
         // Don't stack 3 buffs in a row; attack now!
         points -= 38;
-      } else if (status.hasPowerBuff && (key === "W+K" || key === "W+J" || key === "W+L")) {
+      } else if (status.hasPowerBuff && (key === "W+K" || key === "W+J") && faintRelief === 0) {
         points -= 36;
       } else if (status.hasDefenseBuff && key === "W+I") {
         points -= 38;
-      } else {
-        if (key === "W+K" || key === "W+J" || key === "W+L") {
+      } else if (faintRelief === 0) {
+        if (key === "W+K" || key === "W+J") {
           if (ownChi >= cost + 4 && ownLp >= 750 && enemyLp >= 600) {
             points += 16;
           } else if (ownChi >= cost + 2 && ownLp >= 580 && enemyLp >= 480) {
             points += 5;
-          } else if (!instantHealW && faintRelief < 20) {
+          } else {
             points -= 24;
           }
         }
         // Anti-W+I Spam: Only use High Jump / Evasive W+I when opponent has high Chi (>= 8)
-        // and we have healthy LP time horizon!
         if (key === "W+I") {
           if (enemyChi >= 8 && !status.hasDefenseBuff && ownLp >= 500 && enemyLp >= 500) {
             points += 15;
@@ -609,18 +771,13 @@
         }
       }
     } else if (dir === "A") {
-      if (key === "A+I" && enemyChi >= 4) {
-        points += 14 + Math.min(16, (enemyChi - 3) * 2.5);
-      }
-      if (key === "A+K" && enemyChi >= 5) {
-        points += 10;
-      }
-      if (key === "A+L") {
-        if (ownChi <= 4 && enemyChi <= 6 && !lowTimeHorizon) {
-          points += 14;
-        } else if (enemyChi >= 8) {
-          points -= 12;
-        }
+      const isOmniGuard = move.guardKind === "omni";
+      if (isOmniGuard && enemyChi >= 5) {
+        points += 16 + Math.min(18, (enemyChi - 4) * 2.5);
+      } else if (enemyChi >= 6) {
+        points += 8;
+      } else if (enemyChi <= 2) {
+        points -= 10;
       }
     } else if (dir === "D") {
       points += 10 + gain * 4.2;
@@ -630,11 +787,20 @@
       if (status.hasPowerBuff && ownChi < 4) {
         points += 14;
       }
-    } else if (dir === "S") {
+      if (move.rangeType === "REACH") {
+        points += 6;
+      }
+    } else if (dir === "S" || (dir === "W" && damage > 0)) {
       points += damage * 0.032;
+      if (move.rangeType === "REACH") {
+        points += 8;
+      }
       if (status.hasPowerBuff) {
         // CASH OUT ACTIVE POWER BUFF!
         points += 34 + damage * 0.025;
+      }
+      if (enemyStatus.hasDefenseBuff && charge < 60) {
+        points -= 8;
       }
       if (postChi <= 1 && enemyLp > damage * 1.4 && !status.hasPowerBuff && !enemyFainted) {
         points -= 12;
@@ -650,11 +816,11 @@
    */
   function prior(state, slot, action, difficulty = "master") {
     const raw = scoreActionTactics(state, slot, action, difficulty);
-    // Map tactical score (-50..+80) smoothly onto a positive prior multiplier (0.08..6.0)
+    // Map tactical score (-50..+80) smoothly onto a positive prior multiplier (0.08..6.5)
     const weight = 1.0 + raw / 28;
     return clamp(weight, 0.08, 6.5);
   }
-
+ 
   /*
    * 4. RiderBrains.bonus(state, slot, action, difficulty)
    * Returns an additive root score adjustment used by ForeseeEngine.search().

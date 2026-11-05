@@ -9,11 +9,11 @@
  *   RIDER -> Foresee search with an exact-matchup ACTIVE model.
  *   RIDER without a model -> explicit pure SOUL fallback.
  *
- * ACTIVE checkpoints are copied once per gameState object.
- * A new match must use a new gameState object.
- *
- * Human controls use SoulEnv's charging clock.
- * CPU plans preserve the action and charge returned by search.
+ * Dynamic Real-Time CPU Re-Evaluation:
+ *   - Runs initial findmove(empty) at round start.
+ *   - Observes opponent direction changes / lock-ins during the 8s window
+ *     and re-evaluates after CPU_REACTION_MS (250ms), accounting for remaining
+ *     time, accumulated charge, and active Rider charge-speed buffs/debuffs.
  */
 (function (g) {
   "use strict";
@@ -126,6 +126,7 @@
       gs.inputPausedAt = null;
       gs.soulQueue = [];
       gs.soulActors = {};
+      gs.aiControllers = {};
     }
 
     clearButtons();
@@ -312,6 +313,15 @@
     g.UI.showBattleBanner(lines.join("\n"));
   }
 
+  function extractCellDirection(cell) {
+    if (!cell) return "";
+    if (DIRS.includes(cell.direction)) {
+      return cell.direction;
+    }
+    const actionDir = String(cell.action?.key || "").split("+")[0];
+    return DIRS.includes(actionDir) ? actionDir : "";
+  }
+
   function paint(gs) {
     const env = gs.soulEnv;
     if (!env) return;
@@ -329,7 +339,6 @@
       const cell = env.cells[slot];
       const idle = cell.action?.key === "DO_NOTHING";
 
-      // Planned action objects do not set cell.direction in v5 SoulEnv.
       const actionDirection = cell.action?.key?.split("+")[0];
       const direction = cell.direction || (
         DIRS.includes(actionDirection) ? actionDirection : null
@@ -459,6 +468,368 @@
     return queueInput(slot, action);
   }
 
+  /*
+   * Launches an asynchronous mid-round findmove() search when the opponent
+   * presses/switches a direction or locks in their move.
+   */
+  async function triggerDynamicReplan(gs, token, models, slot) {
+    const ctrl = gs?.aiControllers?.[slot];
+    const env = gs?.soulEnv;
+
+    if (
+      !ctrl ||
+      !env ||
+      ctrl.replanInFlight ||
+      !owns(gs, token) ||
+      gs.roundPhase !== "INPUT" ||
+      env.cells[slot]?.locked
+    ) {
+      return;
+    }
+
+    const lastInput = C.lastInputMs();
+    const remainingMs = Math.max(0, lastInput - env.t);
+    if (remainingMs < 150) {
+      return;
+    }
+
+    const otherSlot = C.other(slot);
+    const selfCell = env.cells[slot];
+    const oppCell = env.cells[otherSlot];
+
+    const selfDir = extractCellDirection(selfCell);
+    const oppDir = extractCellDirection(oppCell);
+
+    const selfStarted =
+      selfCell.startedAt ??
+      selfCell.start ??
+      ctrl.selfStartedAtMs ??
+      env.t;
+    const oppStarted =
+      oppCell.startedAt ??
+      oppCell.start ??
+      ctrl.oppDirStartedAtMs ??
+      env.t;
+
+    const selfElapsedMs = selfDir ? Math.max(0, env.t - selfStarted) : 0;
+    const oppElapsedMs = oppDir ? Math.max(0, env.t - oppStarted) : 0;
+
+    const liveContext = {
+      isInitial: false,
+      envTimeMs: env.t,
+      remainingMs,
+      switchPenaltyMs: STEP_MS,
+      selfDirection: selfDir,
+      selfElapsedMs,
+      selfCharge: Number(selfCell.charge || 0),
+      oppDirection: oppDir,
+      oppElapsedMs,
+      oppCharge: Number(oppCell.charge || 0),
+      oppLocked: Boolean(oppCell.locked),
+      oppSwitchCount: ctrl.oppSwitchCount
+    };
+
+    ctrl.replanInFlight = true;
+    ctrl.dirtyWhileInFlight = false;
+    const replanIndex = ++ctrl.replanCount;
+
+    try {
+      const difficulty = difficultyFor(gs, slot);
+      const stateCopy = C.copyState(gs.core);
+      stateCopy.liveContext = { ...liveContext };
+
+      const context = {
+        state: stateCopy,
+        slot,
+        history: JSON.parse(JSON.stringify(gs.history || [])),
+        difficulty,
+        liveContext: { ...liveContext },
+        timeBudgetMs: difficulty === "rider" ? 65 : 0,
+        seed: K.hash(
+          gs.seed,
+          "decision_live",
+          gs.core.round,
+          slot,
+          replanIndex,
+          oppDir || "NONE",
+          liveContext.oppLocked ? 1 : 0
+        ),
+        policyWeights: difficulty === "rider"
+          ? cloneCheckpoint(models.models[slot])
+          : null,
+        disableAgent: true
+      };
+
+      const decision = await g.AIService.plan(context);
+
+      if (
+        !owns(gs, token) ||
+        gs.roundPhase !== "INPUT" ||
+        !gs.soulEnv ||
+        gs.soulEnv.cells[slot]?.locked
+      ) {
+        return;
+      }
+
+      if (!decision?.action || !C.isLegal(gs.core, slot, decision.action)) {
+        return;
+      }
+
+      const nowEnv = gs.soulEnv;
+      const nowRemainingMs = Math.max(0, C.lastInputMs() - nowEnv.t);
+      const nowSelfCell = nowEnv.cells[slot];
+      const nowSelfDir = extractCellDirection(nowSelfCell);
+      const nowSelfStarted =
+        nowSelfCell.startedAt ??
+        nowSelfCell.start ??
+        ctrl.selfStartedAtMs ??
+        nowEnv.t;
+      const nowSelfElapsed = nowSelfDir
+        ? Math.max(0, nowEnv.t - nowSelfStarted)
+        : 0;
+
+      const candidate = C.normalizeAction(gs.core, slot, decision.action);
+
+      if (candidate.key !== "DO_NOTHING") {
+        const [candDir] = candidate.key.split("+");
+        const availForCand =
+          candDir === nowSelfDir
+            ? nowSelfElapsed + nowRemainingMs
+            : nowRemainingMs;
+
+        const maxReachableNow = C.maxCharge(
+          gs.core[slot],
+          candDir,
+          availForCand
+        );
+
+        if (maxReachableNow < 1) {
+          return;
+        }
+
+        const minReachableNow =
+          candDir === nowSelfDir && nowSelfCell.charge >= 1
+            ? Math.min(maxReachableNow, Math.floor(nowSelfCell.charge))
+            : 1;
+
+        candidate.charge = K.clamp(
+          candidate.charge,
+          minReachableNow,
+          maxReachableNow
+        );
+      }
+
+      ctrl.targetAction = { ...candidate };
+      ctrl.targetScore = Number(decision.debug?.chosenScore ?? ctrl.targetScore);
+      gs.aiPlans[slot] = { ...candidate };
+      gs.aiDebug[slot] = {
+        ...(decision.debug || {}),
+        replanCount: replanIndex,
+        checkpointSource: difficulty === "rider"
+          ? models.models[slot]
+            ? "match-frozen exact-matchup ACTIVE"
+            : "none — explicit SOUL fallback"
+          : "none — pure search"
+      };
+    } catch (err) {
+      console.warn(`[MatchManager] Live replan warning for ${slot}:`, err);
+    } finally {
+      ctrl.replanInFlight = false;
+      if (
+        ctrl.dirtyWhileInFlight &&
+        owns(gs, token) &&
+        gs.roundPhase === "INPUT" &&
+        gs.soulEnv &&
+        !gs.soulEnv.cells[slot]?.locked
+      ) {
+        ctrl.dirtyWhileInFlight = false;
+        ctrl.pendingReactAtMs = gs.soulEnv.t + C.cpuReadyAtMs();
+      }
+    }
+  }
+
+  /*
+   * Per-step real-time CPU controller driven by SoulEnv's 50ms charging clock.
+   * Emits standard direction ("W","A","S","D") and lock ("I","J","K","L","IDLE")
+   * keys so switching or preserving charge follows SoulEnv's exact rules.
+   */
+  function stepDynamicCPU(gs, token, models, env, slot) {
+    const cell = env.cells[slot];
+    if (!cell || cell.locked) return [];
+
+    const ctrl = gs.aiControllers?.[slot];
+    if (!ctrl) return [];
+
+    const otherSlot = C.other(slot);
+    const oppCell = env.cells[otherSlot];
+    const oppDir = extractCellDirection(oppCell);
+    const oppLocked = Boolean(oppCell?.locked);
+
+    // 1. Detect opponent direction changes or lock-in and schedule reaction after CPU_REACTION_MS (250ms)
+    if (oppDir !== ctrl.lastObservedOppDir) {
+      if (ctrl.lastObservedOppDir && oppDir) {
+        ctrl.oppSwitchCount++;
+      }
+      ctrl.lastObservedOppDir = oppDir;
+      ctrl.oppDirStartedAtMs = oppDir
+        ? (oppCell.startedAt ?? oppCell.start ?? env.t)
+        : null;
+
+      if (ctrl.replanInFlight) {
+        ctrl.dirtyWhileInFlight = true;
+      } else {
+        ctrl.pendingReactAtMs = env.t + C.cpuReadyAtMs();
+      }
+    }
+
+    if (oppLocked && !ctrl.lastObservedOppLocked) {
+      ctrl.lastObservedOppLocked = true;
+      if (ctrl.replanInFlight) {
+        ctrl.dirtyWhileInFlight = true;
+      } else {
+        ctrl.pendingReactAtMs = env.t + C.cpuReadyAtMs();
+      }
+    }
+
+    // 2. Fire reactive findmove() once the 250ms reaction window elapses
+    if (
+      ctrl.pendingReactAtMs != null &&
+      env.t >= ctrl.pendingReactAtMs &&
+      !ctrl.replanInFlight
+    ) {
+      ctrl.pendingReactAtMs = null;
+      void triggerDynamicReplan(gs, token, models, slot);
+    }
+
+    // 3. Respect initial CPU reaction time (250ms) at round start
+    if (env.t < ctrl.readyAtMs) {
+      return [];
+    }
+
+    const lastInput = C.lastInputMs();
+    const remainingMs = Math.max(0, lastInput - env.t);
+    const target = ctrl.targetAction || { key: "DO_NOTHING", charge: 0 };
+
+    // 4. Handle IDLE / DO_NOTHING target
+    if (!target.key || target.key === "DO_NOTHING") {
+      const oppIsHuman = !isCPU(gs, otherSlot);
+      if (oppIsHuman && !oppLocked && remainingMs > 150) {
+        return [];
+      }
+      return ["IDLE"];
+    }
+
+    const [targetDir, targetBtn] = String(target.key).split("+");
+    if (!DIRS.includes(targetDir) || !BUTTONS.includes(targetBtn)) {
+      return ["IDLE"];
+    }
+
+    const currentDir = cell.direction || "";
+
+    // 5. Start or switch direction
+    if (currentDir !== targetDir) {
+      if (env.t >= lastInput) {
+        if (
+          currentDir &&
+          cell.charge >= 1 &&
+          C.isLegal(gs.core, slot, {
+            key: `${currentDir}+${targetBtn}`,
+            charge: cell.charge
+          })
+        ) {
+          return [targetBtn];
+        }
+        if (
+          C.isLegal(gs.core, slot, {
+            key: target.key,
+            charge: 1
+          })
+        ) {
+          ctrl.selfStartedAtMs = env.t;
+          return [targetDir, targetBtn];
+        }
+        return ["IDLE"];
+      }
+
+      ctrl.selfStartedAtMs = env.t;
+      return [targetDir];
+    }
+
+    // 6. Currently holding targetDir: decide whether to continue charging or lock
+    const selfStarted =
+      cell.startedAt ??
+      cell.start ??
+      ctrl.selfStartedAtMs ??
+      env.t;
+    const selfElapsedMs = Math.max(0, env.t - selfStarted);
+    const maxPossibleCharge = C.maxCharge(
+      gs.core[slot],
+      targetDir,
+      selfElapsedMs + remainingMs
+    );
+    const desiredCharge = K.clamp(
+      Math.min(target.charge, maxPossibleCharge),
+      1,
+      100
+    );
+
+    const canLockCurrent =
+      cell.charge >= 1 &&
+      C.isLegal(gs.core, slot, {
+        key: target.key,
+        charge: cell.charge
+      });
+
+    if (cell.charge >= desiredCharge && canLockCurrent) {
+      const oppIsHuman = !isCPU(gs, otherSlot);
+      const isFullChargeTarget = desiredCharge >= 100 || desiredCharge >= maxPossibleCharge;
+
+      // Smart Hold: against an unlocked human, hold a 100% charged move unlocked
+      // so the CPU stays free to pivot if the human feints before the deadline.
+      if (
+        oppIsHuman &&
+        isFullChargeTarget &&
+        !oppLocked &&
+        remainingMs > 100
+      ) {
+        return [];
+      }
+
+      // If opponent just locked and a reaction search is pending/running, wait briefly if time permits
+      if (
+        oppIsHuman &&
+        oppLocked &&
+        (ctrl.pendingReactAtMs != null || ctrl.replanInFlight) &&
+        remainingMs > 150
+      ) {
+        return [];
+      }
+
+      return [targetBtn];
+    }
+
+    // Safety lock on final input step of the 8s window
+    if (env.t >= lastInput) {
+      if (canLockCurrent) {
+        return [targetBtn];
+      }
+      for (const fallbackBtn of BUTTONS) {
+        if (
+          cell.charge >= 1 &&
+          C.isLegal(gs.core, slot, {
+            key: `${currentDir}+${fallbackBtn}`,
+            charge: cell.charge
+          })
+        ) {
+          return [fallbackBtn];
+        }
+      }
+      return ["IDLE"];
+    }
+
+    return [];
+  }
+
   async function resolve(gs, token) {
     if (!owns(gs, token) || gs.roundPhase !== "INPUT") return;
 
@@ -501,15 +872,15 @@
 
             const actor = gs.soulActors[slot];
 
-           if (actor) {
-  const proposal = actor(env, slot);
+            if (actor) {
+              const proposal = actor(env, slot);
 
-  if (Array.isArray(proposal)) {
-    inputs[slot].push(...proposal);
-  } else {
-    inputs[slot].push(proposal);
-  }
-}
+              if (Array.isArray(proposal)) {
+                inputs[slot].push(...proposal);
+              } else if (proposal) {
+                inputs[slot].push(proposal);
+              }
+            }
           }
 
           const remaining = [];
@@ -602,6 +973,7 @@
       gs.actions = { p1: null, p2: null };
       gs.soulQueue = [];
       gs.soulActors = {};
+      gs.aiControllers = {};
       gs.aiPlans = {};
       gs.aiDebug = {};
 
@@ -648,31 +1020,39 @@
           return;
         }
 
+        const initialLiveContext = {
+          isInitial: true,
+          envTimeMs: 0,
+          remainingMs: C.lastInputMs() - C.cpuReadyAtMs(),
+          switchPenaltyMs: 0,
+          selfDirection: "",
+          selfElapsedMs: 0,
+          selfCharge: 0,
+          oppDirection: "",
+          oppElapsedMs: 0,
+          oppCharge: 0,
+          oppLocked: false,
+          oppSwitchCount: 0
+        };
+
+        const initialState = C.copyState(before);
+        initialState.liveContext = { ...initialLiveContext };
+
         const context = {
-          state: C.copyState(before),
+          state: initialState,
           slot,
           history: JSON.parse(JSON.stringify(history)),
           difficulty,
+          liveContext: { ...initialLiveContext },
           seed: K.hash(
             gs.seed,
             "decision",
             before.round,
             slot
           ),
-
-          /*
-           * Pass a copy so a same-thread AIService implementation
-           * cannot mutate our match-frozen checkpoint.
-           *
-           * Explicit null is intentional: no worker-side repository
-           * substitution when this match has no frozen ACTIVE model.
-           */
           policyWeights: difficulty === "rider"
             ? cloneCheckpoint(models.models[slot])
             : null,
-
-          // Also prevents a same-thread dispatcher from consulting
-          // a newer ACTIVE model during this match.
           disableAgent: true
         };
 
@@ -702,12 +1082,6 @@
           );
         }
 
-        /*
-         * With the supplied v5 dispatcher, debug.neural reports
-         * whether the neural evaluator was passed to Foresee.
-         * Detect a dropped policyWeights field rather than silently
-         * claiming the frozen model was used.
-         */
         if (difficulty === "rider") {
           const expectedNeural = Boolean(models.models[slot]);
 
@@ -736,8 +1110,23 @@
             : "none — pure search"
         };
 
-        // Preserve both key and search-selected charge.
-        gs.soulActors[slot] = E.planned(action);
+        gs.aiControllers[slot] = {
+          targetAction: { ...action },
+          targetScore: Number(decision.debug?.chosenScore ?? 0),
+          readyAtMs: C.cpuReadyAtMs(),
+          selfStartedAtMs: null,
+          lastObservedOppDir: "",
+          lastObservedOppLocked: false,
+          oppDirStartedAtMs: null,
+          oppSwitchCount: 0,
+          pendingReactAtMs: null,
+          replanInFlight: false,
+          dirtyWhileInFlight: false,
+          replanCount: 0
+        };
+
+        gs.soulActors[slot] = (env, s) =>
+          stepDynamicCPU(gs, token, models, env, s);
       }));
 
       if (!owns(gs, token)) return;
@@ -939,7 +1328,7 @@
   g.MatchManager = {
     VERSION: "live-ui-2",
     BUILD,
-    PATCH: "v5-exact-matchup-rider-handoff",
+    PATCH: "v5-exact-matchup-rider-dynamic-replan",
     begin,
     stop,
     confirm,

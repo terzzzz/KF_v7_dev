@@ -161,6 +161,21 @@
     }
   }
 
+  function riderRequiresEnableSpecials(moveMap) {
+    if (!moveMap) return false;
+    return Object.values(moveMap).some(
+      m => Boolean(m?.buff?.enableSpecials || m?.buff?.effects?.enableSpecials)
+    );
+  }
+
+  function fighterHasSpecialsEnabled(fighter) {
+    return (fighter?.activeBuffs || []).some(
+      b =>
+        b?.roundsLeft > 0 &&
+        Boolean(b?.enableSpecials || b?.effects?.enableSpecials || b?.id === "electro_dynamo")
+    );
+  }
+
   function verifyDecision(context, result) {
     if (!result?.action) {
       throw new Error(
@@ -206,12 +221,22 @@
     requirePositiveMoveCharge(action);
 
     if (action.key !== "DO_NOTHING") {
-      const move =
-        context.state.moves[context.slot][action.key];
+      const slotMoves = context.state.moves[context.slot];
+      const move = slotMoves[action.key];
 
       if (!move) {
         throw new Error(
           "CPU planner returned an unknown move."
+        );
+      }
+
+      if (
+        move.direction === "S" &&
+        riderRequiresEnableSpecials(slotMoves) &&
+        !fighterHasSpecialsEnabled(context.state[context.slot])
+      ) {
+        throw new Error(
+          "CPU planner selected a locked S-move before Electro Dynamo (enableSpecials) was active."
         );
       }
 

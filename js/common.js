@@ -4,7 +4,7 @@
  * Compatibility: shared-core-1
  * Patch: release-routing-1
  *
- * Combat rules and standard-search settings are unchanged.
+ * Combat rules and standard-search settings are preserved with 5-tier support.
  */
 (function (g) {
   "use strict";
@@ -21,18 +21,31 @@
     new Promise(resolve => setTimeout(resolve, ms));
 
   KF.difficulty = function (value) {
-    const key = String(value || "balanced").toLowerCase();
+    const key = String(value || "balanced").trim().toLowerCase();
 
     return {
       novice: "easy",
       easy: "easy",
+      "tree-hopper": "easy",
+      tree_hopper: "easy",
+      treehopper: "easy",
+
       normal: "balanced",
       balanced: "balanced",
-      master: "master",
-      soul: "soul",
-      rider: "rider",
+      balance: "balanced",
+      cricket: "balanced",
 
-      // Compatibility alias. RIDER is not an MCTS implementation.
+      defensive: "defensive",
+      defense: "defensive",
+      beetle: "defensive",
+
+      master: "master",
+      "bullet-ant": "master",
+      bullet_ant: "master",
+      bulletant: "master",
+      soul: "master",
+
+      rider: "rider",
       mcts: "rider"
     }[key] || "balanced";
   };
@@ -74,8 +87,7 @@
   };
 
   /*
-   * Keep these standard-search settings unchanged.
-   * RIDER uses its own dispatcher path.
+   * Search settings for the 5 AI tiers (+ legacy soul alias).
    */
   KF.levels = Object.freeze({
     easy: {
@@ -96,10 +108,19 @@
       nearBest: 16
     },
 
+    defensive: {
+      charges: [1, 35, 60, 90, 100],
+      horizon: 2,
+      finalists: 8,
+      rollouts: 32,
+      risk: 0.25,
+      nearBest: 0
+    },
+
     master: {
       charges: [1, 35, 60, 90, 100],
       horizon: 3,
-      finalists: 6,
+      finalists: 8,
       rollouts: 48,
       risk: 0.15,
       nearBest: 4
@@ -112,6 +133,15 @@
       rollouts: 64,
       risk: 0.15,
       nearBest: 1
+    },
+
+    rider: {
+      charges: [1, 35, 60, 90, 100],
+      horizon: 3,
+      finalists: 10,
+      rollouts: 80,
+      risk: 0.25,
+      nearBest: 0
     }
   });
 
@@ -157,42 +187,38 @@
     ] || 3000;
   };
 
- g.calculateChargeProgress = function (
-  direction,
-  elapsedMs
-) {
-  const key = String(direction || "").toUpperCase();
-
-  // No held direction: an empty display, not a playable
-  // zero-charge move.
-  if (
-    !Object.prototype.hasOwnProperty.call(
-      g.CHARGE_TIMES,
-      key
-    )
+  g.calculateChargeProgress = function (
+    direction,
+    elapsedMs
   ) {
-    return 0;
-  }
+    const key = String(direction || "").toUpperCase();
 
-  const elapsed = Number(elapsedMs);
+    if (
+      !Object.prototype.hasOwnProperty.call(
+        g.CHARGE_TIMES,
+        key
+      )
+    ) {
+      return 0;
+    }
 
-  if (!Number.isFinite(elapsed)) {
-    throw new TypeError(
-      "Charge elapsed time must be a finite number."
+    const elapsed = Number(elapsedMs);
+
+    if (!Number.isFinite(elapsed)) {
+      throw new TypeError(
+        "Charge elapsed time must be a finite number."
+      );
+    }
+
+    return KF.clamp(
+      Math.floor(
+        100 * Math.max(0, elapsed) /
+        g.getChargeTimeMs(key)
+      ),
+      1,
+      100
     );
-  }
-
-  // A newly selected direction starts at 1%.
-  // Existing full-charge durations remain unchanged.
-  return KF.clamp(
-    Math.floor(
-      100 * Math.max(0, elapsed) /
-      g.getChargeTimeMs(key)
-    ),
-    1,
-    100
-  );
-};
+  };
 
   let dataPromise = null;
 

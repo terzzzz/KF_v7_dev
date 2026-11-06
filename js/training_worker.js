@@ -25,7 +25,7 @@ const MAX_WINS_PER_DIFF_OPP = 4;
 // Turbo scheduling constants: keep worker on-CPU ~99.5% of the time
 const YIELD_INTERVAL_MS = 250;
 const PROGRESS_INTERVAL_MS = 1000;
-const CHECKPOINT_GAME_INTERVAL = 250;
+const CHECKPOINT_GAME_INTERVAL = 100;
 const CHECKPOINT_MIN_INTERVAL_MS = 5000;
 
 importScripts(...[

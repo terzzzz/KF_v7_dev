@@ -18,6 +18,13 @@
 
   const DIRS = ["W", "A", "S", "D"];
 
+  // Base tactical anchors (each receives a +1% to +12% randomizer per move/turn):
+  //   24 -> 25..36% (Fast Utility/Guard)
+  //   34 -> 35..46% (Standard Utility/Guard)
+  //   60 -> 61..72% (Fast Priority Attack with reliable hit rate)
+  //   68 -> 69..80% (Neutral D Poke)
+  //   78 -> 79..90% (Neutral S Poke)
+  //   88 -> 89..100% (Safe Heavy Punish)
   const DEFAULT_LEVEL_SETTINGS = {
     easy: {
       horizon: 1,
@@ -25,7 +32,7 @@
       finalists: 4,
       risk: 0.10,
       nearBest: 12,
-      charges: [1, 25, 50, 75, 100]
+      charges: [24, 34, 60, 68, 78, 88]
     },
     balanced: {
       horizon: 2,
@@ -33,7 +40,7 @@
       finalists: 6,
       risk: 0.20,
       nearBest: 8,
-      charges: [1, 25, 50, 75, 100]
+      charges: [24, 34, 60, 68, 78, 88]
     },
     defensive: {
       horizon: 2,
@@ -41,7 +48,7 @@
       finalists: 8,
       risk: 0.30,
       nearBest: 0,
-      charges: [1, 25, 50, 75, 100]
+      charges: [24, 34, 60, 68, 78, 88]
     },
     master: {
       horizon: 3,
@@ -49,7 +56,7 @@
       finalists: 8,
       risk: 0.25,
       nearBest: 0,
-      charges: [1, 25, 50, 75, 90, 100]
+      charges: [24, 34, 60, 68, 78, 88]
     },
     rider: {
       horizon: 3,
@@ -57,7 +64,7 @@
       finalists: 10,
       risk: 0.25,
       nearBest: 0,
-      charges: [1, 25, 50, 75, 90, 100]
+      charges: [24, 34, 60, 68, 78, 88]
     }
   };
 
@@ -66,6 +73,36 @@
       return performance.now();
     }
     return Date.now();
+  }
+
+  function randPlus1To12(rng = Math.random) {
+    const r = typeof rng === "function" ? rng() : Math.random();
+    return 1 + Math.floor(K.clamp(r, 0, 0.999999) * 12);
+  }
+
+  function jitterChargeAnchor(baseCharge, minAllowed, maxAllowed, isOffensive, rng) {
+    if (!Number.isFinite(maxAllowed) || maxAllowed < 1) {
+      return 0;
+    }
+    const safeMin = Math.max(1, Math.min(maxAllowed, Math.round(minAllowed || 1)));
+    const tacticalFloor = isOffensive
+      ? Math.min(maxAllowed, Math.max(safeMin, 58))
+      : Math.min(maxAllowed, Math.max(safeMin, 20));
+
+    let base = Math.round(Number(baseCharge) || 60);
+    if (base <= 5) {
+      base = isOffensive ? 60 : 24;
+    } else if (isOffensive && base < 58) {
+      base = 60;
+    }
+    // Pull 95-100 anchors back to 88 so +1..12% spans 89..100% instead of clamping at 100%
+    if (base >= 95) {
+      base = 88;
+    }
+
+    const clampedBase = K.clamp(base, tacticalFloor, maxAllowed);
+    const jittered = clampedBase + randPlus1To12(rng);
+    return K.clamp(jittered, safeMin, maxAllowed);
   }
 
   function normalizeDifficulty(value) {
@@ -211,6 +248,17 @@
     }
     const move = state?.moves?.[slot]?.[key];
     return move?.direction === "A" || key.startsWith("A+");
+  }
+
+  function isOffensiveMove(state, slot, key) {
+    if (!key || key === "DO_NOTHING") {
+      return false;
+    }
+    const move = state?.moves?.[slot]?.[key];
+    if (!move) {
+      return isDMove(state, slot, key) || isSMove(state, slot, key);
+    }
+    return Boolean(move.offensive) || move.direction === "D" || move.direction === "S";
   }
 
   function isOmniGuardMove(state, slot, key) {
@@ -421,6 +469,280 @@
   }
 
   /*
+   * Generates legal candidate actions with a +1% to +12% randomizer applied per move,
+   * ensuring no difficulty is stuck at constant % values while preserving hit-chance floors.
+   */
+  function buildRandomizedActions(
+    state,
+    slot,
+    extraCharges,
+    dirConstraints,
+    rng
+  ) {
+    const probeCharges = [
+      1, 20, 28, 36, 45, 55, 62, 70, 78, 86, 94, 100,
+      ...(Array.isArray(extraCharges) ? extraCharges : [])
+    ];
+
+    const probed = C.actions(
+      state,
+      slot,
+      [...new Set(probeCharges)],
+      dirConstraints
+    );
+
+    if (!probed || probed.length === 0) {
+      return [{ key: "DO_NOTHING", charge: 0 }];
+    }
+
+    const byKey = new Map();
+    for (const act of probed) {
+      if (!byKey.has(act.key)) {
+        byKey.set(act.key, []);
+      }
+      byKey.get(act.key).push(act.charge ?? 0);
+    }
+
+    const result = [];
+
+    for (const [key, legalCharges] of byKey.entries()) {
+      if (key === "DO_NOTHING") {
+        result.push({ key: "DO_NOTHING", charge: 0 });
+        continue;
+      }
+
+      const move = state.moves?.[slot]?.[key];
+      const dc = dirConstraints && move?.direction ? dirConstraints[move.direction] : null;
+      const availMs = dc && Number.isFinite(dc.availableMs) ? dc.availableMs : undefined;
+      const coreMax = move
+        ? C.maxCharge(state[slot], move.direction, availMs)
+        : Math.max(...legalCharges);
+
+      const minAllowed = Math.max(
+        1,
+        dc && Number.isFinite(dc.minCharge) ? dc.minCharge : 1,
+        Math.min(...legalCharges)
+      );
+      const maxAllowed = Math.max(
+        minAllowed,
+        Math.min(
+          coreMax,
+          dc && Number.isFinite(dc.maxCharge) ? dc.maxCharge : 100
+        )
+      );
+
+      // If opponent is locked at an exact charge in live mode, preserve exact lock
+      if (minAllowed === maxAllowed) {
+        const lockedAct = { key, charge: minAllowed };
+        if (C.isLegal(state, slot, lockedAct)) {
+          result.push(lockedAct);
+        }
+        continue;
+      }
+
+      const offensive = isOffensiveMove(state, slot, key);
+      const baseAnchors = offensive
+        ? [60, 68, 78, 88]
+        : [24, 34, 48];
+
+      const chosenCharges = new Set();
+
+      for (const anchor of baseAnchors) {
+        const jittered = jitterChargeAnchor(
+          anchor,
+          minAllowed,
+          maxAllowed,
+          offensive,
+          rng
+        );
+        if (jittered >= 1) {
+          chosenCharges.add(jittered);
+        }
+      }
+
+      if (Array.isArray(extraCharges)) {
+        for (const extra of extraCharges) {
+          if (!Number.isFinite(extra) || extra < 1) continue;
+          const jittered = jitterChargeAnchor(
+            extra,
+            minAllowed,
+            maxAllowed,
+            offensive,
+            rng
+          );
+          if (jittered >= 1) {
+            chosenCharges.add(jittered);
+          }
+        }
+      }
+
+      let addedForMove = 0;
+      for (const chg of chosenCharges) {
+        const candidate = { key, charge: chg };
+        if (C.isLegal(state, slot, candidate)) {
+          result.push(candidate);
+          addedForMove++;
+        }
+      }
+
+      if (addedForMove === 0) {
+        const fallbackCharge = K.clamp(
+          maxAllowed,
+          1,
+          100
+        );
+        const fallback = { key, charge: fallbackCharge };
+        if (C.isLegal(state, slot, fallback)) {
+          result.push(fallback);
+        }
+      }
+    }
+
+    return result.length > 0 ? result : probed;
+  }
+
+  /*
+   * Evaluates the 4 Tactical Charge Rules:
+   *   1. Fast Priority with Hit-Chance Balance (60%–76% for D/S, never 35%–55%).
+   *   2. Faint > 75% AND Opponent Chi Check (high risk only when oppChi >= oppMinS).
+   *   3. Contested Neutral Poke (D: 69%–82%, S: 79%–92%).
+   *   4. Safe Heavy Punish (89%–100% when opponent is fainted or starved of Chi).
+   */
+  function evaluateTacticalChargeBonus(state, slot, action) {
+    if (!state || !action || action.key === "DO_NOTHING") {
+      return 0;
+    }
+
+    const enemySlot = C.other(slot);
+    const own = state[slot];
+    const enemy = state[enemySlot];
+    const move = state.moves?.[slot]?.[action.key];
+
+    if (!own || !enemy || !move) {
+      return 0;
+    }
+
+    const charge = Number(action.charge || 0);
+    const dir = move.direction;
+    const offensive = isOffensiveMove(state, slot, action.key);
+
+    const faintThreshold = Math.max(
+      1,
+      Number(g.COMBAT_RULES?.FAINT_THRESHOLD || 100)
+    );
+    const myFaintRatio = Number(own.faintMeter || 0) / faintThreshold;
+    const oppFaintRatio = Number(enemy.faintMeter || 0) / faintThreshold;
+
+    const oppChi = Number(enemy.chi || 0);
+    const oppMinS = minSChiCost(state, enemySlot);
+    const oppMaxLp = Math.max(1, Number(enemy.maxLp || 1600));
+    const oppLpRatio = Number(enemy.lp || 0) / oppMaxLp;
+
+    // Rule 2: Faint > 75% combined with Opponent Chi threat check
+    const highFaintRisk =
+      !own.isFainted &&
+      !enemy.isFainted &&
+      myFaintRatio > 0.75 &&
+      oppChi >= oppMinS;
+
+    const moderateFaintRisk =
+      !own.isFainted &&
+      !enemy.isFainted &&
+      myFaintRatio > 0.75 &&
+      oppChi >= 2 &&
+      oppChi < oppMinS;
+
+    // Rule 4 condition: Opponent is fainted, Chi-starved, or faint-doomed with low Chi
+    const lowOpponentThreat =
+      Boolean(enemy.isFainted) ||
+      oppChi <= 1 ||
+      (oppFaintRatio > 0.75 && oppChi < 2);
+
+    // Non-offensive W / A utility & guards (no offensive hit-rate penalty)
+    if (!offensive) {
+      if (charge < 20) {
+        return -18; // Prevent 1% charge cheese
+      }
+      if (highFaintRisk) {
+        return charge >= 24 && charge <= 38
+          ? 8
+          : charge > 55
+            ? -10
+            : 2;
+      }
+      return charge >= 25 && charge <= 48
+        ? 6
+        : charge > 65
+          ? -6
+          : 2;
+    }
+
+    // Offensive moves (D / S / offensive W or A): protect hit chance by penalizing < 58%
+    if (charge < 58) {
+      return -22;
+    }
+
+    // Rule 4 — Safe Heavy Punish (opponent is fainted or has very low Chi)
+    if (lowOpponentThreat && !highFaintRisk) {
+      if (charge >= 88) {
+        return 12;
+      }
+      if (charge >= 78) {
+        return 5;
+      }
+      return -6;
+    }
+
+    // Rule 1 & Rule 2 — High Faint Risk (faint > 75% & oppChi >= minS) OR Lethal Kill-Confirm
+    // Stay in 60%–76% so hit chance stays reliable while still winning priority
+    if (highFaintRisk || oppLpRatio <= 0.22) {
+      if (charge >= 60 && charge <= 76) {
+        return 14;
+      }
+      if (charge > 76 && charge <= 82) {
+        return 2;
+      }
+      if (charge > 82) {
+        return highFaintRisk ? -15 : -8;
+      }
+    }
+
+    // Moderate Faint Risk (faint > 75%, but opponent only has 2-3 Chi and cannot use S moves)
+    if (moderateFaintRisk) {
+      if (charge >= 64 && charge <= 84) {
+        return 9;
+      }
+      if (charge > 88) {
+        return -7;
+      }
+      return 2;
+    }
+
+    // Rule 3 — Contested Neutral Poke (D: 68%–82%, S: 78%–92%)
+    if (dir === "D") {
+      if (charge >= 68 && charge <= 82) {
+        return 8;
+      }
+      if (charge >= 60 && charge < 68) {
+        return 4;
+      }
+      return 1;
+    }
+
+    if (dir === "S") {
+      if (charge >= 78 && charge <= 92) {
+        return 8;
+      }
+      if (charge >= 64 && charge < 78) {
+        return 4;
+      }
+      return 2;
+    }
+
+    return charge >= 65 && charge <= 88 ? 5 : 0;
+  }
+
+  /*
    * Evaluates active buff / status unit differential for Rider EV_Tree (w_Buff = 18.0).
    */
   function evaluateActiveBuffUnits(player) {
@@ -526,7 +848,7 @@
       score += 28;
     }
 
-    // 3. Faint-Doomed Setup
+    // 3. Faint-Doomed Setup (> 75% faint + Opponent Chi threat check)
     const faintThreshold = Math.max(
       1,
       Number(g.COMBAT_RULES?.FAINT_THRESHOLD || 100)
@@ -534,11 +856,13 @@
     const ownFaintRatio = Number(own.faintMeter || 0) / faintThreshold;
     const enemyFaintRatio = Number(enemy.faintMeter || 0) / faintThreshold;
 
-    if (!own.isFainted && ownFaintRatio >= 0.65 && ownChi <= 3 && enemyChi >= 4) {
-      score -= 32 * ((ownFaintRatio - 0.50) / 0.50);
+    if (!own.isFainted && ownFaintRatio > 0.75 && enemyChi >= enemyMinS) {
+      const chiThreatScale = enemyChi >= enemyMinS + 2 ? 1.25 : 1.0;
+      score -= 36 * chiThreatScale * ((ownFaintRatio - 0.60) / 0.40);
     }
-    if (!enemy.isFainted && enemyFaintRatio >= 0.65 && enemyChi <= 3 && ownChi >= 4) {
-      score += 32 * ((enemyFaintRatio - 0.50) / 0.50);
+    if (!enemy.isFainted && enemyFaintRatio > 0.75 && ownChi >= ownMinS) {
+      const chiThreatScale = ownChi >= ownMinS + 2 ? 1.25 : 1.0;
+      score += 36 * chiThreatScale * ((enemyFaintRatio - 0.60) / 0.40);
     }
 
     return score;
@@ -965,7 +1289,7 @@
         const oppSampleKey = liveOppDir + "+K";
         const oppSampleAction = {
           key: state?.moves?.[enemySlot]?.[oppSampleKey] ? oppSampleKey : liveOppDir + "+J",
-          charge: Math.min(100, Math.max(liveOppCharge, 50))
+          charge: Math.min(100, Math.max(liveOppCharge, 62))
         };
         const priorityCmp =
           C.comparePriority(
@@ -1211,7 +1535,7 @@
    * Build an action probability distribution from:
    * - RiderBrains tactical priors
    * - Observed move, button, direction, and A+I vs S tendencies
-   * - Current legal actions (and real-time direction/speed constraints when provided)
+   * - Current legal actions with +1..12% randomized tactical charges
    */
   function policy(
     state,
@@ -1239,14 +1563,11 @@
     const otherCanUseS = canUseSMove(state, otherSlot);
     const otherCanUseAI = canUseMoveKey(state, otherSlot, "A+I");
 
-    const masterSettings = getLevelSettings("master");
-    const chargeChoices = [
-      ...masterSettings.charges
-    ];
+    const extraCharges = [];
 
     for (const item of observed.charges.slice(-3)) {
-      chargeChoices.push(item.charge);
-      chargeChoices.push(
+      extraCharges.push(item.charge);
+      extraCharges.push(
         Math.max(1, item.charge - 1)
       );
     }
@@ -1257,14 +1578,24 @@
       Number.isFinite(liveContext.oppCharge) &&
       liveContext.oppCharge >= 1
     ) {
-      chargeChoices.push(Math.floor(liveContext.oppCharge));
+      extraCharges.push(Math.floor(liveContext.oppCharge));
     }
 
-    const available = C.actions(
+    const policyRng = K.rng(
+      K.hash(
+        state?.round || 1,
+        (history && history.length) || 0,
+        slot,
+        rolloutSelf ? "self_policy" : "opp_policy"
+      )
+    );
+
+    const available = buildRandomizedActions(
       state,
       slot,
-      [...new Set(chargeChoices)],
-      dirConstraints
+      extraCharges,
+      dirConstraints,
+      policyRng
     );
 
     const groups = {};
@@ -1314,6 +1645,15 @@
       !rolloutSelf && liveContext
         ? Math.max(0, Number(liveContext.oppSwitchCount) || 0)
         : 0;
+
+    const faintThreshold = Math.max(
+      1,
+      Number(g.COMBAT_RULES?.FAINT_THRESHOLD || 100)
+    );
+    const slotFaintRatio = Number(state[slot]?.faintMeter || 0) / faintThreshold;
+    const otherChi = Number(state[otherSlot]?.chi || 0);
+    const otherMinS = minSChiCost(state, otherSlot);
+    const slotUnderHighFaintRisk = slotFaintRatio > 0.75 && otherChi >= otherMinS;
 
     const entries = [];
 
@@ -1462,10 +1802,19 @@
 
       const local = group.map(action => {
         const actCharge = action.charge ?? 0;
+        const offensive = isOffensiveMove(state, slot, action.key);
 
-        let weight = actCharge >= 90
-          ? 1.3
-          : 0.65;
+        let weight = 1.0;
+        if (offensive) {
+          if (slotUnderHighFaintRisk) {
+            // Under >75% faint + opponent Chi threat: prefer 60-76% fast priority band
+            weight = actCharge >= 60 && actCharge <= 76 ? 1.55 : actCharge > 82 ? 0.45 : 0.85;
+          } else {
+            weight = actCharge >= 68 && actCharge <= 92 ? 1.30 : actCharge >= 60 ? 1.0 : 0.40;
+          }
+        } else {
+          weight = actCharge >= 24 && actCharge <= 48 ? 1.35 : 0.70;
+        }
 
         for (const item of observed.charges) {
           weight +=
@@ -1475,10 +1824,10 @@
             );
         }
 
-        if (state[otherSlot].isFainted) {
-          weight *= actCharge === 100
-            ? 5
-            : 0.2;
+        if (state[otherSlot].isFainted || otherChi <= 1) {
+          weight *= actCharge >= 88
+            ? 3.5
+            : 0.35;
         }
 
         return { action, weight };
@@ -1669,7 +2018,7 @@
     }
 
     const opponentSlot = C.other(slot);
-    const chargeChoices = [...settings.charges];
+    const extraCharges = [];
 
     for (const turn of history) {
       const observed = turn[opponentSlot] || turn.actions?.[opponentSlot];
@@ -1682,7 +2031,7 @@
         observed.charge >= 1 &&
         observed.charge <= 100
       ) {
-        chargeChoices.push(
+        extraCharges.push(
           Math.max(1, observed.charge - 1)
         );
       }
@@ -1694,7 +2043,7 @@
       Number.isFinite(liveContext.selfCharge) &&
       liveContext.selfCharge >= 1
     ) {
-      chargeChoices.push(Math.floor(liveContext.selfCharge));
+      extraCharges.push(Math.floor(liveContext.selfCharge));
     }
 
     const selfConstraints = buildDirectionConstraints(
@@ -1711,11 +2060,23 @@
       false
     );
 
-    const allOwnActions = C.actions(
+    const chargeJitterRng = K.rng(
+      K.hash(
+        seed,
+        "charge_jitter_v2",
+        state?.round || 1,
+        history.length,
+        slot,
+        difficulty
+      )
+    );
+
+    const allOwnActions = buildRandomizedActions(
       state,
       slot,
-      [...new Set(chargeChoices)],
-      selfConstraints
+      extraCharges,
+      selfConstraints,
+      chargeJitterRng
     );
 
     let ownActions = allOwnActions;
@@ -1733,8 +2094,7 @@
         candidates.includes(action) ||
         candidates.some(candidate =>
           typeof candidate === "object" &&
-          candidate.key === action.key &&
-          candidate.charge === action.charge
+          candidate.key === action.key
         )
       );
 
@@ -1880,7 +2240,12 @@
         brainDiff
       );
 
-      let tacticalRootBonus = 0;
+      // Apply the 4 Tactical Charge Rules (Hit-chance balance + Faint > 75% & oppChi check)
+      let tacticalRootBonus = evaluateTacticalChargeBonus(
+        state,
+        slot,
+        action
+      );
       const ownMove = state.moves?.[slot]?.[action.key];
 
       if (isSmartDifficulty) {

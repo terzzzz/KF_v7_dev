@@ -8,7 +8,8 @@
  *     attack multipliers, and periodic LP regen/bleed payoffs (strictly non-stacking per buffId).
  *   - Per-match tactical parameter telemetry (16 metrics + 10 reserved backup slots).
  *   - Rider Matrix EV (30 * P_Matrix + 45 * V_Matrix) for live Rider search policy.
- *   - Core-owned execution-charge limits.
+ *   - Tactical execution-charge resolver with +1% to +12% randomizer, hit-chance floor,
+ *     and faint > 75% + opponent Chi threat check.
  *   - Deterministic seeded action selection.
  *   - Evaluation without guidance or training exploration.
  *   - Reverse-matchup opponent networks only.
@@ -189,6 +190,43 @@
     return move?.direction === "W" || key.startsWith("W+");
   }
 
+  function minSChiCost(state, slot) {
+    const moves = state?.moves?.[slot];
+    if (!moves) {
+      return 4;
+    }
+    let minCost = Infinity;
+    for (const [key, move] of Object.entries(moves)) {
+      if (!move) continue;
+      if (move.direction === "S" || key.startsWith("S+")) {
+        const cost = Number(move.chiCost);
+        if (Number.isFinite(cost) && cost > 0 && cost < minCost) {
+          minCost = cost;
+        }
+      }
+    }
+    return Number.isFinite(minCost) ? minCost : 4;
+  }
+
+  function randChargePlus1To12(rng = Math.random) {
+    const r = typeof rng === "function" ? rng() : Math.random();
+    return 1 + Math.floor(K.clamp(r, 0, 0.999999) * 12);
+  }
+
+  function clampChargeWithJitter(baseCharge, maxCharge, minFloor = 20, rng = Math.random) {
+    if (!Number.isFinite(maxCharge) || maxCharge < 1) {
+      return 0;
+    }
+    const safeFloor = Math.max(1, Math.min(maxCharge, Math.round(minFloor)));
+    let base = Math.round(Number(baseCharge) || safeFloor);
+    if (base >= 95) {
+      base = Math.min(maxCharge, 88);
+    }
+    const floored = K.clamp(base, safeFloor, maxCharge);
+    const jittered = floored + randChargePlus1To12(rng);
+    return K.clamp(jittered, 1, maxCharge);
+  }
+
   function findActiveBuff(player, buffId) {
     if (!player || !buffId || !Array.isArray(player.activeBuffs)) {
       return null;
@@ -366,6 +404,8 @@
     const maxChi = Math.max(1, Number(own.maxChi || enemy.maxChi || 16));
     const ownChi = Number(own.chi || 0);
     const enemyChi = Number(enemy.chi || 0);
+    const ownMinS = minSChiCost(state, slot);
+    const enemyMinS = minSChiCost(state, enemySlot);
 
     const ownHasS = canSlotUseSMove(state, slot);
     const enemyHasS = canSlotUseSMove(state, enemySlot);
@@ -396,11 +436,11 @@
     const ownFaintRatio = Number(own.faintMeter || 0) / faintThreshold;
     const enemyFaintRatio = Number(enemy.faintMeter || 0) / faintThreshold;
 
-    if (!own.isFainted && ownFaintRatio >= 0.65 && ownChi <= 3 && enemyChi >= 4) {
-      potential -= 0.35 * ((ownFaintRatio - 0.50) / 0.50);
+    if (!own.isFainted && ownFaintRatio > 0.75 && enemyChi >= enemyMinS) {
+      potential -= 0.38 * ((ownFaintRatio - 0.60) / 0.40);
     }
-    if (!enemy.isFainted && enemyFaintRatio >= 0.65 && enemyChi <= 3 && ownChi >= 4) {
-      potential += 0.35 * ((enemyFaintRatio - 0.50) / 0.50);
+    if (!enemy.isFainted && enemyFaintRatio > 0.75 && ownChi >= ownMinS) {
+      potential += 0.38 * ((enemyFaintRatio - 0.60) / 0.40);
     }
 
     return K.clamp(potential, -1, 1);
@@ -849,10 +889,17 @@
     }
   }
 
-  function resolveExecutionCharge(key, state, slot) {
+  /*
+   * Resolves execution charge using the 4 tactical rules + (+1% to +12%) randomizer:
+   *   1. Hit-chance balanced fast attacks (60%–64% base + 1..12% -> 61%–76%).
+   *   2. Faint > 75% AND Opponent Chi threat check (high risk only when opp.chi >= minSChiCost).
+   *   3. Contested Neutral Poke (D: 68% + 1..12%, S: 78% + 1..12%).
+   *   4. Safe Heavy Punish (88% + 1..12% -> 89%–100% when opponent is fainted or low Chi).
+   */
+  function resolveExecutionCharge(key, state, slot, rng = Math.random) {
     assertSlot(slot);
 
-    if (key === "DO_NOTHING") {
+    if (!key || key === "DO_NOTHING") {
       return 0;
     }
 
@@ -862,22 +909,87 @@
       throw new Error("Cannot charge an unknown move: " + key);
     }
 
-    const charge = C.maxCharge(
+    const maxCharge = C.maxCharge(
       state[slot],
       move.direction
     );
 
     if (
-      !Number.isFinite(charge) ||
-      charge < 1 ||
-      charge > 100
+      !Number.isFinite(maxCharge) ||
+      maxCharge < 1 ||
+      maxCharge > 100
     ) {
       throw new Error(
         "No positive execution charge is reachable for " + key
       );
     }
 
-    return charge;
+    const me = state[slot];
+    const oppSlot = C.other(slot);
+    const opp = state[oppSlot];
+
+    const dir = move.direction;
+    const isAttack = Boolean(move.offensive) || dir === "D" || dir === "S";
+
+    const faintThreshold = Math.max(
+      1,
+      Number(g.COMBAT_RULES?.FAINT_THRESHOLD || 100)
+    );
+    const meFaintRatio = Number(me?.faintMeter || 0) / faintThreshold;
+    const oppFaintRatio = Number(opp?.faintMeter || 0) / faintThreshold;
+
+    const oppChi = Number(opp?.chi || 0);
+    const oppMinS = minSChiCost(state, oppSlot);
+    const oppMaxLp = Math.max(1, Number(opp?.maxLp || 1600));
+    const oppLpRatio = Number(opp?.lp || 0) / oppMaxLp;
+
+    // Rule 2: Faint > 75% AND Opponent Chi check
+    const highFaintRisk =
+      !me?.isFainted &&
+      !opp?.isFainted &&
+      meFaintRatio > 0.75 &&
+      oppChi >= oppMinS;
+
+    const moderateFaintRisk =
+      !me?.isFainted &&
+      !opp?.isFainted &&
+      meFaintRatio > 0.75 &&
+      oppChi >= 2 &&
+      oppChi < oppMinS;
+
+    // Rule 4: Safe Heavy Punish when opponent is fainted or starved of Chi
+    const lowOpponentThreat =
+      Boolean(opp?.isFainted) ||
+      oppChi <= 1 ||
+      (oppFaintRatio > 0.75 && oppChi < 2);
+
+    // 1. Non-offensive Utility / Guard (W / A): no offensive accuracy penalty
+    if (!isAttack) {
+      const utilityBase = highFaintRisk ? 24 : 34; // -> 25..36% or 35..46%
+      return clampChargeWithJitter(utilityBase, maxCharge, 20, rng);
+    }
+
+    // 2. Rule 4 — Safe Heavy Punish (88% + 1..12% -> 89%..100%)
+    if (lowOpponentThreat && !highFaintRisk) {
+      return clampChargeWithJitter(88, maxCharge, 60, rng);
+    }
+
+    // 3. Rule 1 & Rule 2 — High Faint Risk (faint > 75% & oppChi >= oppMinS) OR Kill-Confirm
+    // Keep base at 60-64% so hit chance stays reliable while still winning priority
+    if (highFaintRisk || oppLpRatio <= 0.22) {
+      const fastAttackBase = dir === "D" ? 60 : 64; // -> 61..72% (D) or 65..76% (S)
+      return clampChargeWithJitter(fastAttackBase, maxCharge, 58, rng);
+    }
+
+    // 4. Moderate Faint Risk (faint > 75%, opponent only has 2-3 Chi)
+    if (moderateFaintRisk) {
+      const modBase = dir === "D" ? 64 : 70; // -> 65..76% (D) or 71..82% (S)
+      return clampChargeWithJitter(modBase, maxCharge, 58, rng);
+    }
+
+    // 5. Rule 3 — Contested Neutral Poke (D: 69..80%, S: 79..90%)
+    const neutralBase = dir === "D" ? 68 : 78;
+    return clampChargeWithJitter(neutralBase, maxCharge, 58, rng);
   }
 
   function normalizeLegalAction(state, slot, action, source) {
@@ -902,7 +1014,7 @@
     return normalized;
   }
 
-  function actionForIndex(env, slot, index) {
+  function actionForIndex(env, slot, index, rng = Math.random) {
     if (!Number.isInteger(index)) {
       throw new Error("Neural action index must be an integer.");
     }
@@ -918,7 +1030,7 @@
       slot,
       {
         key,
-        charge: resolveExecutionCharge(key, env.state, slot)
+        charge: resolveExecutionCharge(key, env.state, slot, rng)
       },
       "Controller"
     );
@@ -1232,7 +1344,7 @@
             );
           }
 
-          action = actionForIndex(env, slot, index);
+          action = actionForIndex(env, slot, index, rng);
         }
 
         const proposedAction = normalizeLegalAction(
@@ -1256,14 +1368,53 @@
           );
         }
 
-        const preserveRiderSearchCharge =
-          mode === "rider" &&
-          options.isTraining === false &&
-          !options.guide;
+        const chosenKey = E.ACTION_MAP[a];
+        const canUseProposedCharge =
+          proposedAction &&
+          proposedAction.key === chosenKey &&
+          chosenKey !== "DO_NOTHING" &&
+          Number.isFinite(proposedAction.charge) &&
+          proposedAction.charge > 0;
 
-        action = preserveRiderSearchCharge
-          ? proposedAction
-          : actionForIndex(env, slot, a);
+        if (canUseProposedCharge) {
+          const move = env.state.moves?.[slot]?.[chosenKey];
+          const maxCharge = move ? C.maxCharge(env.state[slot], move.direction) : 100;
+          const isAttack =
+            Boolean(move?.offensive) ||
+            move?.direction === "D" ||
+            move?.direction === "S";
+          const minFloor = isAttack ? 58 : 20;
+
+          // If a custom teacher returned a static bucket (1, 25, 50, 75, 90, 100),
+          // lift to tactical floor and apply +1..12% jitter; otherwise keep ForeseeEngine's jittered charge
+          const rawC = Math.round(proposedAction.charge);
+          const isStaticBucket =
+            rawC === 1 ||
+            rawC === 25 ||
+            rawC === 50 ||
+            rawC === 75 ||
+            rawC === 90 ||
+            rawC === 100 ||
+            rawC < minFloor;
+
+          const finalCharge = isStaticBucket
+            ? clampChargeWithJitter(
+                rawC < minFloor ? (isAttack ? 60 : 24) : rawC,
+                maxCharge,
+                minFloor,
+                rng
+              )
+            : K.clamp(rawC, 1, maxCharge);
+
+          action = normalizeLegalAction(
+            env.state,
+            slot,
+            { key: chosenKey, charge: finalCharge },
+            "Learner charge resolver"
+          );
+        } else {
+          action = actionForIndex(env, slot, a, rng);
+        }
 
         const selectedQ = q ? q[a] : 0;
 
@@ -1613,9 +1764,8 @@
           "Opponent mask"
         );
 
-        const index = E.scripted(
-          K.rng(K.hash(roundSeed, "scripted"))
-        )(
+        const scriptedRng = K.rng(K.hash(roundSeed, "scripted"));
+        const index = E.scripted(scriptedRng)(
           E.observe(env, enemySlot),
           mask
         );
@@ -1626,7 +1776,7 @@
           );
         }
 
-        opposingAction = actionForIndex(env, enemySlot, index);
+        opposingAction = actionForIndex(env, enemySlot, index, scriptedRng);
       } else if (activeOpponentMode === "network") {
         opposingAction = reactor(
           spec,

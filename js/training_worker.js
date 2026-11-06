@@ -22,6 +22,12 @@ const MIXED_CPU_SEQUENCE = [
 const MIXED_ROUND_SPAN = 30;
 const MAX_WINS_PER_DIFF_OPP = 4;
 
+// Turbo scheduling constants: keep worker on-CPU ~99.5% of the time
+const YIELD_INTERVAL_MS = 250;
+const PROGRESS_INTERVAL_MS = 1000;
+const CHECKPOINT_GAME_INTERVAL = 250;
+const CHECKPOINT_MIN_INTERVAL_MS = 5000;
+
 importScripts(...[
   "common.js",
   "combat_core.js",
@@ -183,7 +189,6 @@ function validateJob(job) {
   } else if (
     !Number.isFinite(job.guideHoldPct) ||
     !Number.isFinite(job.guideZeroPct) ||
-    !Number.isFinite(job.guideHoldPct) ||
     job.guideHoldPct < 0 ||
     job.guideZeroPct > 100 ||
     job.guideHoldPct > job.guideZeroPct
@@ -406,7 +411,9 @@ async function run(job) {
       : null;
 
     const weightsID = old ? SoulAgent.fingerprint(old) : null;
-    const loadedWeightsID = String(KF.hash(JSON.stringify(net.toJSON())));
+    const loadedWeightsID = !training
+      ? String(KF.hash(JSON.stringify(net.toJSON())))
+      : weightsID;
 
     if (!training && String(weightsID) !== loadedWeightsID) {
       throw new Error(
@@ -443,6 +450,7 @@ async function run(job) {
   const started = performance.now();
   let lastProgress = started;
   let lastYield = started;
+  let lastCheckpointSent = started;
 
   let games = 0;
   let wins = 0;
@@ -675,7 +683,7 @@ async function run(job) {
       matchupReports: buildMatchupEvaluationReports(seconds),
 
       breakdown,
-      firstWinningGames: JSON.parse(JSON.stringify(firstWinningGames)),
+      firstWinningGames,
 
       wasdRatio: {
         counts: { ...wasdCounts }
@@ -683,7 +691,7 @@ async function run(job) {
 
       moveBreakdown: {
         jkilCounts: { ...jkilCounts },
-        moveMatrix: JSON.parse(JSON.stringify(moveMatrix))
+        moveMatrix
       }
     };
   }
@@ -712,6 +720,10 @@ async function run(job) {
         ]
       : job.mode;
 
+    const bucketKey = `${ctx.key}|${matchOpponentMode}`;
+    const needDemoMoves =
+      (winCountsByDiffOpp[bucketKey] || 0) < MAX_WINS_PER_DIFF_OPP;
+
     const ctxPair = Math.floor(ctx.games / 2);
     const matchSeed = KF.hash(
       seed,
@@ -726,9 +738,12 @@ async function run(job) {
     epsilon = 0;
     imitation = 0;
 
+    let matchGuideProbability = 0;
+
     if (training) {
       if (job.warmStart) {
         guideProbability = 1;
+        matchGuideProbability = 1;
         imitation = 1;
 
         epsilon = Math.max(
@@ -751,7 +766,7 @@ async function run(job) {
         }
 
         const rollingWinRate = ctx.recent.length
-          ? ctx.recent.reduce((sum, value) => sum + value) /
+          ? ctx.recent.reduce((sum, value) => sum + value, 0) /
             ctx.recent.length
           : 0.2;
 
@@ -775,7 +790,14 @@ async function run(job) {
           )
         );
 
-        const masterImitation = guideProbability > 0
+        // Deterministic per-match roll so low guideProbability skips heavy teacher lookahead
+        // on unguided matches instead of running teacher evaluation on 100% of matches
+        const guideRoll = (KF.hash(matchSeed, "guide_gate", i) >>> 0) / 4294967296;
+        const guidedMatch = guideProbability >= 1 || (guideProbability > 0 && guideRoll < guideProbability);
+
+        matchGuideProbability = guidedMatch ? 1 : 0;
+
+        const masterImitation = guidedMatch
           ? Math.max(0.01, 0.05 * guideProbability)
           : 0;
 
@@ -787,7 +809,7 @@ async function run(job) {
     }
 
     const matchTransitions = [];
-    const matchRoundMoves = [];
+    const matchRoundMoves = needDemoMoves ? [] : null;
 
     const generator = SoulSim.episode({
       data,
@@ -803,7 +825,7 @@ async function run(job) {
 
       seed: matchSeed,
       epsilon,
-      guideProbability,
+      guideProbability: matchGuideProbability,
       teacher: job.teacher,
       rewardMode: job.rewardMode,
 
@@ -852,19 +874,21 @@ async function run(job) {
         ctx.wasdCounts[stance]++;
         ctx.jkilCounts[button]++;
 
-        matchRoundMoves.push({
-          round: matchRoundMoves.length + 1,
-          learnerMove: key,
-          learnerCharge,
-          learnerLp: event.transition.learnerLp,
-          learnerChi: event.transition.learnerChi,
-          learnerFaint: event.transition.learnerFaint,
-          oppMove: event.transition.opponentActionKey,
-          oppCharge: event.transition.opponentCharge,
-          oppLp: event.transition.oppLp,
-          oppChi: event.transition.oppChi,
-          oppFaint: event.transition.oppFaint
-        });
+        if (needDemoMoves) {
+          matchRoundMoves.push({
+            round: matchRoundMoves.length + 1,
+            learnerMove: key,
+            learnerCharge,
+            learnerLp: event.transition.learnerLp,
+            learnerChi: event.transition.learnerChi,
+            learnerFaint: event.transition.learnerFaint,
+            oppMove: event.transition.opponentActionKey,
+            oppCharge: event.transition.opponentCharge,
+            oppLp: event.transition.oppLp,
+            oppChi: event.transition.oppChi,
+            oppFaint: event.transition.oppFaint
+          });
+        }
       } else if (event.type === "round") {
         if (
           Number.isFinite(event.qSumDelta) &&
@@ -877,18 +901,6 @@ async function run(job) {
         }
       } else if (event.type === "end") {
         result = event.result;
-      }
-
-      const now = performance.now();
-
-      if (now - lastProgress >= 500) {
-        send("progress", { report: report(ctx) });
-        lastProgress = now;
-      }
-
-      if (now - lastYield >= 50) {
-        await pause();
-        lastYield = performance.now();
       }
     }
 
@@ -915,10 +927,9 @@ async function run(job) {
       ctx.wins++;
       outcome = "wins";
 
-      const bucketKey = `${ctx.key}|${matchOpponentMode}`;
       const currentBucketWins = winCountsByDiffOpp[bucketKey] || 0;
 
-      if (currentBucketWins < MAX_WINS_PER_DIFF_OPP) {
+      if (currentBucketWins < MAX_WINS_PER_DIFF_OPP && matchRoundMoves) {
         winCountsByDiffOpp[bucketKey] = currentBucketWins + 1;
 
         firstWinningGames.push({
@@ -933,7 +944,7 @@ async function run(job) {
           bucketWinIndex: currentBucketWins + 1,
           bucketMaxWins: MAX_WINS_PER_DIFF_OPP,
           totalRounds: result.rounds,
-          moves: [...matchRoundMoves]
+          moves: matchRoundMoves
         });
       }
 
@@ -989,14 +1000,28 @@ async function run(job) {
     row.games++;
     row[outcome]++;
 
-    if (training && (ctx.games % 10 === 0 || games % 25 === 0)) {
+    const now = performance.now();
+
+    if (
+      training &&
+      ctx.games % CHECKPOINT_GAME_INTERVAL === 0 &&
+      now - lastCheckpointSent >= CHECKPOINT_MIN_INTERVAL_MS
+    ) {
       send("checkpoint", {
         checkpoint: buildCheckpointForContext(ctx)
       });
+      lastCheckpointSent = performance.now();
     }
 
-    await pause();
-    lastYield = performance.now();
+    if (now - lastProgress >= PROGRESS_INTERVAL_MS) {
+      send("progress", { report: report(ctx) });
+      lastProgress = performance.now();
+    }
+
+    if (now - lastYield >= YIELD_INTERVAL_MS) {
+      await pause();
+      lastYield = performance.now();
+    }
   }
 
   if (training) {

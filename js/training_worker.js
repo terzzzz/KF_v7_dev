@@ -20,6 +20,7 @@ const MIXED_CPU_SEQUENCE = [
   "master"
 ];
 const MIXED_ROUND_SPAN = 30;
+const MAX_WINS_PER_DIFF_OPP = 4;
 
 importScripts(...[
   "common.js",
@@ -182,6 +183,7 @@ function validateJob(job) {
   } else if (
     !Number.isFinite(job.guideHoldPct) ||
     !Number.isFinite(job.guideZeroPct) ||
+    !Number.isFinite(job.guideHoldPct) ||
     job.guideHoldPct < 0 ||
     job.guideZeroPct > 100 ||
     job.guideHoldPct > job.guideZeroPct
@@ -457,6 +459,7 @@ async function run(job) {
 
   const breakdown = {};
   const firstWinningGames = [];
+  const winCountsByDiffOpp = {};
 
   const wasdCounts = {
     W: 0,
@@ -748,7 +751,7 @@ async function run(job) {
         }
 
         const rollingWinRate = ctx.recent.length
-          ? ctx.recent.reduce((sum, value) => sum + value, 0) /
+          ? ctx.recent.reduce((sum, value) => sum + value) /
             ctx.recent.length
           : 0.2;
 
@@ -912,10 +915,23 @@ async function run(job) {
       ctx.wins++;
       outcome = "wins";
 
-      if (firstWinningGames.length < 5) {
+      const bucketKey = `${ctx.key}|${matchOpponentMode}`;
+      const currentBucketWins = winCountsByDiffOpp[bucketKey] || 0;
+
+      if (currentBucketWins < MAX_WINS_PER_DIFF_OPP) {
+        winCountsByDiffOpp[bucketKey] = currentBucketWins + 1;
+
         firstWinningGames.push({
           gameNumber: games,
           matchupKey: ctx.key,
+          opponentId: oppRider.id,
+          opponentName: oppRider.name || oppRider.id,
+          difficulty: matchOpponentMode,
+          difficultyLabel:
+            modeDisplayNames[matchOpponentMode] || matchOpponentMode,
+          learnerSlot,
+          bucketWinIndex: currentBucketWins + 1,
+          bucketMaxWins: MAX_WINS_PER_DIFF_OPP,
           totalRounds: result.rounds,
           moves: [...matchRoundMoves]
         });

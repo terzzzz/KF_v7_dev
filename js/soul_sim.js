@@ -5,7 +5,7 @@
  *   - Environment-owned observations and legal-action masks.
  *   - One replay transition per resolved round.
  *   - Multi-turn proportional credit assignment for W buffs, stackable evasion,
- *     attack multipliers, and periodic LP regen/bleed payoffs.
+ *     attack multipliers, and periodic LP regen/bleed payoffs (strictly non-stacking per buffId).
  *   - Per-match tactical parameter telemetry (16 metrics + 10 reserved backup slots).
  *   - Rider Matrix EV (30 * P_Matrix + 45 * V_Matrix) for live Rider search policy.
  *   - Core-owned execution-charge limits.
@@ -187,6 +187,68 @@
     }
     const move = state?.moves?.[slot]?.[key];
     return move?.direction === "W" || key.startsWith("W+");
+  }
+
+  function findActiveBuff(player, buffId) {
+    if (!player || !buffId || !Array.isArray(player.activeBuffs)) {
+      return null;
+    }
+    return (
+      player.activeBuffs.find(
+        b => b && b.id === buffId && Number(b.roundsLeft) > 0
+      ) || null
+    );
+  }
+
+  /**
+   * Returns the existing active buff (or airborne pseudo-buff) if `key` is a
+   * non-offensive utility move whose buff is ALREADY active on `state[slot]`,
+   * with no instant heal/chi/faint utility and no unapplied enemy debuff.
+   */
+  function getRedundantActiveBuff(state, slot, key) {
+    if (!state || !slot || !key || key === "DO_NOTHING") {
+      return null;
+    }
+
+    const move = state.moves?.[slot]?.[key];
+    const player = state[slot];
+    if (!move || !player || move.offensive || move.guardKind) {
+      return null;
+    }
+
+    if (
+      Number(move.lpRecovery || 0) > 0 ||
+      Number(move.faintRecovery || 0) > 0 ||
+      Number(move.chiGain || 0) > 0
+    ) {
+      return null;
+    }
+
+    const enemySlot = C.other(slot);
+    const enemy = state[enemySlot];
+    const debuffSpec = move.debuff || move.targetDebuff;
+    if (debuffSpec?.id && enemy) {
+      const existingDebuff = findActiveBuff(enemy, debuffSpec.id);
+      if (!existingDebuff) {
+        return null;
+      }
+    }
+
+    if (move.buff?.id) {
+      const existing = findActiveBuff(player, move.buff.id);
+      if (existing && Number(existing.roundsLeft) >= 1) {
+        return existing;
+      }
+    }
+
+    if (move.grantsAirborne && Number(player.airborneTicks) >= 1) {
+      return {
+        id: "airborne",
+        roundsLeft: Number(player.airborneTicks)
+      };
+    }
+
+    return null;
   }
 
   function canSlotUseSMove(state, slot) {
@@ -487,6 +549,7 @@
     const ownAfter = after[learnerSlot];
     const enemyAfter = after[enemySlot];
     const ownBefore = before[learnerSlot];
+    const enemyBefore = before[enemySlot];
 
     const ownPeriodic = estimatePeriodicLpDelta(ownBefore, ownAfter);
     const tookDirectDamage = (ownBefore.lp + ownPeriodic) - ownAfter.lp > 1;
@@ -494,6 +557,7 @@
       return null;
     }
 
+    const debuffSpec = move.debuff || move.targetDebuff;
     const eff = move.buff?.effects || {};
     const evasionBoost = Number(eff.evasion || 0);
     const attackMult = Number(eff.attack || 1);
@@ -502,8 +566,8 @@
     const armorMult = eff.armor !== undefined ? Number(eff.armor) : 1;
     const lpRegen = Number(move.buff?.lpRegen ?? eff.lpRegen ?? 0);
     const lpBleed = Number(
-      move.targetDebuff?.lpBleed ??
-      move.targetDebuff?.effects?.lpBleed ??
+      debuffSpec?.lpBleed ??
+      debuffSpec?.effects?.lpBleed ??
       0
     );
     const grantsAirborne = Boolean(
@@ -529,13 +593,32 @@
       1,
       Number(
         move.buff?.duration ??
-        move.targetDebuff?.duration ??
+        debuffSpec?.duration ??
         (grantsAirborne ? 1 : 0)
       )
     );
 
     const buffId = move.buff?.id || resolvedActionKey;
-    const debuffId = move.targetDebuff?.id || resolvedActionKey;
+    const debuffId = debuffSpec?.id || resolvedActionKey;
+
+    const prevOwnBuff = move.buff?.id
+      ? findActiveBuff(ownBefore, buffId)
+      : null;
+    const prevAirborne =
+      Boolean(move.grantsAirborne) && Number(ownBefore.airborneTicks) >= 1;
+    const prevEnemyDebuff = debuffSpec?.id
+      ? findActiveBuff(enemyBefore, debuffId)
+      : null;
+
+    // CombatCore overwrites same-ID buffs without stacking potency.
+    // Do not reward redundant non-offensive recasts of an already-active buff.
+    if (
+      !move.offensive &&
+      (prevOwnBuff || prevAirborne) &&
+      (lpBleed <= 0 || Boolean(prevEnemyDebuff))
+    ) {
+      return null;
+    }
 
     const ownBuffActive =
       grantsAirborne ||
@@ -601,7 +684,9 @@
 
     const evadedScore = detectEvadedAttack(before, after, learnerSlot, actions);
 
-    const activeEntries = [];
+    // Deduplicate by buffId (keeping only the latest cast entry) so same-ID buffs
+    // can never stack in credit assignment, matching CombatCore.applyBuff().
+    const byBuffKey = new Map();
     for (const entry of pendingWindow) {
       if (!entry.buffMeta || entry.buffMeta.roundsRemaining <= 0) {
         continue;
@@ -616,10 +701,12 @@
         (enemyBefore.activeBuffs || []).some(b => b.id === meta.debuffId && b.roundsLeft > 0);
 
       if (stillHasOwnBuff || stillHasEnemyDebuff) {
-        activeEntries.push(entry);
+        const dedupKey = `${meta.buffId || ""}|${meta.debuffId || ""}`;
+        byBuffKey.set(dedupKey, entry);
       }
     }
 
+    const activeEntries = Array.from(byBuffKey.values());
     if (activeEntries.length === 0) {
       return;
     }
@@ -896,6 +983,32 @@
 
       const { s, m } = readState(env, learnerSlot, spec);
       const q = predictValues(net, s, spec);
+
+      let maxQ = -Infinity;
+      let minQ = Infinity;
+      for (let i = 0; i < q.length; i++) {
+        if (!m[i]) continue;
+        if (q[i] > maxQ) maxQ = q[i];
+        if (q[i] < minQ) minQ = q[i];
+      }
+
+      const spread = Number.isFinite(maxQ - minQ) && (maxQ - minQ) > 0
+        ? Math.max(0.35, maxQ - minQ)
+        : 0.50;
+
+      // Align live Matrix evaluation with CombatCore's non-stacking buff rule:
+      // suppress redundant recasts of already-active non-offensive buffs.
+      for (let i = 0; i < q.length; i++) {
+        if (!m[i]) continue;
+        const key = E.ACTION_MAP[i];
+        const redundantBuff = getRedundantActiveBuff(state, learnerSlot, key);
+        if (redundantBuff) {
+          const rounds = Number(redundantBuff.roundsLeft || 1);
+          const penaltyScale = rounds >= 2 ? 1.15 : 0.75;
+          q[i] -= spread * penaltyScale;
+        }
+      }
+
       return { q, m };
     }
 
@@ -1203,6 +1316,7 @@
 
       const ownKey = String(actions?.[slot]?.key || "");
       const enemyKey = String(actions?.[enemySlot]?.key || "");
+      const ownMove = before.moves?.[slot]?.[ownKey];
 
       const ownUsedAGuard = isAGuardKey(before, slot, ownKey);
       const enemyUsedAGuard = isAGuardKey(before, enemySlot, enemyKey);
@@ -1225,10 +1339,37 @@
         }
       }
 
-      const statusDelta =
+      const rawStatusDelta =
         statusPotential(after, slot) - statusPotential(before, slot);
 
-      reward += 0.30 * statusDelta;
+      const redundantBuff = getRedundantActiveBuff(before, slot, ownKey);
+      const activeMods = C.modifiers(before[slot]);
+      const isBuffedStanceAttack =
+        Boolean(ownMove?.offensive) &&
+        (
+          activeMods.attack > 1.01 ||
+          (ownMove.direction === "D" && activeMods.dAttack > 1.01) ||
+          (ownMove.direction === "S" && activeMods.sAttack > 1.01)
+        );
+
+      let effectiveStatusDelta = rawStatusDelta;
+
+      if (redundantBuff) {
+        // Never reward refreshing an already-active non-stacking buff
+        effectiveStatusDelta = Math.min(0, rawStatusDelta);
+        reward -= Number(redundantBuff.roundsLeft) >= 2 ? 0.22 : 0.14;
+      } else if (isBuffedStanceAttack) {
+        // Do not penalize natural 1-turn buff tick-down when cashing out with an attack
+        const enemyStatusDelta =
+          fighterStatusValue(before[enemySlot]) - fighterStatusValue(after[enemySlot]);
+        effectiveStatusDelta = Math.max(rawStatusDelta, enemyStatusDelta);
+
+        if (enemyLpChange > 0) {
+          reward += 0.12 * K.clamp(enemyLpChange / 0.15, 0.35, 1.0);
+        }
+      }
+
+      reward += 0.30 * effectiveStatusDelta;
 
       const ownEvadedScore = detectEvadedAttack(before, after, slot, actions);
       const enemyEvadedScore = detectEvadedAttack(before, after, enemySlot, actions);
@@ -1716,6 +1857,21 @@
               resolvedAction.key
             )
           : null;
+
+      // Supersede any older pendingWindow entry with the same buffId,
+      // matching CombatCore.applyBuff() overwriting same-ID statuses.
+      const resolvedMoveObj = before.moves?.[learnerSlot]?.[resolvedAction.key];
+      const overwrittenBuffId =
+        buffMeta?.buffId ||
+        (!resolvedMoveObj?.offensive ? resolvedMoveObj?.buff?.id : null);
+
+      if (overwrittenBuffId) {
+        for (const item of pendingWindow) {
+          if (item.buffMeta && item.buffMeta.buffId === overwrittenBuffId) {
+            item.buffMeta.roundsRemaining = 0;
+          }
+        }
+      }
 
       let category = "Neu";
 

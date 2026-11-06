@@ -578,40 +578,75 @@
       if (Array.isArray(report.firstWinningGames) && report.firstWinningGames.length > 0) {
         lines.push(
           "",
-          "==================================================",
-          "FIRST WINNING GAMES — EXACT MOVE SEQUENCES",
-          "=================================================="
+          "======================================================================",
+          "FIRST 4 WINNING GAMES PER DIFFICULTY & PER OPPONENT — MOVE SEQUENCES",
+          "======================================================================"
         );
 
-        report.firstWinningGames.forEach((game, index) => {
-          const gameNum = game.gameNumber || (index + 1);
-          const totalRounds = game.totalRounds || game.moves?.length || 0;
-          const mKey = game.matchupKey ? ` [${game.matchupKey}]` : "";
+        // Group wins by (Matchup / Opponent) + Difficulty while preserving discovery order
+        const groupedWins = new Map();
+
+        for (const game of report.firstWinningGames) {
+          const mKey = game.matchupKey || "UNKNOWN_MATCHUP";
+          const diffKey = game.difficulty || "default";
+          const groupKey = `${mKey}|${diffKey}`;
+
+          if (!groupedWins.has(groupKey)) {
+            groupedWins.set(groupKey, {
+              matchupKey: mKey,
+              opponentId: game.opponentId || "",
+              opponentName: game.opponentName || game.opponentId || "",
+              difficulty: diffKey,
+              difficultyLabel: game.difficultyLabel || diffKey,
+              games: []
+            });
+          }
+
+          groupedWins.get(groupKey).games.push(game);
+        }
+
+        for (const group of groupedWins.values()) {
+          const oppHeader = group.opponentName
+            ? `${group.matchupKey} (vs ${group.opponentName})`
+            : group.matchupKey;
 
           lines.push(
             "",
-            `--- WINNING GAME #${index + 1}${mKey} (Match #${gameNum}, ${totalRounds} Rounds) ---`
+            `=== [ ${oppHeader} | Difficulty: ${group.difficultyLabel} ] (${group.games.length} / 4 Wins) ===`
           );
 
-          if (Array.isArray(game.moves) && game.moves.length > 0) {
-            game.moves.forEach(m => {
-              const rNum = String(m.round || "").padStart(2);
-              const lAction = String(m.learnerMove || "DO_NOTHING").padEnd(10);
-              const lCharge = String(m.learnerCharge ?? 0).padStart(3) + "%";
-              const lLp = m.learnerLp !== undefined 
-                ? ` (LP:${String(m.learnerLp).padStart(4)} Chi:${String(m.learnerChi).padStart(2)} Fnt:${String(m.learnerFaint).padStart(2)})`
-                : "";
+          group.games.forEach((game, idx) => {
+            const winRank = game.bucketWinIndex || (idx + 1);
+            const maxRank = game.bucketMaxWins || 4;
+            const gameNum = game.gameNumber || (idx + 1);
+            const totalRounds = game.totalRounds || game.moves?.length || 0;
+            const slotTag = game.learnerSlot ? `, Slot: ${game.learnerSlot}` : "";
 
-              const oAction = String(m.oppMove || "DO_NOTHING").padEnd(10);
-              const oCharge = String(m.oppCharge ?? 0).padStart(3) + "%";
-              const oLp = m.oppLp !== undefined 
-                ? ` (LP:${String(m.oppLp).padStart(4)} Chi:${String(m.oppChi).padStart(2)} Fnt:${String(m.oppFaint).padStart(2)})`
-                : "";
+            lines.push(
+              "",
+              `--- WIN #${winRank}/${maxRank} [${group.matchupKey} | ${group.difficultyLabel}] (Match #${gameNum}${slotTag}, ${totalRounds} Rounds) ---`
+            );
 
-              lines.push(`  R${rNum}: Learner [ ${lAction} @ ${lCharge} ]${lLp} vs Opponent [ ${oAction} @ ${oCharge} ]${oLp}`);
-            });
-          }
-        });
+            if (Array.isArray(game.moves) && game.moves.length > 0) {
+              game.moves.forEach(m => {
+                const rNum = String(m.round || "").padStart(2);
+                const lAction = String(m.learnerMove || "DO_NOTHING").padEnd(10);
+                const lCharge = String(m.learnerCharge ?? 0).padStart(3) + "%";
+                const lLp = m.learnerLp !== undefined
+                  ? ` (LP:${String(m.learnerLp).padStart(4)} Chi:${String(m.learnerChi).padStart(2)} Fnt:${String(m.learnerFaint).padStart(2)})`
+                  : "";
+
+                const oAction = String(m.oppMove || "DO_NOTHING").padEnd(10);
+                const oCharge = String(m.oppCharge ?? 0).padStart(3) + "%";
+                const oLp = m.oppLp !== undefined
+                  ? ` (LP:${String(m.oppLp).padStart(4)} Chi:${String(m.oppChi).padStart(2)} Fnt:${String(m.oppFaint).padStart(2)})`
+                  : "";
+
+                lines.push(`  R${rNum}: Learner [ ${lAction} @ ${lCharge} ]${lLp} vs Opponent [ ${oAction} @ ${oCharge} ]${oLp}`);
+              });
+            }
+          });
+        }
       }
 
       if (report.cancelled) {

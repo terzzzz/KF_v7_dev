@@ -405,6 +405,7 @@
     }
   };
 
+  
   /*
    * Complete Tabulated Movelist Database for all 6 Riders (EN & JA)
    */
@@ -2117,176 +2118,101 @@
   installRiderBadgeStyles();
   disablePortraitOrientationOverlay();
 
+/** Builds a single category card table inside the Movelist modal. */
+  function buildMovelistCategoryHtml(title, sub, catClass, moves, isAttack) {
+    const dict = t();
+    const col4Header = isAttack ? dict.colDmg : dict.colEffect;
+    const rowsHtml = (moves || []).map(m => {
+      const col4Val = isAttack
+        ? `<td class="kf-dmg-val">${m.dmg ?? '-'}</td>`
+        : `<td class="kf-effect-val">${m.effect || '-'}</td>`;
+      return `
+        <tr>
+          <td class="kf-move-name">${m.name}</td>
+          <td><span class="kf-cmd-badge">${m.cmd}</span></td>
+          <td class="kf-chi-val">${m.chi}</td>
+          ${col4Val}
+          <td class="kf-remarks-val">${m.remarks || '-'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div class="kf-movelist-cat-card ${catClass}">
+        <div class="kf-movelist-cat-header">
+          <span>${title}</span>
+          <span style="opacity:0.75;font-size:0.65rem;">${sub}</span>
+        </div>
+        <table class="kf-movelist-table">
+          <thead>
+            <tr>
+              <th>${dict.colName}</th>
+              <th>${dict.colCmd}</th>
+              <th>${dict.colChi}</th>
+              <th>${col4Header}</th>
+              <th>${dict.colRemarks}</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
   /** Renders the HTML content for a specific Rider's movelist inside #kf-movelist-modal in the active language. */
   function renderMovelistModalContent(riderId) {
     const dict = t();
     const langKey = window.gameLang === 'ja' ? 'ja' : 'en';
+    const langMovelists = RIDER_MOVELISTS[langKey] || RIDER_MOVELISTS.en;
     const riders = window.AVAILABLE_RIDERS || [];
-    const normalizedId = String(riderId || 'ichigo').toLowerCase();
+    const riderObj = riders.find(r => r.id === riderId) || riders[0] || { id: 'ichigo', name: 'Kamen Rider Ichigo', icon: 'assets/images/icons/ichigo.png', maxLp: 3000 };
+    const data = langMovelists[riderObj.id] || langMovelists.ichigo;
 
-    const moveSetLang = RIDER_MOVELISTS[langKey] || RIDER_MOVELISTS.en;
-    const moveData = moveSetLang[normalizedId] || moveSetLang.ichigo;
-
-    const riderObj = riders.find(r => r.id === normalizedId) || riders[0] || {
-      id: normalizedId,
-      name: moveData.name,
-      icon: `assets/images/icons/${normalizedId}.png`,
-      maxLp: 3000
-    };
-
+    const watermarkEl = document.getElementById('kf-movelist-watermark');
     const switcherEl = document.getElementById('kf-movelist-switcher');
+    const bodyEl = document.getElementById('kf-movelist-body');
+    const closeBtn = document.getElementById('kf-movelist-close-btn');
+
+    if (watermarkEl) watermarkEl.src = riderObj.icon;
+    if (closeBtn) closeBtn.textContent = dict.movelistCloseBtn;
+
     if (switcherEl) {
       switcherEl.innerHTML = riders.map(r => {
         const shortName = getLocalizedRiderShortName(r);
-        const activeClass = r.id === normalizedId ? ' is-active' : '';
+        const activeClass = r.id === riderObj.id ? 'is-active' : '';
         return `
-          <button type="button" class="kf-movelist-tab-btn${activeClass}" data-rider-id="${r.id}">
-            <img src="${r.icon}" alt="${shortName}">
+          <button type="button" class="kf-movelist-tab-btn ${activeClass}" data-rider-id="${r.id}">
+            <img src="${r.icon}" alt="">
             <span>${shortName}</span>
           </button>
         `;
       }).join('');
 
       switcherEl.querySelectorAll('.kf-movelist-tab-btn').forEach(btn => {
-        btn.addEventListener('click', function () {
-          renderMovelistModalContent(this.getAttribute('data-rider-id'));
+        btn.addEventListener('click', () => {
+          renderMovelistModalContent(btn.getAttribute('data-rider-id'));
         });
       });
     }
 
-    const watermarkEl = document.getElementById('kf-movelist-watermark');
-    if (watermarkEl) {
-      watermarkEl.src = riderObj.icon;
-      watermarkEl.alt = '';
+    if (bodyEl) {
+      bodyEl.innerHTML = `
+        <div class="kf-movelist-header-banner">
+          <img class="kf-movelist-avatar" src="${riderObj.icon}" alt="${getLocalizedRiderName(riderObj)}">
+          <div class="kf-movelist-title-group">
+            <h2 class="kf-movelist-rider-title">${data.name || getLocalizedRiderName(riderObj)}</h2>
+            <div class="kf-movelist-subtitle">${dict.movelistSheetSub(riderObj.maxLp || 3000)}</div>
+          </div>
+        </div>
+        <div class="kf-movelist-grid">
+          ${buildMovelistCategoryHtml(dict.catBasicTitle, dict.catBasicSub, 'kf-cat-basic', data.basic, true)}
+          ${buildMovelistCategoryHtml(dict.catSpecialTitle, dict.catSpecialSub, 'kf-cat-special', data.special, true)}
+          ${buildMovelistCategoryHtml(dict.catUtilityTitle, dict.catUtilitySub, 'kf-cat-utility', data.utilities, false)}
+          ${buildMovelistCategoryHtml(dict.catDefenseTitle, dict.catDefenseSub, 'kf-cat-defense', data.defense, false)}
+        </div>
+      `;
+      bodyEl.scrollTop = 0;
     }
-
-    const closeBtn = document.getElementById('kf-movelist-close-btn');
-    if (closeBtn) {
-      closeBtn.textContent = dict.movelistCloseBtn;
-    }
-
-    const bodyEl = document.getElementById('kf-movelist-body');
-    if (!bodyEl) return;
-
-    const renderAttackRows = (rows) => rows.map(row => `
-      <tr>
-        <td class="kf-move-name">${row.name}</td>
-        <td><span class="kf-cmd-badge">${row.cmd}</span></td>
-        <td class="kf-chi-val">${row.chi}</td>
-        <td class="kf-dmg-val">${row.dmg}</td>
-        <td class="kf-remarks-val">${row.remarks || '—'}</td>
-      </tr>
-    `).join('');
-
-    const renderEffectRows = (rows) => rows.map(row => `
-      <tr>
-        <td class="kf-move-name">${row.name}</td>
-        <td><span class="kf-cmd-badge">${row.cmd}</span></td>
-        <td class="kf-chi-val">${row.chi}</td>
-        <td class="kf-effect-val">${row.effect}</td>
-        <td class="kf-remarks-val">${row.remarks || '—'}</td>
-      </tr>
-    `).join('');
-
-    bodyEl.innerHTML = `
-      <div class="kf-movelist-header-banner">
-        <img class="kf-movelist-avatar" src="${riderObj.icon}" alt="${moveData.name}">
-        <div class="kf-movelist-title-group">
-          <h2 class="kf-movelist-rider-title">${moveData.name}</h2>
-          <span class="kf-movelist-subtitle">${dict.movelistSheetSub(riderObj.maxLp || 3000)}</span>
-        </div>
-      </div>
-
-      <div class="kf-movelist-grid">
-        <!-- Basic Attack -->
-        <div class="kf-movelist-cat-card kf-cat-basic">
-          <div class="kf-movelist-cat-header">
-            <span>${dict.catBasicTitle}</span>
-            <span>${dict.catBasicSub}</span>
-          </div>
-          <table class="kf-movelist-table">
-            <thead>
-              <tr>
-                <th>${dict.colName}</th>
-                <th>${dict.colCmd}</th>
-                <th>${dict.colChi}</th>
-                <th>${dict.colDmg}</th>
-                <th>${dict.colRemarks}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderAttackRows(moveData.basic)}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Special Attack -->
-        <div class="kf-movelist-cat-card kf-cat-special">
-          <div class="kf-movelist-cat-header">
-            <span>${dict.catSpecialTitle}</span>
-            <span>${dict.catSpecialSub}</span>
-          </div>
-          <table class="kf-movelist-table">
-            <thead>
-              <tr>
-                <th>${dict.colName}</th>
-                <th>${dict.colCmd}</th>
-                <th>${dict.colChi}</th>
-                <th>${dict.colDmg}</th>
-                <th>${dict.colRemarks}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderAttackRows(moveData.special)}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Utilities -->
-        <div class="kf-movelist-cat-card kf-cat-utility">
-          <div class="kf-movelist-cat-header">
-            <span>${dict.catUtilityTitle}</span>
-            <span>${dict.catUtilitySub}</span>
-          </div>
-          <table class="kf-movelist-table">
-            <thead>
-              <tr>
-                <th>${dict.colName}</th>
-                <th>${dict.colCmd}</th>
-                <th>${dict.colChi}</th>
-                <th>${dict.colEffect}</th>
-                <th>${dict.colRemarks}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderEffectRows(moveData.utilities)}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Defense -->
-        <div class="kf-movelist-cat-card kf-cat-defense">
-          <div class="kf-movelist-cat-header">
-            <span>${dict.catDefenseTitle}</span>
-            <span>${dict.catDefenseSub}</span>
-          </div>
-          <table class="kf-movelist-table">
-            <thead>
-              <tr>
-                <th>${dict.colName}</th>
-                <th>${dict.colCmd}</th>
-                <th>${dict.colChi}</th>
-                <th>${dict.colEffect}</th>
-                <th>${dict.colRemarks}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderEffectRows(moveData.defense)}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
   }
 
   /** Ensures the Movelist modal container exists inside #vs-select-screen. */
@@ -2483,34 +2409,25 @@
     modal.style.display = 'none';
   };
 
-  /** Ensures the Credits link and upper-layer modal exist inside #vs-select-screen. */
+ /** Ensures the Credits link and upper-layer modal exist inside #vs-select-screen. */
   function ensureCreditsUI() {
     const selectScreen = document.getElementById('vs-select-screen');
     if (!selectScreen) return;
 
     const dict = t();
 
-    let linkBtn =
-      document.getElementById('kf-credits-link') ||
-      document.getElementById('credits-btn');
-
-    if (!linkBtn) {
-      linkBtn = document.createElement('button');
-      linkBtn.id = 'kf-credits-link';
-      linkBtn.type = 'button';
-      linkBtn.className = 'kf-credits-link';
-      selectScreen.appendChild(linkBtn);
+    let link = document.getElementById('kf-credits-link');
+    if (!link) {
+      link = document.createElement('button');
+      link.id = 'kf-credits-link';
+      link.type = 'button';
+      link.className = 'kf-credits-link';
+      link.addEventListener('click', window.openCreditsModal);
+      selectScreen.appendChild(link);
     }
-
-    linkBtn.textContent = dict.creditsLink;
-
-    if (!linkBtn.dataset.kfCreditsBound) {
-      linkBtn.addEventListener('click', window.openCreditsModal);
-      linkBtn.dataset.kfCreditsBound = '1';
-    }
+    link.textContent = dict.creditsLink;
 
     let modal = document.getElementById('kf-credits-modal');
-
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'kf-credits-modal';
@@ -2519,7 +2436,6 @@
       modal.style.display = 'none';
       modal.setAttribute('role', 'dialog');
       modal.setAttribute('aria-modal', 'true');
-      modal.setAttribute('aria-label', 'Game Credits');
 
       const card = document.createElement('div');
       card.className = 'kf-credits-modal-card';
@@ -2529,31 +2445,26 @@
 
       const qrWrap = document.createElement('div');
       qrWrap.className = 'kf-credits-qr-wrap';
-
       const qrImg = document.createElement('img');
-      qrImg.id = 'kf-credits-qr-img';
       qrImg.className = 'kf-credits-qr-img';
       qrImg.alt = 'Support QR Code';
-      qrImg.dataset.pathIndex = '0';
+      let qrIdx = 0;
       qrImg.src = CREDITS_QR_PATHS[0];
-
-      qrImg.addEventListener('error', function () {
-        const nextIdx = (parseInt(qrImg.dataset.pathIndex, 10) || 0) + 1;
-        if (nextIdx < CREDITS_QR_PATHS.length) {
-          qrImg.dataset.pathIndex = String(nextIdx);
-          qrImg.src = CREDITS_QR_PATHS[nextIdx];
+      qrImg.onerror = function () {
+        qrIdx += 1;
+        if (qrIdx < CREDITS_QR_PATHS.length) {
+          qrImg.src = CREDITS_QR_PATHS[qrIdx];
         } else {
           qrWrap.style.display = 'none';
         }
-      });
-
+      };
       qrWrap.appendChild(qrImg);
-      body.appendChild(qrWrap);
 
       const pre = document.createElement('pre');
       pre.className = 'kf-credits-pre';
       pre.textContent = dict.creditsContent;
 
+      body.appendChild(qrWrap);
       body.appendChild(pre);
 
       const footer = document.createElement('div');
@@ -2572,9 +2483,7 @@
       modal.appendChild(card);
 
       modal.addEventListener('click', function (event) {
-        if (event.target === modal) {
-          window.closeCreditsModal(event);
-        }
+        if (event.target === modal) window.closeCreditsModal(event);
       });
 
       selectScreen.appendChild(modal);
@@ -2588,36 +2497,18 @@
 
     const dict = t();
 
-    // Remove the volume bar and its label container from the DOM
-    document.querySelectorAll('input[type="range"], #volume-control, #bgm-volume-control, .volume-control, .bgm-control').forEach(el => {
-      if (el.tagName === 'INPUT' && el.parentElement && el.parentElement !== document.body && el.parentElement !== selectScreen && el.parentElement.children.length <= 3) {
-        el.parentElement.remove();
-      } else {
-        el.remove();
-      }
-    });
-
-    let linkBtn =
-      document.getElementById('kf-howto-link') ||
-      document.getElementById('how-to-play-btn');
-
-    if (!linkBtn) {
-      linkBtn = document.createElement('button');
-      linkBtn.id = 'kf-howto-link';
-      linkBtn.type = 'button';
-      linkBtn.className = 'kf-howto-link';
-      selectScreen.appendChild(linkBtn);
+    let link = document.getElementById('kf-howto-link');
+    if (!link) {
+      link = document.createElement('button');
+      link.id = 'kf-howto-link';
+      link.type = 'button';
+      link.className = 'kf-howto-link';
+      link.addEventListener('click', window.openHowToPlayModal);
+      selectScreen.appendChild(link);
     }
-
-    linkBtn.textContent = dict.howtoLink;
-
-    if (!linkBtn.dataset.kfHowtoBound) {
-      linkBtn.addEventListener('click', window.openHowToPlayModal);
-      linkBtn.dataset.kfHowtoBound = '1';
-    }
+    link.textContent = dict.howtoLink;
 
     let modal = document.getElementById('kf-howto-modal');
-
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'kf-howto-modal';
@@ -2626,7 +2517,6 @@
       modal.style.display = 'none';
       modal.setAttribute('role', 'dialog');
       modal.setAttribute('aria-modal', 'true');
-      modal.setAttribute('aria-label', 'How To Play');
 
       const card = document.createElement('div');
       card.className = 'kf-credits-modal-card kf-howto-modal-card';
@@ -2651,9 +2541,7 @@
       modal.appendChild(card);
 
       modal.addEventListener('click', function (event) {
-        if (event.target === modal) {
-          window.closeHowToPlayModal(event);
-        }
+        if (event.target === modal) window.closeHowToPlayModal(event);
       });
 
       selectScreen.appendChild(modal);
@@ -2661,34 +2549,56 @@
   }
 
   /** Injects and updates the 3-step progress tracker pill bar under the header. */
-  function updateStepTrackerUI(currentStep) {
-    const headerText = document.getElementById('select-step-title') || document.getElementById('vs-header-text');
-    if (!headerText || !headerText.parentNode) return;
+  function updateStepTrackerUI(stepArg) {
+    const selectScreen = document.getElementById('vs-select-screen');
+    if (!selectScreen) return;
 
     const dict = t();
+    const currentStep = stepArg || parseInt(window.vsSelectionState?.step, 10) || 1;
 
     let tracker = document.getElementById('kf-step-tracker');
     if (!tracker) {
       tracker = document.createElement('div');
       tracker.id = 'kf-step-tracker';
       tracker.className = 'kf-step-tracker';
-      headerText.insertAdjacentElement('afterend', tracker);
+      tracker.innerHTML = `
+        <span id="kf-pill-step1" class="kf-step-pill is-active"></span>
+        <span class="kf-step-connector"></span>
+        <span id="kf-pill-step2" class="kf-step-pill step-p2"></span>
+        <span class="kf-step-connector"></span>
+        <span id="kf-pill-step3" class="kf-step-pill step-ready"></span>
+      `;
+      const headerEl = document.getElementById('select-step-title') || document.getElementById('vs-header-text');
+      if (headerEl && headerEl.parentNode) {
+        headerEl.parentNode.insertBefore(tracker, headerEl.nextSibling);
+      } else {
+        selectScreen.insertBefore(tracker, selectScreen.firstChild);
+      }
     }
 
-    tracker.innerHTML = `
-      <span class="kf-step-pill step-p1" data-step="1">${dict.trackerStep1}</span>
-      <span class="kf-step-connector"></span>
-      <span class="kf-step-pill step-p2" data-step="2">${dict.trackerStep2}</span>
-      <span class="kf-step-connector"></span>
-      <span class="kf-step-pill step-ready" data-step="3">${dict.trackerStep3}</span>
-    `;
+    const p1 = document.getElementById('kf-pill-step1');
+    const p2 = document.getElementById('kf-pill-step2');
+    const p3 = document.getElementById('kf-pill-step3');
+    if (!p1 || !p2 || !p3) return;
 
-    const pills = tracker.querySelectorAll('.kf-step-pill');
-    pills.forEach(pill => {
-      const stepNum = parseInt(pill.getAttribute('data-step'), 10);
-      pill.classList.toggle('is-active', stepNum === currentStep);
-      pill.classList.toggle('is-done', stepNum < currentStep);
-    });
+    p1.textContent = dict.trackerStep1;
+    p2.textContent = dict.trackerStep2;
+    p3.textContent = dict.trackerStep3;
+
+    p1.className = 'kf-step-pill';
+    p2.className = 'kf-step-pill step-p2';
+    p3.className = 'kf-step-pill step-ready';
+
+    if (currentStep === 1) {
+      p1.classList.add('is-active');
+    } else if (currentStep === 2) {
+      p1.classList.add('is-done');
+      p2.classList.add('is-active');
+    } else {
+      p1.classList.add('is-done');
+      p2.classList.add('is-done');
+      p3.classList.add('is-active');
+    }
   }
 
   /** Injects or updates the LP & interactive MOVELIST button strip below each Rider's name. */
@@ -2724,11 +2634,10 @@
   /** Renders and updates the bottom Quick-Select Roster Dock. */
   function updateRosterDockUI() {
     const selectScreen = document.getElementById('vs-select-screen');
-    const p1Card = document.getElementById('p1-card');
-    if (!selectScreen || !p1Card) return;
+    if (!selectScreen) return;
 
     const dict = t();
-    const riders = window.AVAILABLE_RIDERS;
+    const riders = window.AVAILABLE_RIDERS || [];
     const state = window.vsSelectionState;
     const currentStep = parseInt(state.step, 10) || 1;
 
@@ -2737,62 +2646,69 @@
       dock = document.createElement('div');
       dock.id = 'kf-roster-dock';
       dock.className = 'kf-roster-dock';
-
-      const cardsContainer = p1Card.parentElement;
-      if (cardsContainer && cardsContainer !== selectScreen) {
-        cardsContainer.insertAdjacentElement('afterend', dock);
+      dock.innerHTML = `
+        <div id="kf-roster-dock-title" class="kf-roster-dock-title"></div>
+        <div id="kf-roster-grid" class="kf-roster-grid"></div>
+      `;
+      const backBtn = document.getElementById('back-btn') || document.querySelector('.btn-back');
+      const actionRow = backBtn ? backBtn.parentNode : null;
+      if (actionRow && actionRow.parentNode) {
+        actionRow.parentNode.insertBefore(dock, actionRow);
       } else {
         selectScreen.appendChild(dock);
       }
     }
 
-    const promptLabel =
-      currentStep === 1
-        ? dict.dockStep1
-        : currentStep === 2
-        ? dict.dockStep2
-        : dict.dockStep3;
+    const titleEl = document.getElementById('kf-roster-dock-title');
+    if (titleEl) {
+      titleEl.textContent =
+        currentStep === 1 ? dict.dockStep1 :
+        currentStep === 2 ? dict.dockStep2 :
+        dict.dockStep3;
+    }
 
-    dock.innerHTML = `
-      <div class="kf-roster-dock-title">${promptLabel}</div>
-      <div class="kf-roster-grid" id="kf-roster-grid"></div>
-    `;
+    const gridEl = document.getElementById('kf-roster-grid');
+    if (!gridEl) return;
 
-    const grid = dock.querySelector('#kf-roster-grid');
-    riders.forEach((rider, idx) => {
+    gridEl.innerHTML = riders.map((rider, idx) => {
       const isP1 = idx === state.p1Index;
       const isP2 = idx === state.p2Index;
-
-      const tile = document.createElement('button');
-      tile.type = 'button';
-      tile.className = 'kf-roster-tile' + (isP1 ? ' is-p1' : '') + (isP2 ? ' is-p2' : '');
-      tile.title = getLocalizedRiderName(rider);
+      const classes = ['kf-roster-tile'];
+      if (isP1) classes.push('is-p1');
+      if (isP2) classes.push('is-p2');
 
       const shortName = getLocalizedRiderShortName(rider);
 
-      tile.innerHTML = `
-        <div class="kf-roster-badges">
-          ${isP1 ? '<span class="kf-roster-tag p1">P1</span>' : ''}
-          ${isP2 ? '<span class="kf-roster-tag p2">P2</span>' : ''}
+      return `
+        <div class="${classes.join(' ')}" data-rider-index="${idx}" title="${getLocalizedRiderName(rider)}">
+          <div class="kf-roster-badges">
+            ${isP1 ? '<span class="kf-roster-tag p1">P1</span>' : ''}
+            ${isP2 ? '<span class="kf-roster-tag p2">P2</span>' : ''}
+          </div>
+          <img class="kf-roster-tile-img" src="${rider.icon}" alt="${shortName}">
+          <div class="kf-roster-tile-name">${shortName}</div>
         </div>
-        <img class="kf-roster-tile-img" src="${rider.icon}" alt="${shortName}">
-        <span class="kf-roster-tile-name">${shortName}</span>
       `;
+    }).join('');
 
+    gridEl.querySelectorAll('.kf-roster-tile').forEach(tile => {
       tile.addEventListener('click', () => {
+        const idx = parseInt(tile.getAttribute('data-rider-index'), 10);
+        if (Number.isNaN(idx)) return;
         const stepNow = parseInt(window.vsSelectionState.step, 10) || 1;
         if (stepNow === 1) {
           window.vsSelectionState.p1Index = idx;
-          window.updateSelectionUI();
         } else if (stepNow === 2) {
           window.vsSelectionState.p2Index = idx;
-          window.updateSelectionUI();
+        } else {
+          return;
         }
+        window.updateSelectionUI();
       });
-
-      grid.appendChild(tile);
     });
   }
+
+  
 
   // Close Credits, How To Play, or Movelist modal on Escape or Enter key
   document.addEventListener('keydown', function (event) {
@@ -3343,5 +3259,14 @@
 
   window.addEventListener('resize', disablePortraitOrientationOverlay);
   window.addEventListener('orientationchange', disablePortraitOrientationOverlay);
-
+window.refreshVsSelectLanguage = function () {
+    window.updateSelectionUI();
+    const movelistModal = document.getElementById('kf-movelist-modal');
+    if (movelistModal && !movelistModal.hidden) {
+      const activeTab = document.querySelector('#kf-movelist-switcher .kf-movelist-tab-btn.is-active');
+      const fallbackRider = (window.AVAILABLE_RIDERS && window.AVAILABLE_RIDERS[window.vsSelectionState.p1Index]) || { id: 'ichigo' };
+      const activeRiderId = activeTab ? activeTab.getAttribute('data-rider-id') : fallbackRider.id;
+      renderMovelistModalContent(activeRiderId);
+    }
+  };
 })(window);

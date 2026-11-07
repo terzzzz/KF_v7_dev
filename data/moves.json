@@ -391,7 +391,7 @@
     "D+K": { "name": "Claw Attack", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 130, "hitChance": 75, "video": "claw.mp4" },
     "D+L": { "name": "Claw Combo", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 142, "hitChance": 78, "video": "combo_claw.mp4" },
     "D+I": { "name": "Standard Kick", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 74, "hitChance": 80, "video": "kick2.mp4", "sourceFacing": "right" },
-    "S+J": { "name": "Amazon Kick", "type": "SPECIAL", "chiCost": 4, "baseDamage": 420, "hitChance": 80, "video": "amazon_kick.mp4" },
+    "S+J": { "name": "Amazon Kick", "type": "SPECIAL", "chiCost": 4, "baseDamage": 420, "hitChance": 80, "video": "rider_kick.mp4" },
     "S+K": {
       "name": "Jaguar Shock",
       "type": "SPECIAL",

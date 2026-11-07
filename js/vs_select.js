@@ -1241,6 +1241,9 @@
         font-weight: 700 !important;
         letter-spacing: 0.06em !important;
         text-transform: uppercase;
+        cursor: pointer;
+        pointer-events: auto !important;
+        user-select: none;
         transition: all 0.18s ease !important;
       }
 
@@ -3018,13 +3021,8 @@
     const state = window.vsSelectionState;
     const riders = window.AVAILABLE_RIDERS || [];
 
-    const currentStep = parseInt(state.step, 10) || 1;
-    const requiredStep = playerKey === 'p1' ? 1 : 2;
-
-    if (
-      currentStep !== requiredStep ||
-      !state[playerKey + 'IsCPU']
-    ) {
+    // Allow cycling difficulty on any step as long as this slot is set to CPU
+    if (!state[playerKey + 'IsCPU']) {
       return;
     }
 
@@ -3271,8 +3269,20 @@
     }
   };
 
-  // Step confirm button click listener
+  // Step confirm & difficulty badge click listener
   document.addEventListener('click', (e) => {
+    const p1Diff = e.target.closest('#p1-diff-display');
+    if (p1Diff && !p1Diff.hasAttribute('onclick')) {
+      window.toggleDifficulty('p1');
+      return;
+    }
+
+    const p2Diff = e.target.closest('#p2-diff-display');
+    if (p2Diff && !p2Diff.hasAttribute('onclick')) {
+      window.toggleDifficulty('p2');
+      return;
+    }
+
     const p1Btn = e.target.closest('#confirm-p1-btn, #btn-confirm-p1');
     if (p1Btn) {
       window.vsSelectionState.step = 2;

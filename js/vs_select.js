@@ -89,11 +89,12 @@
       creditsCloseBtn: 'OK',
       movelistCloseBtn: 'CLOSE',
       diffLabels: {
-        easy: 'Rugrat',
-        balanced: 'All-rounder',
-        master: 'Geek',
-        soul: 'Monomaniac',
-        rider: 'Rider'
+        easy: 'TREE-HOPPER',
+        balanced: 'CRICKET',
+        defensive: 'BEETLE',
+        master: 'BULLET ANT',
+        soul: 'BULLET ANT',
+        rider: 'RIDER'
       },
       riderNames: {
         ichigo: 'Kamen Rider Ichigo',
@@ -174,7 +175,7 @@
 
           <div class="kf-howto-section">
             <h3>1. Select Your Rider &amp; Match Setup</h3>
-            <p>Pick your Kamen Rider on the character selection screen. Choose whether to battle a friend or face off against CPU opponents ranging from <strong>Rugrat</strong> (Easy) up to the 36-matrix neural <strong>Rider</strong> tier.</p>
+            <p>Pick your Kamen Rider on the character selection screen. Choose whether to battle a friend or face off against CPU opponents ranging from <strong>TREE-HOPPER</strong> (Easy) up to the 36-matrix neural <strong>RIDER</strong> tier.</p>
           </div>
 
           <div class="kf-howto-section">
@@ -243,7 +244,7 @@
       player2Heading: 'プレイヤー 2',
       humanLabel: 'プレイヤー',
       cpuLabel: 'CPU',
-      naLabel: '―',
+      naLabel: 'なし',
       difficultyLabel: '難易度:',
       movelistBtn: '📋 技表',
       dockStep1: 'クイック選択 ― クリックしてプレイヤー1を決定',
@@ -260,10 +261,11 @@
       creditsCloseBtn: '閉じる',
       movelistCloseBtn: '閉じる',
       diffLabels: {
-        easy: 'ちびっこ',
-        balanced: 'オールラウンダー',
-        master: 'マニア',
-        soul: '特撮の鬼',
+        easy: 'ツノゼミ',
+        balanced: 'コオロギ',
+        defensive: 'カブトムシ',
+        master: 'パラポネラ',
+        soul: 'パラポネラ',
         rider: 'ライダー'
       },
       riderNames: {
@@ -346,7 +348,7 @@
 
           <div class="kf-howto-section">
             <h3>1. ライダーと対戦モードの選択</h3>
-            <p>キャラクター選択画面で仮面ライダーを選択します。対人戦またはCPU戦（入門向けの<strong>「ちびっこ」</strong>から、36マトリクスAI搭載の最高峰<strong>「ライダー」</strong>まで選択可能）を設定してバトルに挑みましょう。</p>
+            <p>キャラクター選択画面で仮面ライダーを選択します。対人戦またはCPU戦（入門向けの<strong>「ツノゼミ」</strong>から、36マトリクスAI搭載の最高峰<strong>「ライダー」</strong>まで選択可能）を設定してバトルに挑みましょう。</p>
           </div>
 
           <div class="kf-howto-section">
@@ -834,8 +836,8 @@
     const options = [
       'easy',
       'balanced',
-      'master',
-      'soul'
+      'defensive',
+      'master'
     ];
 
     if (riderLevelAvailable(rider)) {
@@ -850,6 +852,8 @@
 
     if (difficulty === 'mcts') {
       difficulty = 'rider';
+    } else if (difficulty === 'soul') {
+      difficulty = 'master';
     }
 
     if (!Object.prototype.hasOwnProperty.call(
@@ -863,7 +867,7 @@
       difficulty === 'rider' &&
       !riderLevelAvailable(rider)
     ) {
-      return 'soul';
+      return 'master';
     }
 
     return difficulty;
@@ -1261,13 +1265,15 @@
         background: rgba(16, 48, 68, 0.5) !important;
       }
 
-      #p1-diff-display.master,
-      #p2-diff-display.master {
+      #p1-diff-display.defensive,
+      #p2-diff-display.defensive {
         color: #ff9e64 !important;
         border-color: rgba(255, 158, 100, 0.65) !important;
         background: rgba(70, 32, 18, 0.55) !important;
       }
 
+      #p1-diff-display.master,
+      #p2-diff-display.master,
       #p1-diff-display.soul,
       #p2-diff-display.soul {
         color: #ff6b8b !important;
@@ -2839,6 +2845,7 @@
       'easy',
       'normal',
       'balanced',
+      'defensive',
       'hard',
       'master',
       'soul',
@@ -3012,7 +3019,7 @@
     window.updateSelectionUI();
   };
 
-  /** Cycles CPU difficulty setting (easy -> balanced -> master -> soul -> [rider]). */
+  /** Cycles CPU difficulty setting (easy -> balanced -> defensive -> master -> [rider]). */
   window.toggleDifficulty = function(playerKey) {
     if (playerKey !== 'p1' && playerKey !== 'p2') {
       return;

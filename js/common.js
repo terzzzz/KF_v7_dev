@@ -89,54 +89,57 @@
   /*
    * Search settings for the 5 AI tiers (+ legacy soul alias).
    */
+ /*
+   * Search settings for the 5 AI tiers (+ legacy soul alias).
+   */
   KF.levels = Object.freeze({
     easy: {
-      charges: [60, 100],
+      charges: [24, 34, 60, 68, 78, 88],
       horizon: 1,
-      finalists: 0,
+      finalists: 4,
       rollouts: 0,
-      risk: 0,
-      nearBest: 160
+      risk: 0.10,
+      nearBest: 12
     },
 
     balanced: {
-      charges: [60, 90, 100],
-      horizon: 1,
-      finalists: 0,
-      rollouts: 0,
-      risk: 0,
-      nearBest: 16
+      charges: [24, 34, 60, 68, 78, 88],
+      horizon: 2,
+      finalists: 6,
+      rollouts: 16,
+      risk: 0.20,
+      nearBest: 8
     },
 
     defensive: {
-      charges: [1, 35, 60, 90, 100],
+      charges: [24, 34, 60, 68, 78, 88],
       horizon: 2,
       finalists: 8,
-      rollouts: 32,
-      risk: 0.25,
+      rollouts: 28,
+      risk: 0.30,
       nearBest: 0
     },
 
     master: {
-      charges: [1, 35, 60, 90, 100],
+      charges: [24, 34, 60, 68, 78, 88],
       horizon: 3,
       finalists: 8,
       rollouts: 48,
-      risk: 0.15,
-      nearBest: 4
+      risk: 0.25,
+      nearBest: 0
     },
 
     soul: {
-      charges: [1, 35, 60, 90, 100],
+      charges: [24, 34, 60, 68, 78, 88],
       horizon: 3,
       finalists: 8,
       rollouts: 64,
-      risk: 0.15,
-      nearBest: 1
+      risk: 0.25,
+      nearBest: 0
     },
 
     rider: {
-      charges: [1, 35, 60, 90, 100],
+      charges: [24, 34, 60, 68, 78, 88],
       horizon: 3,
       finalists: 10,
       rollouts: 80,

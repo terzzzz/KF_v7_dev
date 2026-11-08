@@ -153,15 +153,9 @@
   function getLevelSettings(difficulty) {
     const norm = normalizeDifficulty(difficulty);
     const base = DEFAULT_LEVEL_SETTINGS[norm] || DEFAULT_LEVEL_SETTINGS.balanced;
-    const fromKF =
-      (K && K.levels && (K.levels[norm] || (norm === "defensive" && K.levels.balanced))) ||
-      {};
     return {
       ...base,
-      ...fromKF,
-      charges: Array.isArray(fromKF.charges) && fromKF.charges.length > 0
-        ? [...fromKF.charges]
-        : [...base.charges]
+      charges: [...base.charges]
     };
   }
 
@@ -265,13 +259,10 @@
     if (!key || typeof key !== "string") {
       return false;
     }
-    if (key === "A+I") {
-      return true;
-    }
     const move = state?.moves?.[slot]?.[key];
     return Boolean(
       move &&
-      (move.guardKind === "all" || move.omniGuard === true)
+      (move.guardKind === "omni" || move.guardKind === "all" || move.omniGuard === true)
     );
   }
 
@@ -279,13 +270,37 @@
     if (!key || typeof key !== "string") {
       return false;
     }
-    if (key === "A+I") {
-      return true;
-    }
     const move = state?.moves?.[slot]?.[key];
     return Boolean(
       move &&
       (move.direction === "A" || move.guardKind || move.omniGuard)
+    );
+  }
+
+  function canUseOmniGuard(state, slot, dirConstraints = null) {
+    if (!state || !state[slot] || state[slot].isFainted) {
+      return false;
+    }
+    const moves = state.moves?.[slot];
+    if (!moves) {
+      return false;
+    }
+    for (const key of Object.keys(moves)) {
+      if (isOmniGuardMove(state, slot, key) && canUseMoveKey(state, slot, key, dirConstraints)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function guardMatchesAttack(guardMove, attackMove) {
+    if (!guardMove || !guardMove.guardKind || !attackMove || !attackMove.offensive || attackMove.unblockable) {
+      return false;
+    }
+    return (
+      guardMove.guardKind === "omni" ||
+      guardMove.guardKind === "all" ||
+      guardMove.guardButton === attackMove.button
     );
   }
 
@@ -903,31 +918,33 @@
     const ownKey = String(ownAction?.key || "");
     const enemyKey = String(opponentAction?.key || "");
 
-    const ownIsAI = ownKey === "A+I";
-    const enemyIsAI = enemyKey === "A+I";
-    const ownIsAGuard = isAGuardMove(before, slot, ownKey);
-    const enemyIsAGuard = isAGuardMove(before, enemySlot, enemyKey);
+    const ownMove = before.moves?.[slot]?.[ownKey];
+    const enemyMove = before.moves?.[enemySlot]?.[enemyKey];
+
+    const ownIsOmni = isOmniGuardMove(before, slot, ownKey);
+    const enemyIsOmni = isOmniGuardMove(before, enemySlot, enemyKey);
+    const ownGuardMatches = guardMatchesAttack(ownMove, enemyMove);
+    const enemyGuardMatches = guardMatchesAttack(enemyMove, ownMove);
     const ownIsS = isSMove(before, slot, ownKey);
     const enemyIsS = isSMove(before, enemySlot, enemyKey);
-    const enemyMove = before.moves?.[enemySlot]?.[enemyKey];
 
     let tacticalDelta = 0;
 
-    // Case 1: We used A+I (or A-guard) against opponent's S move and won Chi without losing LP
+    // Case 1: We used a matching guard (or Omni Guard) against opponent's S move and won Chi without losing LP
     if (
-      (ownIsAI || ownIsAGuard) &&
+      ownGuardMatches &&
       enemyIsS &&
       ownLpDelta >= 0 &&
       netChiDelta > 0
     ) {
-      tacticalDelta += (ownIsAI ? 44 : 28) + 12 * netChiDelta;
+      tacticalDelta += (ownIsOmni ? 44 : 34) + 12 * netChiDelta;
 
       const enemyMinS = minSChiCost(before, enemySlot);
       if (beforeEnemy.chi >= enemyMinS && afterEnemy.chi < enemyMinS) {
         tacticalDelta += 26;
       }
     } else if (
-      (ownIsAI || ownIsAGuard) &&
+      ownGuardMatches &&
       enemyMove?.offensive &&
       ownLpDelta >= -15
     ) {
@@ -935,14 +952,14 @@
       tacticalDelta += 24;
     }
 
-    // Case 2: We used an S move into opponent's A+I (or A-guard), dealt 0 LP damage, and lost Chi
+    // Case 2: We used an S move into opponent's matching guard (or Omni Guard), dealt 0 LP damage, and lost Chi
     if (
       ownIsS &&
-      (enemyIsAI || enemyIsAGuard) &&
+      enemyGuardMatches &&
       enemyLpDelta >= 0 &&
       netChiDelta < 0
     ) {
-      tacticalDelta -= (enemyIsAI ? 50 : 32) + 14 * Math.abs(netChiDelta);
+      tacticalDelta -= (enemyIsOmni ? 50 : 36) + 14 * Math.abs(netChiDelta);
 
       const ownMinS = minSChiCost(before, slot);
       if (beforeOwn.chi >= ownMinS && afterOwn.chi < ownMinS) {
@@ -1124,7 +1141,7 @@
 
   /*
    * BEETLE (defensive) finalist selector:
-   * Guarantees DO_NOTHING (IDLE) and all legal A-guard moves (especially Omni Guard / A+I)
+   * Guarantees DO_NOTHING (IDLE) and all legal A-guard moves (especially Omni Guard / A-guards)
    * are present in the finalist pool before Monte Carlo rollouts run.
    */
   function selectBeetleFinalists(sortedRows, limit, state, slot) {
@@ -1407,9 +1424,9 @@
 
   /*
    * Model move usage, attack-button habits (J/K/I/L), direction habits (A/D/S/W),
-   * A+I usage, and A+I vs S trap habits from recent history.
+   * Omni Guard usage, and Omni Guard vs S trap habits from recent history.
    */
-  function observations(history, slot) {
+  function observations(history, slot, state = null) {
     const counts = {};
     const charges = [];
     const buttonCounts = { J: 0, K: 0, I: 0, L: 0 };
@@ -1438,8 +1455,12 @@
       }
 
       const key = String(action.key || "");
+      const isOmni = state
+        ? isOmniGuardMove(state, slot, key)
+        : key === "A+I";
+
       if (!streakBroken) {
-        if (key === "A+I") {
+        if (isOmni) {
           aIConsecutive++;
         } else if (key !== "DO_NOTHING") {
           streakBroken = true;
@@ -1448,7 +1469,7 @@
 
       if (recentTurns < 5) {
         recentTurns++;
-        if (key === "A+I") {
+        if (isOmni) {
           recentAICount++;
         } else if (key.startsWith("S+")) {
           recentSCount++;
@@ -1474,12 +1495,15 @@
       );
 
       const key = String(action.key || "");
+      const isOmni = state
+        ? isOmniGuardMove(state, slot, key)
+        : key === "A+I";
       const otherAction = turn[otherSlot] || turn.actions?.[otherSlot];
       const otherKey = String(otherAction?.key || "");
 
       counts[key] = (counts[key] || 0) + weight;
 
-      if (key === "A+I") {
+      if (isOmni) {
         aIWeight += weight;
         if (otherKey.startsWith("S+")) {
           aIVsSWeight += weight * 1.5;
@@ -1534,7 +1558,7 @@
   /*
    * Build an action probability distribution from:
    * - RiderBrains tactical priors
-   * - Observed move, button, direction, and A+I vs S tendencies
+   * - Observed move, button, direction, and Omni Guard vs S tendencies
    * - Current legal actions with +1..12% randomized tactical charges
    */
   function policy(
@@ -1550,8 +1574,8 @@
     const normDiff = normalizeDifficulty(difficulty);
     const brainDiff = brainDifficultyKey(normDiff);
     const otherSlot = C.other(slot);
-    const observed = observations(history || [], slot);
-    const otherObserved = observations(history || [], otherSlot);
+    const observed = observations(history || [], slot, state);
+    const otherObserved = observations(history || [], otherSlot, state);
 
     const isSmartTier =
       counterRead ||
@@ -1561,7 +1585,7 @@
 
     const ownCanUseS = canUseSMove(state, slot, dirConstraints);
     const otherCanUseS = canUseSMove(state, otherSlot);
-    const otherCanUseAI = canUseMoveKey(state, otherSlot, "A+I");
+    const otherCanUseAI = canUseOmniGuard(state, otherSlot);
 
     const extraCharges = [];
 
@@ -1723,7 +1747,7 @@
       }
 
       if (isSmartTier && move) {
-        const isKeyAI = key === "A+I";
+        const isKeyAI = isOmniGuardMove(state, slot, key);
         const isKeyS = isSMove(state, slot, key);
 
         if (isKeyAI) {
@@ -2081,9 +2105,10 @@
 
     let ownActions = allOwnActions;
 
-    const enemyObserved = observations(history, opponentSlot);
+    const enemyObserved = observations(history, opponentSlot, state);
     const enemyCanUseS = canUseSMove(state, opponentSlot, oppConstraints);
     const ownCanUseS = canUseSMove(state, slot, selfConstraints);
+    const ownCanUseOmni = canUseOmniGuard(state, slot, selfConstraints);
 
     if (
       Array.isArray(candidates) &&
@@ -2107,7 +2132,7 @@
           if (enemyCanUseS || isBeetle) {
             for (const act of allOwnActions) {
               if (
-                (act.key === "A+I" || (isBeetle && (isAGuardMove(state, slot, act.key) || act.key === "DO_NOTHING"))) &&
+                (isOmniGuardMove(state, slot, act.key) || (isBeetle && (isAGuardMove(state, slot, act.key) || act.key === "DO_NOTHING"))) &&
                 !existingIds.has(actionId(act))
               ) {
                 ownActions.push(act);
@@ -2146,13 +2171,18 @@
 
     let enemySProb = 0;
     let enemyAIProb = 0;
+    const enemySProbByButton = { J: 0, K: 0, I: 0, L: 0 };
 
     for (const entry of opponentPolicy) {
       const k = entry.action.key;
-      if (k === "A+I") {
+      if (isOmniGuardMove(state, opponentSlot, k)) {
         enemyAIProb += entry.probability;
       } else if (isSMove(state, opponentSlot, k)) {
         enemySProb += entry.probability;
+        const oppMove = state.moves?.[opponentSlot]?.[k];
+        if (oppMove?.button && Object.prototype.hasOwnProperty.call(enemySProbByButton, oppMove.button)) {
+          enemySProbByButton[oppMove.button] += entry.probability;
+        }
       }
     }
 
@@ -2176,7 +2206,7 @@
       ? [...rawAdvisedKeys]
       : [];
 
-    if (isSmartDifficulty && enemyCanUseS && !advisedKeys.includes("A+I")) {
+    if (isSmartDifficulty && enemyCanUseS && ownCanUseOmni && !advisedKeys.includes("A+I")) {
       advisedKeys.unshift("A+I");
     }
 
@@ -2247,13 +2277,24 @@
         action
       );
       const ownMove = state.moves?.[slot]?.[action.key];
+      const ownIsOmni = isOmniGuardMove(state, slot, action.key);
 
       if (isSmartDifficulty) {
-        if (action.key === "A+I" && enemyCanUseS) {
+        if (ownIsOmni && enemyCanUseS) {
           tacticalRootBonus +=
             36 * enemySProb +
             8 * Math.min(2.5, enemyObserved.dirCounts.S) +
             (oppChi >= oppMinS + 2 ? 10 : 0);
+        } else if (
+          ownMove?.guardKind === "matching" &&
+          ownMove.guardButton &&
+          enemyCanUseS &&
+          enemySProbByButton[ownMove.guardButton] > 0
+        ) {
+          // For Riders without Omni Guard (V3, Riderman, X, Amazon), boost the exact matching guard against enemy S moves
+          tacticalRootBonus +=
+            32 * enemySProbByButton[ownMove.guardButton] +
+            (oppChi >= oppMinS + 2 ? 6 : 0);
         } else if (isSMove(state, slot, action.key)) {
           if (
             enemyAIProb >= 0.16 ||
@@ -2335,7 +2376,7 @@
               tacticalRootBonus += 22;
             }
           } else if (isAGuardMove(state, slot, action.key)) {
-            tacticalRootBonus += (action.key === "A+I" && enemyCanUseS) ? 30 : 18;
+            tacticalRootBonus += (ownIsOmni && enemyCanUseS) ? 30 : 18;
           } else if (action.key === "DO_NOTHING" && myChi < 0.60 * myMaxChi) {
             tacticalRootBonus += 20 + 2.5 * Math.max(0, 0.60 * myMaxChi - myChi);
           }
@@ -2414,9 +2455,10 @@
         if (
           isSmartDifficulty &&
           enemyCanUseS &&
-          !finalists.some(r => r.action.key === "A+I")
+          ownCanUseOmni &&
+          !finalists.some(r => isOmniGuardMove(state, slot, r.action.key))
         ) {
-          const bestAIRow = rows.find(r => r.action.key === "A+I");
+          const bestAIRow = rows.find(r => isOmniGuardMove(state, slot, r.action.key));
           if (bestAIRow && finalists.length > 0) {
             finalists[finalists.length - 1] = { ...bestAIRow };
           }

@@ -141,7 +141,26 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function configureForesight(options = {}) {
+    if (typeof g.SoulEnv?.setForesightConfig === "function") {
+      return g.SoulEnv.setForesightConfig(options);
+    }
+    return null;
+  }
+
+  function getForesightConfig() {
+    if (typeof g.SoulEnv?.getForesightConfig === "function") {
+      return g.SoulEnv.getForesightConfig();
+    }
+    return { enabled: true, horizon: 3, beamWidth: 4 };
+  }
+
   function createDefaultMatchParameters(overrides = null) {
+    const foresight = getForesightConfig();
+    const defaultReserved = new Array(RESERVED_PARAM_SLOTS).fill(0);
+    // Slot 0 stores active foresight lookahead horizon n by default
+    defaultReserved[0] = Number(foresight?.horizon || 3);
+
     const base = {
       avgRounds: 0,
       avgFinalLpRatio: 0,
@@ -161,7 +180,7 @@
       faintSufferedRate: 0,
       stanceDistribution: { W: 0, A: 0, S: 0, D: 0, IDLE: 0 },
       buttonDistribution: { J: 0, K: 0, I: 0, L: 0, NONE: 0 },
-      reservedSlots: new Array(RESERVED_PARAM_SLOTS).fill(0)
+      reservedSlots: defaultReserved
     };
 
     if (!overrides || typeof overrides !== "object") {
@@ -183,7 +202,7 @@
         ? overrides.reservedSlots
             .slice(0, RESERVED_PARAM_SLOTS)
             .map(v => (Number.isFinite(Number(v)) ? Number(v) : 0))
-        : new Array(RESERVED_PARAM_SLOTS).fill(0)
+        : [...defaultReserved]
     };
 
     while (merged.reservedSlots.length < RESERVED_PARAM_SLOTS) {
@@ -1069,6 +1088,7 @@
       activeRosterCount: getActiveCodes().length,
       backupSlotCount: BACKUP_SLOT_COUNT,
       reservedParamSlotCount: RESERVED_PARAM_SLOTS,
+      foresightConfig: getForesightConfig(),
 
       candidate: store.candidate.legacy,
       active: store.active.legacy,
@@ -1102,6 +1122,8 @@
     getAllSlotCodes,
     syncRosterCodes,
     getCanonicalKey,
+    configureForesight,
+    getForesightConfig,
     createDefaultMatchParameters,
     fingerprint,
     validateCheckpoint,

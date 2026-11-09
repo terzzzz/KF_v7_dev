@@ -5,7 +5,8 @@
  * Playback interface: live-ui-2
  *
  * CPU policy:
- *   NOVICE / BALANCED / MASTER / SOUL -> pure Foresee search.
+ *   EASY (Tree-hopper) / BALANCED (Cricket) / DEFENSIVE (Beetle) /
+ *   MASTER (Bullet Ant) / SOUL -> pure Foresee search.
  *   RIDER -> Foresee search with an exact-matchup ACTIVE model.
  *   RIDER without a model -> explicit pure SOUL fallback.
  *
@@ -29,6 +30,31 @@
   const BUTTONS = ["I", "J", "K", "L"];
   const KEYS = [...DIRS, ...BUTTONS];
   const HUMAN_INPUTS = new Set([...KEYS, "IDLE", "DO_NOTHING"]);
+
+  const SUPPORTED_DIFFICULTIES = Object.freeze([
+    "easy",
+    "balanced",
+    "defensive",
+    "master",
+    "soul",
+    "rider"
+  ]);
+
+  const DIFFICULTY_ALIASES = Object.freeze({
+    novice: "easy",
+    "tree-hopper": "easy",
+    tree_hopper: "easy",
+    treehopper: "easy",
+    balance: "balanced",
+    cricket: "balanced",
+    defense: "defensive",
+    beetle: "defensive",
+    "bullet-ant": "master",
+    bullet_ant: "master",
+    bulletant: "master",
+    // Compatibility alias only; this is not an MCTS implementation.
+    mcts: "rider"
+  });
 
   /*
    * The supplied v5 SoulEnv keeps STEP and limit() private.
@@ -68,21 +94,22 @@
   function difficultyFor(gs, slot) {
     const raw = String(
       gs.matchConfig?.[slot + "Difficulty"] || "balanced"
-    ).toLowerCase();
+    ).trim().toLowerCase();
 
-    if (raw === "novice") return "easy";
+    const aliased = DIFFICULTY_ALIASES[raw] || raw;
 
-    // Compatibility alias only; this is not an MCTS implementation.
-    if (raw === "mcts") return "rider";
-
-    if (["easy", "balanced", "master", "soul", "rider"].includes(raw)) {
-      return raw;
+    if (SUPPORTED_DIFFICULTIES.includes(aliased)) {
+      return aliased;
     }
 
-    const normalized = K.difficulty(raw);
+    const normalized = typeof K?.difficulty === "function"
+      ? String(K.difficulty(aliased) || "").trim().toLowerCase()
+      : aliased;
 
-    if (["easy", "balanced", "master", "soul", "rider"].includes(normalized)) {
-      return normalized;
+    const normalizedAliased = DIFFICULTY_ALIASES[normalized] || normalized;
+
+    if (SUPPORTED_DIFFICULTIES.includes(normalizedAliased)) {
+      return normalizedAliased;
     }
 
     throw new Error("Unsupported CPU difficulty: " + raw);
@@ -1328,7 +1355,7 @@
   g.MatchManager = {
     VERSION: "live-ui-2",
     BUILD,
-    PATCH: "v5-exact-matchup-rider-dynamic-replan",
+    PATCH: "v5-exact-matchup-rider-dynamic-replan-5tiers",
     begin,
     stop,
     confirm,

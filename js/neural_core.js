@@ -1,5 +1,6 @@
 /* js/neural_core.js
- * CPU MLP, Adam, masked action selection, n-step foresight selection, replay, Double DQN.
+ * CPU MLP, Adam, masked action selection, n-step foresight selection, replay, Double DQN,
+ * and 49-Matchup Compact Matrix Pool (7v7 Rider-vs-Rider).
  * Build: v5-state256-action17
  */
 (function (g) {
@@ -7,6 +8,10 @@
 
   const BUILD = "v5-state256-action17";
   const K = g.KF;
+
+  // Default compact architecture for 1v1 matchup matrices: 256 -> 64 -> 32 -> 17
+  const COMPACT_MATCHUP_SIZES = Object.freeze([256, 64, 32, 17]);
+  const GDRIVE_FOLDER_ID = "15P5HeKqLxMYw3ykirJj2HMT726SZnkId";
 
   function validateSizes(sizes) {
     if (
@@ -93,17 +98,36 @@
 
   /**
    * Selects an action by combining network Q-values with n-move foresight EV planning.
+   * - Live Search is STRICTLY OFF when mode === "train"
+   * - Live Search is STRICTLY ON when mode === "eval" or "game"
    */
   function selectWithForesight(env, slot, net, mask, options = {}) {
-    const obs = g.SoulEnv.observe(env, slot);
+    const mode =
+      options.mode ||
+      env?.mode ||
+      env?.state?.mode ||
+      (typeof g.SoulEnv?.getExecutionMode === "function"
+        ? g.SoulEnv.getExecutionMode()
+        : "game");
+
+    const useLiveSearch =
+      typeof g.SoulEnv?.shouldUseLiveSearch === "function"
+        ? g.SoulEnv.shouldUseLiveSearch(mode, env)
+        : mode !== "train";
+
+    // Skip expensive plan memory rollout during training observations
+    const obs = g.SoulEnv.observe(env, slot, !useLiveSearch);
     const inputVec = g.SoulEnv.vector(obs);
     const q = net.predict(inputVec);
     checkOutput(q, mask);
 
     const adjustedQ = Float32Array.from(q);
 
-    if (typeof g.SoulEnv?.foresee === "function") {
-      const plan = g.SoulEnv.foresee(env, slot, net, options);
+    if (useLiveSearch && typeof g.SoulEnv?.foresee === "function") {
+      const plan = g.SoulEnv.foresee(env, slot, net, {
+        ...options,
+        mode
+      });
       const plannedIdx = plan?.sequence?.[0] ?? -1;
 
       if (
@@ -451,6 +475,9 @@
       this.updates = 0;
       this.loss = 0;
 
+      this.matchupKey = options.matchupKey || null;
+      this.mode = options.mode || "train";
+
       this.gamma = g.SoulEnv.GAMMA;
       this.batchSize = options.batchSize || 32;
       this.warmup = options.warmup || 256;
@@ -466,6 +493,21 @@
       this.updateStats = {
         win: 0, damage: 0, loss: 0, neutral: 0
       };
+    }
+
+    setMode(mode = "train") {
+      this.mode = mode === "train" || mode === "eval" || mode === "game"
+        ? mode
+        : "game";
+      return this.mode;
+    }
+
+    selectAction(env, slot, mask, options = {}) {
+      const activeMode = options.mode || this.mode || "game";
+      return selectWithForesight(env, slot, this.net, mask, {
+        ...options,
+        mode: activeMode
+      });
     }
 
     softUpdateTarget(tau = 0.005) {
@@ -638,6 +680,159 @@
       this.updates++;
       this.softUpdateTarget();
     }
+
+    toJSON() {
+      return {
+        build: BUILD,
+        schema: g.SoulEnv?.SCHEMA,
+        matchupKey: this.matchupKey,
+        steps: this.steps,
+        updates: this.updates,
+        loss: this.loss,
+        updateStats: { ...this.updateStats },
+        net: this.net.toJSON()
+      };
+    }
+
+    static fromJSON(payload, seed = 1, options = {}) {
+      const netJson = payload?.net || payload;
+      const net = Network.fromJSON(netJson);
+      const steps = Number(payload?.steps) || 0;
+      const learner = new Learner(net, seed, steps, {
+        ...options,
+        matchupKey: payload?.matchupKey || options.matchupKey || null
+      });
+      learner.updates = Number(payload?.updates) || 0;
+      learner.loss = Number(payload?.loss) || 0;
+      if (payload?.updateStats && typeof payload.updateStats === "object") {
+        learner.updateStats = {
+          win: Number(payload.updateStats.win) || 0,
+          damage: Number(payload.updateStats.damage) || 0,
+          loss: Number(payload.updateStats.loss) || 0,
+          neutral: Number(payload.updateStats.neutral) || 0
+        };
+      }
+      return learner;
+    }
+  }
+
+  /**
+   * 49-Matchup Compact Matrix Pool (7 Riders vs 7 Riders)
+   * Stores and syncs individual 1v1 matrices (`matrix_rA_vs_rB.json`)
+   * with Google Drive Folder 15P5HeKqLxMYw3ykirJj2HMT726SZnkId.
+   */
+  class MatchupMatrixPool {
+    constructor(options = {}) {
+      this.sizes = Array.isArray(options.sizes)
+        ? [...options.sizes]
+        : [...COMPACT_MATCHUP_SIZES];
+      validateSizes(this.sizes);
+
+      this.numRiders = Number(options.numRiders) || 7;
+      this.capacityPerMatchup = Number(options.capacityPerMatchup) || 8192;
+      this.folderId = options.folderId || GDRIVE_FOLDER_ID;
+      this.learners = new Map();
+    }
+
+    static normalizeRiderIndex(rider) {
+      if (typeof rider === "number" && Number.isInteger(rider)) {
+        return Math.max(0, Math.min(6, rider));
+      }
+      const str = String(rider || "").trim().toLowerCase();
+      const match = str.match(/(\d+)/);
+      if (match) {
+        return Math.max(0, Math.min(6, Number(match[1])));
+      }
+      return 0;
+    }
+
+    static getKey(riderA, riderB) {
+      const a = MatchupMatrixPool.normalizeRiderIndex(riderA);
+      const b = MatchupMatrixPool.normalizeRiderIndex(riderB);
+      return `r${a}_vs_r${b}`;
+    }
+
+    static getFileName(riderA, riderB) {
+      return `matrix_${MatchupMatrixPool.getKey(riderA, riderB)}.json`;
+    }
+
+    getOrCreateSync(riderA, riderB, mode = "train", seed = 1) {
+      const key = MatchupMatrixPool.getKey(riderA, riderB);
+      let learner = this.learners.get(key);
+
+      if (!learner) {
+        const net = new Network(this.sizes);
+        learner = new Learner(net, seed, 0, {
+          matchupKey: key,
+          mode,
+          capacity: this.capacityPerMatchup
+        });
+        this.learners.set(key, learner);
+      }
+
+      learner.setMode(mode);
+      return learner;
+    }
+
+    async getMatchupLearner(riderA, riderB, mode = "game", seed = 1) {
+      const key = MatchupMatrixPool.getKey(riderA, riderB);
+      if (this.learners.has(key)) {
+        const existing = this.learners.get(key);
+        existing.setMode(mode);
+        return existing;
+      }
+
+      const storage = g.MatrixStorage || g.matrixStorage || null;
+      if (storage && typeof storage.loadMatchupMatrix === "function") {
+        try {
+          const a = MatchupMatrixPool.normalizeRiderIndex(riderA);
+          const b = MatchupMatrixPool.normalizeRiderIndex(riderB);
+          const loaded = await storage.loadMatchupMatrix(a, b);
+          if (loaded) {
+            const learner = Learner.fromJSON(loaded, seed, {
+              matchupKey: key,
+              mode,
+              capacity: this.capacityPerMatchup
+            });
+            this.learners.set(key, learner);
+            return learner;
+          }
+        } catch (_) {
+          // Fallback to fresh compact matrix if remote/local file not yet created
+        }
+      }
+
+      return this.getOrCreateSync(riderA, riderB, mode, seed);
+    }
+
+    async saveMatchup(riderA, riderB) {
+      const a = MatchupMatrixPool.normalizeRiderIndex(riderA);
+      const b = MatchupMatrixPool.normalizeRiderIndex(riderB);
+      const key = MatchupMatrixPool.getKey(a, b);
+      const learner = this.learners.get(key);
+      if (!learner) return null;
+
+      const payload = learner.toJSON();
+      const storage = g.MatrixStorage || g.matrixStorage || null;
+      if (storage && typeof storage.saveMatchupMatrix === "function") {
+        return await storage.saveMatchupMatrix(a, b, payload);
+      }
+      return payload;
+    }
+
+    async saveAllActiveToGoogleDrive() {
+      const results = [];
+      for (let rA = 0; rA < this.numRiders; rA++) {
+        for (let rB = 0; rB < this.numRiders; rB++) {
+          const key = MatchupMatrixPool.getKey(rA, rB);
+          if (this.learners.has(key)) {
+            const res = await this.saveMatchup(rA, rB);
+            results.push({ key, saved: Boolean(res) });
+          }
+        }
+      }
+      return results;
+    }
   }
 
   function getStanceGroups(actionIndex, outputSize = 17) {
@@ -659,9 +854,12 @@
 
   g.SoulNN = {
     BUILD,
+    COMPACT_MATCHUP_SIZES,
+    GDRIVE_FOLDER_ID,
     Network,
     Learner,
     Replay,
+    MatchupMatrixPool,
     validateJSON,
     argmax,
     randomAction,

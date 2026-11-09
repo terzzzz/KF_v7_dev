@@ -444,14 +444,14 @@
         "id": "electro_coat",
         "label": "ELECTRO",
         "type": "defense",
-        "duration": 3,
-        "effects": { "armor": 0.78, "accuracy": 15 }
+        "duration": 4,
+        "effects": { "armor": 0.78 }
       }
     },
     "W+K": {
       "name": "Electro Dynamo",
       "type": "UTILITY",
-      "chiCost": 1,
+      "chiCost": 5,
       "baseDamage": 0,
       "hitChance": 100,
       "video": "charge_up.mp4",
@@ -459,8 +459,8 @@
         "id": "electro_dynamo",
         "label": "DYNAMO",
         "type": "attack",
-        "duration": 20,
-        "effects": { "sAttack": 1.25, "enableSpecials": true }
+        "duration": 15,
+        "effects": { "enableSpecials": true }
       }
     },
     "W+L": {
@@ -482,7 +482,7 @@
       "rangeType": "REACH",
       "chiCost": 4,
       "chiRefundOnHit": 0,
-      "baseDamage": 340,
+      "baseDamage": 380,
       "hitChance": 76,
       "video": "electro_fire.mp4",
       "debuff": {
@@ -493,9 +493,9 @@
         "effects": { "speed": 0.70 }
       }
     },
-    "S+K": { "name": "Electro Waterfall", "type": "SPECIAL", "rangeType": "REACH", "chiCost": 5, "chiRefundOnHit": 1, "baseDamage": 440, "baseFaintDamage": 30, "hitChance": 74, "video": "electro_waterfall.mp4" },
-    "S+L": { "name": "Stronger Electro Kick", "type": "SPECIAL", "chiCost": 7, "chiRefundOnHit": 3, "baseDamage": 680, "hitChance": 74, "video": "electro_kick.mp4" },
-    "S+I": { "name": "Super Electronic Drill Kick", "type": "SPECIAL", "chiCost": 10, "chiRefundOnHit": 4, "baseDamage": 850, "hitChance": 74, "video": "drill_kick.mp4" },
+    "S+K": { "name": "Electro Waterfall", "type": "SPECIAL", "rangeType": "REACH", "chiCost": 5, "chiRefundOnHit": 1, "baseDamage": 440, "baseFaintDamage": 35, "hitChance": 74, "video": "electro_waterfall.mp4" },
+    "S+L": { "name": "Stronger Electro Kick", "type": "SPECIAL", "chiCost": 7, "chiRefundOnHit": 3, "baseDamage": 780, "hitChance": 74, "video": "electro_kick.mp4" },
+    "S+I": { "name": "Super Electronic Drill Kick", "type": "SPECIAL", "chiCost": 10, "chiRefundOnHit": 3, "baseDamage": 1250, "hitChance": 74, "video": "drill_kick.mp4" },
     "A+I": { "name": "Electro Barrier", "type": "DEFENSE", "guardKind": "omni", "chiCost": 4, "baseDamage": 0, "hitChance": 100, "video": "electro_barrier.mp4" },
     "A+J": { "name": "Guard", "type": "DEFENSE", "chiCost": 0, "baseDamage": 0, "hitChance": 100, "video": "guard.mp4" },
     "A+K": { "name": "Guard", "type": "DEFENSE", "chiCost": 0, "baseDamage": 0, "hitChance": 100, "video": "guard.mp4" },

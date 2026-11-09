@@ -1,5 +1,6 @@
 /* js/charge_env.js
  * Combat observations, orthogonal CHI, tactical flags, n-step EV foresight plan memory,
+ * execution mode gating (Live Search OFF in 'train', ON in 'eval'/'game'),
  * action mapping, and optional charge controls.
  * Build: v5-state256-action17
  *
@@ -84,13 +85,18 @@
 
   const IDLE_INDEX = 16;
 
-  // Adjustable n-step foresight configuration
+  // Adjustable n-step foresight configuration & execution mode gate
+  // mode: "train" (Live Search OFF) | "eval" (Live Search ON) | "game" (Live Search ON)
   const foresightConfig = {
     enabled: true,
-    horizon: 3,           // Default n = 3 moves lookahead
-    beamWidth: 4,         // Top K candidate branches expanded per ply
-    commitmentBonus: 0.28,// Hysteresis bonus for following last turn's high-EV plan
-    minEvThreshold: 0.05  // Minimum EV required to commit a multi-turn plan
+    mode: "game",
+    liveSearchInTrain: false, // Strictly OFF during training for fast CPU throughput
+    liveSearchInEval: true,   // Strictly ON during evaluation
+    liveSearchInGame: true,   // Strictly ON during actual game matches
+    horizon: 3,               // Default n = 3 moves lookahead
+    beamWidth: 4,             // Top K candidate branches expanded per ply
+    commitmentBonus: 0.28,    // Hysteresis bonus for following last turn's high-EV plan
+    minEvThreshold: 0.05      // Minimum EV required to commit a multi-turn plan
   };
 
   // WeakMap keeps multi-turn plan state bound to combat state objects
@@ -111,12 +117,57 @@
     return C.decisionLimitMs();
   }
 
+  function setExecutionMode(mode = "game") {
+    if (mode === "train" || mode === "eval" || mode === "game") {
+      foresightConfig.mode = mode;
+    }
+    return foresightConfig.mode;
+  }
+
+  function getExecutionMode() {
+    return foresightConfig.mode;
+  }
+
+  function shouldUseLiveSearch(mode = null, env = null) {
+    if (!foresightConfig.enabled) return false;
+    const effectiveMode =
+      mode ||
+      env?.mode ||
+      env?.state?.mode ||
+      foresightConfig.mode ||
+      "game";
+
+    if (effectiveMode === "train") {
+      return Boolean(foresightConfig.liveSearchInTrain);
+    }
+    if (effectiveMode === "eval") {
+      return Boolean(foresightConfig.liveSearchInEval);
+    }
+    return Boolean(foresightConfig.liveSearchInGame);
+  }
+
   function setForesightConfig(options = {}) {
     if (!options || typeof options !== "object") {
       return { ...foresightConfig };
     }
     if (typeof options.enabled === "boolean") {
       foresightConfig.enabled = options.enabled;
+    }
+    if (
+      options.mode === "train" ||
+      options.mode === "eval" ||
+      options.mode === "game"
+    ) {
+      foresightConfig.mode = options.mode;
+    }
+    if (typeof options.liveSearchInTrain === "boolean") {
+      foresightConfig.liveSearchInTrain = options.liveSearchInTrain;
+    }
+    if (typeof options.liveSearchInEval === "boolean") {
+      foresightConfig.liveSearchInEval = options.liveSearchInEval;
+    }
+    if (typeof options.liveSearchInGame === "boolean") {
+      foresightConfig.liveSearchInGame = options.liveSearchInGame;
     }
     if (Number.isFinite(Number(options.horizon))) {
       foresightConfig.horizon = Math.max(
@@ -147,11 +198,11 @@
     return { ...foresightConfig };
   }
 
-  function makeSpec() {
+  function makeSpec(compact = false) {
     return {
       schema: SCHEMA,
       input: 256,
-      hidden: [128, 64],
+      hidden: compact ? [64, 32] : [128, 64],
       output: ACTION_MAP.length,
       actions: [...ACTION_MAP],
       statusIds: [...STATUS_IDS]
@@ -358,6 +409,16 @@
   /* ------------------------------------------------------------------
    * Persistent n-Move EV Foresight Planner & Plan Memory
    * ------------------------------------------------------------------ */
+
+  function emptyPlanMemoryBlock() {
+    return {
+      plannedActionIndex: -1,
+      plannedActionOrthogonal: new Array(ACTION_MAP.length).fill(0),
+      isLegal: 0,
+      remainingHorizonRatio: 0,
+      foreseenEvScaled: 0
+    };
+  }
 
   function getStatePlanStore(state) {
     if (!state || typeof state !== "object") {
@@ -677,13 +738,7 @@
 
   function syncAndReadPlanMemory(state, slot) {
     if (!foresightConfig.enabled || !state || !state[slot]) {
-      return {
-        plannedActionIndex: -1,
-        plannedActionOrthogonal: new Array(ACTION_MAP.length).fill(0),
-        isLegal: 0,
-        remainingHorizonRatio: 0,
-        foreseenEvScaled: 0
-      };
+      return emptyPlanMemoryBlock();
     }
 
     const store = getStatePlanStore(state);
@@ -735,13 +790,7 @@
 
     const plannedOrthogonal = new Array(ACTION_MAP.length).fill(0);
     if (!plan || !plan.sequence.length) {
-      return {
-        plannedActionIndex: -1,
-        plannedActionOrthogonal: plannedOrthogonal,
-        isLegal: 0,
-        remainingHorizonRatio: 0,
-        foreseenEvScaled: 0
-      };
+      return emptyPlanMemoryBlock();
     }
 
     const plannedIdx = plan.sequence[0];
@@ -769,6 +818,10 @@
   }
 
   function foresee(env, slot, net = null, options = {}) {
+    const mode = options.mode || env?.mode || env?.state?.mode || foresightConfig.mode;
+    if (!options.force && !shouldUseLiveSearch(mode, env)) {
+      return null;
+    }
     const state = env?.state || env;
     return buildForesightPlan(state, slot, net, options);
   }
@@ -777,11 +830,12 @@
    * Environment Lifecycle & Step Execution
    * ------------------------------------------------------------------ */
 
-  function create(state, previousActions = {}) {
+  function create(state, previousActions = {}, options = {}) {
     const env = {
       state,
       previousActions,
       history: state.history || [],
+      mode: options.mode || state?.mode || foresightConfig.mode || "game",
       cells: {},
       t: 0,
       done: false
@@ -863,14 +917,15 @@
       cell.start = null;
     }
 
-    // Synchronize executed action with persistent foresight plan memory
-    const store = getStatePlanStore(env.state);
-    const plan = store[slot];
-    const lockedIdx = getActionIndexByKey(normalized.key);
-    if (plan && Array.isArray(plan.sequence) && plan.sequence.length > 0) {
-      if (plan.sequence[0] !== lockedIdx) {
-        // AI deviated from the prior plan; align head so next turn re-evaluates cleanly
-        plan.sequence[0] = lockedIdx;
+    // Synchronize executed action with persistent foresight plan memory (when active)
+    if (shouldUseLiveSearch(env.mode, env)) {
+      const store = getStatePlanStore(env.state);
+      const plan = store[slot];
+      const lockedIdx = getActionIndexByKey(normalized.key);
+      if (plan && Array.isArray(plan.sequence) && plan.sequence.length > 0) {
+        if (plan.sequence[0] !== lockedIdx) {
+          plan.sequence[0] = lockedIdx;
+        }
       }
     }
 
@@ -1064,15 +1119,11 @@
       )
     ];
 
-    const planMemory = skipPlanRefresh
-      ? {
-          plannedActionIndex: -1,
-          plannedActionOrthogonal: new Array(ACTION_MAP.length).fill(0),
-          isLegal: 0,
-          remainingHorizonRatio: 0,
-          foreseenEvScaled: 0
-        }
-      : syncAndReadPlanMemory(env.state, slot);
+    // Bypass 3-move live search when skipPlanRefresh is true OR when in 'train' mode
+    const useLiveSearch = !skipPlanRefresh && shouldUseLiveSearch(env?.mode, env);
+    const planMemory = useLiveSearch
+      ? syncAndReadPlanMemory(env.state, slot)
+      : emptyPlanMemoryBlock();
 
     return {
       self,
@@ -1528,6 +1579,9 @@
     makeSpec,
     assertSpec,
     getActionIndexByKey,
+    setExecutionMode,
+    getExecutionMode,
+    shouldUseLiveSearch,
     setForesightConfig,
     getForesightConfig,
     foresee,

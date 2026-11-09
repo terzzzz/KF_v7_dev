@@ -452,6 +452,7 @@
       "name": "Electro Dynamo",
       "type": "UTILITY",
       "chiCost": 5,
+      "chiRefundOnHit": 4,
       "baseDamage": 0,
       "hitChance": 100,
       "video": "charge_up.mp4",

@@ -451,8 +451,8 @@
     "W+K": {
       "name": "Electro Dynamo",
       "type": "UTILITY",
-      "chiCost": 4,
-      "chiRefundOnHit": 3,
+      "chiCost": 2,
+      "chiRefundOnHit": 2,
       "baseDamage": 0,
       "hitChance": 100,
       "video": "charge_up.mp4",

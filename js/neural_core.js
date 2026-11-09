@@ -1,5 +1,5 @@
 /* js/neural_core.js
- * CPU MLP, Adam, masked action selection, replay, Double DQN.
+ * CPU MLP, Adam, masked action selection, n-step foresight selection, replay, Double DQN.
  * Build: v5-state256-action17
  */
 (function (g) {
@@ -89,6 +89,41 @@
     }
 
     return best;
+  }
+
+  /**
+   * Selects an action by combining network Q-values with n-move foresight EV planning.
+   */
+  function selectWithForesight(env, slot, net, mask, options = {}) {
+    const obs = g.SoulEnv.observe(env, slot);
+    const inputVec = g.SoulEnv.vector(obs);
+    const q = net.predict(inputVec);
+    checkOutput(q, mask);
+
+    const adjustedQ = Float32Array.from(q);
+
+    if (typeof g.SoulEnv?.foresee === "function") {
+      const plan = g.SoulEnv.foresee(env, slot, net, options);
+      const plannedIdx = plan?.sequence?.[0] ?? -1;
+
+      if (
+        plannedIdx >= 0 &&
+        plannedIdx < adjustedQ.length &&
+        (!mask || mask[plannedIdx])
+      ) {
+        const foresightWeight = Number.isFinite(options.foresightWeight)
+          ? options.foresightWeight
+          : 0.35;
+        const bonus = K.clamp(Number(plan.targetEv || 0), -2, 2) * foresightWeight;
+        adjustedQ[plannedIdx] += bonus;
+      }
+    }
+
+    if (options.temperature && options.temperature > 0.001) {
+      return sampleAction(adjustedQ, mask, options.temperature, options.rng);
+    }
+
+    return argmax(adjustedQ, mask);
   }
 
   function validateJSON(json) {
@@ -421,6 +456,13 @@
       this.warmup = options.warmup || 256;
       this.interval = options.interval || 32;
 
+      // Multi-step foresight lookahead buffer (default n = 3 turns)
+      this.nStep = Math.max(
+        1,
+        Math.min(6, Number(options.nStep ?? g.SoulEnv?.getForesightConfig?.()?.horizon ?? 3))
+      );
+      this.nStepQueue = [];
+
       this.updateStats = {
         win: 0, damage: 0, loss: 0, neutral: 0
       };
@@ -439,6 +481,41 @@
       }
     }
 
+    _commitNStepFromHead() {
+      if (!this.nStepQueue.length) return;
+
+      const head = this.nStepQueue.shift();
+      let nStepReward = head.r;
+      let cumulativeDiscount = head.discount;
+      let finalS1 = head.s1;
+      let finalM1 = head.m1;
+
+      for (let i = 0; i < this.nStepQueue.length; i++) {
+        if (cumulativeDiscount === 0) break;
+        const stepItem = this.nStepQueue[i];
+        nStepReward += cumulativeDiscount * stepItem.r;
+        cumulativeDiscount *= stepItem.discount;
+        finalS1 = stepItem.s1;
+        finalM1 = stepItem.m1;
+        if (stepItem.done) break;
+      }
+
+      // Boost replay priority weight when a multi-step sequence achieves high foreseen EV
+      let weightScale = head.weightScale ?? 1;
+      if (nStepReward - head.r > 0.35) {
+        weightScale = Math.min(2.5, weightScale * 1.25);
+      }
+
+      this.replay.add({
+        ...head,
+        nStepR: nStepReward,
+        nStepDiscount: cumulativeDiscount,
+        nStepS1: finalS1,
+        nStepM1: finalM1,
+        weightScale
+      });
+    }
+
     accept(transition, imitation = 0.03) {
       const discount = transition.done
         ? 0
@@ -453,46 +530,58 @@
       ) {
         throw new Error("Invalid replay transition.");
       }
-/*
- * Combat replay must identify the action that actually executed.
- * Generic Network.train() remains usable for ordinary test rows;
- * this guard protects the combat replay ingestion path.
- */
-const actionKey =
-  g.SoulEnv.ACTION_MAP[transition.a];
 
-const selectedCharge = transition.selectedCharge;
+      /*
+       * Combat replay must identify the action that actually executed.
+       * Generic Network.train() remains usable for ordinary test rows;
+       * this guard protects the combat replay ingestion path.
+       */
+      const actionKey =
+        g.SoulEnv.ACTION_MAP[transition.a];
 
-const validCharge = actionKey === "DO_NOTHING"
-  ? selectedCharge === 0
-  : (
-      Number.isFinite(selectedCharge) &&
-      selectedCharge >= 1 &&
-      selectedCharge <= 100
-    );
+      const selectedCharge = transition.selectedCharge;
 
-if (
-  !actionKey ||
-  !validCharge ||
-  transition.actionKey !== actionKey ||
-  transition.selectedActionKey !== actionKey ||
-  transition.resolvedActionKey !== actionKey ||
-  transition.charge !== selectedCharge ||
-  transition.resolvedCharge !== selectedCharge ||
-  transition.coreAdjustedAction === true
-) {
-  throw new Error(
-    "Replay action/charge mismatch. " +
-    "Non-idle replay moves must execute at 1–100% charge."
-  );
-}
+      const validCharge = actionKey === "DO_NOTHING"
+        ? selectedCharge === 0
+        : (
+            Number.isFinite(selectedCharge) &&
+            selectedCharge >= 1 &&
+            selectedCharge <= 100
+          );
+
+      if (
+        !actionKey ||
+        !validCharge ||
+        transition.actionKey !== actionKey ||
+        transition.selectedActionKey !== actionKey ||
+        transition.resolvedActionKey !== actionKey ||
+        transition.charge !== selectedCharge ||
+        transition.resolvedCharge !== selectedCharge ||
+        transition.coreAdjustedAction === true
+      ) {
+        throw new Error(
+          "Replay action/charge mismatch. " +
+          "Non-idle replay moves must execute at 1–100% charge."
+        );
+      }
+
       this.steps++;
 
-      this.replay.add({
+      const enriched = {
         ...transition,
         discount,
         weightScale: transition.weightScale ?? 1
-      });
+      };
+
+      this.nStepQueue.push(enriched);
+
+      if (transition.done) {
+        while (this.nStepQueue.length > 0) {
+          this._commitNStepFromHead();
+        }
+      } else if (this.nStepQueue.length >= this.nStep) {
+        this._commitNStepFromHead();
+      }
 
       if (
         this.steps % this.interval !== 0 ||
@@ -502,14 +591,27 @@ if (
       }
 
       const rows = this.replay.sample(this.batchSize, this.rng).map(t => {
-        let target = t.r;
-
-        if (t.discount > 0) {
-          const nextAction = argmax(this.net.predict(t.s1), t.m1);
-          target += t.discount * this.target.predict(t.s1)[nextAction];
+        // 1-step Double DQN target
+        let target1 = t.r;
+        if (t.discount > 0 && t.m1 && t.m1.some(Boolean)) {
+          const nextAction1 = argmax(this.net.predict(t.s1), t.m1);
+          target1 += t.discount * this.target.predict(t.s1)[nextAction1];
         }
 
-        target = K.clamp(target, -5, 5);
+        // n-step Double DQN foresight target
+        let targetN = t.nStepR ?? t.r;
+        const discN = t.nStepDiscount ?? t.discount;
+        const s1N = t.nStepS1 ?? t.s1;
+        const m1N = t.nStepM1 ?? t.m1;
+
+        if (discN > 0 && s1N && m1N && m1N.some(Boolean)) {
+          const nextActionN = argmax(this.net.predict(s1N), m1N);
+          targetN += discN * this.target.predict(s1N)[nextActionN];
+        }
+
+        // Blend 1-step stability (40%) with n-step foresight destination EV (60%)
+        const blendedTarget = 0.40 * target1 + 0.60 * targetN;
+        const target = K.clamp(blendedTarget, -5, 5);
 
         const category = t.rewardCategory || "Neu";
         const key = category === "Win"
@@ -564,6 +666,7 @@ if (
     argmax,
     randomAction,
     sampleAction,
+    selectWithForesight,
     getStanceGroups
   };
 })(globalThis);

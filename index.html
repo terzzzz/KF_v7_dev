@@ -451,6 +451,241 @@
     })();
   </script>
 
+  <!-- Hardcoded 49-Matchup Matrix Manifest & Google Script / Drive Bridge -->
+  <script>
+    (function (g) {
+      "use strict";
+
+      const GDRIVE_FOLDER_ID = "15P5HeKqLxMYw3ykirJj2HMT726SZnkId";
+      const STORAGE_PREFIX = "kf_matrix49_v5_";
+      const GAS_URL_STORAGE_KEY = "kf_gdrive_gas_webapp_url";
+
+      const ACTIVE_RIDERS_7 = Object.freeze([
+        { index: 0, id: "ichigo",   code: "r0", name: "Kamen Rider Ichigo" },
+        { index: 1, id: "nigo",     code: "r1", name: "Kamen Rider Nigo" },
+        { index: 2, id: "v3",       code: "r2", name: "Kamen Rider V3" },
+        { index: 3, id: "riderman", code: "r3", name: "Riderman" },
+        { index: 4, id: "x",        code: "r4", name: "Kamen Rider X" },
+        { index: 5, id: "amazon",   code: "r5", name: "Kamen Rider Amazon" },
+        { index: 6, id: "stronger", code: "r6", name: "Kamen Rider Stronger" }
+      ]);
+
+      // Hardcoded 49 Matchup Matrices (7 Riders x 7 Riders)
+      const HARDCODED_49_MATRICES = Object.freeze({
+        "r0_vs_r0": { key: "r0_vs_r0", p1: 0, p2: 0, p1Id: "ichigo",   p2Id: "ichigo",   file: "matrix_r0_vs_r0.json" },
+        "r0_vs_r1": { key: "r0_vs_r1", p1: 0, p2: 1, p1Id: "ichigo",   p2Id: "nigo",     file: "matrix_r0_vs_r1.json" },
+        "r0_vs_r2": { key: "r0_vs_r2", p1: 0, p2: 2, p1Id: "ichigo",   p2Id: "v3",       file: "matrix_r0_vs_r2.json" },
+        "r0_vs_r3": { key: "r0_vs_r3", p1: 0, p2: 3, p1Id: "ichigo",   p2Id: "riderman", file: "matrix_r0_vs_r3.json" },
+        "r0_vs_r4": { key: "r0_vs_r4", p1: 0, p2: 4, p1Id: "ichigo",   p2Id: "x",        file: "matrix_r0_vs_r4.json" },
+        "r0_vs_r5": { key: "r0_vs_r5", p1: 0, p2: 5, p1Id: "ichigo",   p2Id: "amazon",   file: "matrix_r0_vs_r5.json" },
+        "r0_vs_r6": { key: "r0_vs_r6", p1: 0, p2: 6, p1Id: "ichigo",   p2Id: "stronger", file: "matrix_r0_vs_r6.json" },
+
+        "r1_vs_r0": { key: "r1_vs_r0", p1: 1, p2: 0, p1Id: "nigo",     p2Id: "ichigo",   file: "matrix_r1_vs_r0.json" },
+        "r1_vs_r1": { key: "r1_vs_r1", p1: 1, p2: 1, p1Id: "nigo",     p2Id: "nigo",     file: "matrix_r1_vs_r1.json" },
+        "r1_vs_r2": { key: "r1_vs_r2", p1: 1, p2: 2, p1Id: "nigo",     p2Id: "v3",       file: "matrix_r1_vs_r2.json" },
+        "r1_vs_r3": { key: "r1_vs_r3", p1: 1, p2: 3, p1Id: "nigo",     p2Id: "riderman", file: "matrix_r1_vs_r3.json" },
+        "r1_vs_r4": { key: "r1_vs_r4", p1: 1, p2: 4, p1Id: "nigo",     p2Id: "x",        file: "matrix_r1_vs_r4.json" },
+        "r1_vs_r5": { key: "r1_vs_r5", p1: 1, p2: 5, p1Id: "nigo",     p2Id: "amazon",   file: "matrix_r1_vs_r5.json" },
+        "r1_vs_r6": { key: "r1_vs_r6", p1: 1, p2: 6, p1Id: "nigo",     p2Id: "stronger", file: "matrix_r1_vs_r6.json" },
+
+        "r2_vs_r0": { key: "r2_vs_r0", p1: 2, p2: 0, p1Id: "v3",       p2Id: "ichigo",   file: "matrix_r2_vs_r0.json" },
+        "r2_vs_r1": { key: "r2_vs_r1", p1: 2, p2: 1, p1Id: "v3",       p2Id: "nigo",     file: "matrix_r2_vs_r1.json" },
+        "r2_vs_r2": { key: "r2_vs_r2", p1: 2, p2: 2, p1Id: "v3",       p2Id: "v3",       file: "matrix_r2_vs_r2.json" },
+        "r2_vs_r3": { key: "r2_vs_r3", p1: 2, p2: 3, p1Id: "v3",       p2Id: "riderman", file: "matrix_r2_vs_r3.json" },
+        "r2_vs_r4": { key: "r2_vs_r4", p1: 2, p2: 4, p1Id: "v3",       p2Id: "x",        file: "matrix_r2_vs_r4.json" },
+        "r2_vs_r5": { key: "r2_vs_r5", p1: 2, p2: 5, p1Id: "v3",       p2Id: "amazon",   file: "matrix_r2_vs_r5.json" },
+        "r2_vs_r6": { key: "r2_vs_r6", p1: 2, p2: 6, p1Id: "v3",       p2Id: "stronger", file: "matrix_r2_vs_r6.json" },
+
+        "r3_vs_r0": { key: "r3_vs_r0", p1: 3, p2: 0, p1Id: "riderman", p2Id: "ichigo",   file: "matrix_r3_vs_r0.json" },
+        "r3_vs_r1": { key: "r3_vs_r1", p1: 3, p2: 1, p1Id: "riderman", p2Id: "nigo",     file: "matrix_r3_vs_r1.json" },
+        "r3_vs_r2": { key: "r3_vs_r2", p1: 3, p2: 2, p1Id: "riderman", p2Id: "v3",       file: "matrix_r3_vs_r2.json" },
+        "r3_vs_r3": { key: "r3_vs_r3", p1: 3, p2: 3, p1Id: "riderman", p2Id: "riderman", file: "matrix_r3_vs_r3.json" },
+        "r3_vs_r4": { key: "r3_vs_r4", p1: 3, p2: 4, p1Id: "riderman", p2Id: "x",        file: "matrix_r3_vs_r4.json" },
+        "r3_vs_r5": { key: "r3_vs_r5", p1: 3, p2: 5, p1Id: "riderman", p2Id: "amazon",   file: "matrix_r3_vs_r5.json" },
+        "r3_vs_r6": { key: "r3_vs_r6", p1: 3, p2: 6, p1Id: "riderman", p2Id: "stronger", file: "matrix_r3_vs_r6.json" },
+
+        "r4_vs_r0": { key: "r4_vs_r0", p1: 4, p2: 0, p1Id: "x",        p2Id: "ichigo",   file: "matrix_r4_vs_r0.json" },
+        "r4_vs_r1": { key: "r4_vs_r1", p1: 4, p2: 1, p1Id: "x",        p2Id: "nigo",     file: "matrix_r4_vs_r1.json" },
+        "r4_vs_r2": { key: "r4_vs_r2", p1: 4, p2: 2, p1Id: "x",        p2Id: "v3",       file: "matrix_r4_vs_r2.json" },
+        "r4_vs_r3": { key: "r4_vs_r3", p1: 4, p2: 3, p1Id: "x",        p2Id: "riderman", file: "matrix_r4_vs_r3.json" },
+        "r4_vs_r4": { key: "r4_vs_r4", p1: 4, p2: 4, p1Id: "x",        p2Id: "x",        file: "matrix_r4_vs_r4.json" },
+        "r4_vs_r5": { key: "r4_vs_r5", p1: 4, p2: 5, p1Id: "x",        p2Id: "amazon",   file: "matrix_r4_vs_r5.json" },
+        "r4_vs_r6": { key: "r4_vs_r6", p1: 4, p2: 6, p1Id: "x",        p2Id: "stronger", file: "matrix_r4_vs_r6.json" },
+
+        "r5_vs_r0": { key: "r5_vs_r0", p1: 5, p2: 0, p1Id: "amazon",   p2Id: "ichigo",   file: "matrix_r5_vs_r0.json" },
+        "r5_vs_r1": { key: "r5_vs_r1", p1: 5, p2: 1, p1Id: "amazon",   p2Id: "nigo",     file: "matrix_r5_vs_r1.json" },
+        "r5_vs_r2": { key: "r5_vs_r2", p1: 5, p2: 2, p1Id: "amazon",   p2Id: "v3",       file: "matrix_r5_vs_r2.json" },
+        "r5_vs_r3": { key: "r5_vs_r3", p1: 5, p2: 3, p1Id: "amazon",   p2Id: "riderman", file: "matrix_r5_vs_r3.json" },
+        "r5_vs_r4": { key: "r5_vs_r4", p1: 5, p2: 4, p1Id: "amazon",   p2Id: "x",        file: "matrix_r5_vs_r4.json" },
+        "r5_vs_r5": { key: "r5_vs_r5", p1: 5, p2: 5, p1Id: "amazon",   p2Id: "amazon",   file: "matrix_r5_vs_r5.json" },
+        "r5_vs_r6": { key: "r5_vs_r6", p1: 5, p2: 6, p1Id: "amazon",   p2Id: "stronger", file: "matrix_r5_vs_r6.json" },
+
+        "r6_vs_r0": { key: "r6_vs_r0", p1: 6, p2: 0, p1Id: "stronger", p2Id: "ichigo",   file: "matrix_r6_vs_r0.json" },
+        "r6_vs_r1": { key: "r6_vs_r1", p1: 6, p2: 1, p1Id: "stronger", p2Id: "nigo",     file: "matrix_r6_vs_r1.json" },
+        "r6_vs_r2": { key: "r6_vs_r2", p1: 6, p2: 2, p1Id: "stronger", p2Id: "v3",       file: "matrix_r6_vs_r2.json" },
+        "r6_vs_r3": { key: "r6_vs_r3", p1: 6, p2: 3, p1Id: "stronger", p2Id: "riderman", file: "matrix_r6_vs_r3.json" },
+        "r6_vs_r4": { key: "r6_vs_r4", p1: 6, p2: 4, p1Id: "stronger", p2Id: "x",        file: "matrix_r6_vs_r4.json" },
+        "r6_vs_r5": { key: "r6_vs_r5", p1: 6, p2: 5, p1Id: "stronger", p2Id: "amazon",   file: "matrix_r6_vs_r5.json" },
+        "r6_vs_r6": { key: "r6_vs_r6", p1: 6, p2: 6, p1Id: "stronger", p2Id: "stronger", file: "matrix_r6_vs_r6.json" }
+      });
+
+      function resolveRiderIndex(rider) {
+        if (typeof rider === "number" && Number.isInteger(rider)) {
+          return Math.max(0, Math.min(6, rider));
+        }
+        const s = String(rider || "").trim().toLowerCase();
+        const byId = ACTIVE_RIDERS_7.find(
+          r => r.id === s || r.code === s || s.includes(r.id)
+        );
+        if (byId) return byId.index;
+        const m = s.match(/(\d+)/);
+        return m ? Math.max(0, Math.min(6, Number(m[1]))) : 0;
+      }
+
+      function getEntry(riderA, riderB) {
+        const a = resolveRiderIndex(riderA);
+        const b = resolveRiderIndex(riderB);
+        return HARDCODED_49_MATRICES[`r${a}_vs_r${b}`];
+      }
+
+      function getGasWebAppUrl() {
+        try {
+          return g.GDRIVE_GAS_WEBAPP_URL || localStorage.getItem(GAS_URL_STORAGE_KEY) || "";
+        } catch (_) {
+          return g.GDRIVE_GAS_WEBAPP_URL || "";
+        }
+      }
+
+      function setGasWebAppUrl(url) {
+        const trimmed = String(url || "").trim();
+        g.GDRIVE_GAS_WEBAPP_URL = trimmed;
+        try {
+          if (trimmed) localStorage.setItem(GAS_URL_STORAGE_KEY, trimmed);
+          else localStorage.removeItem(GAS_URL_STORAGE_KEY);
+        } catch (_) {}
+        return trimmed;
+      }
+
+      async function loadMatchupMatrix(riderA, riderB) {
+        const entry = getEntry(riderA, riderB);
+        const gasUrl = getGasWebAppUrl();
+
+        // 1. Try Google Script Web App (linked to Folder 15P5HeKqLxMYw3ykirJj2HMT726SZnkId)
+        if (gasUrl) {
+          try {
+            const sep = gasUrl.includes("?") ? "&" : "?";
+            const url = `${gasUrl}${sep}action=load&folderId=${encodeURIComponent(GDRIVE_FOLDER_ID)}&key=${encodeURIComponent(entry.key)}&file=${encodeURIComponent(entry.file)}`;
+            const res = await fetch(url, { method: "GET", cache: "no-store" });
+            if (res.ok) {
+              const json = await res.json();
+              const matrixPayload = json?.matrix || json?.data || json;
+              if (matrixPayload && (matrixPayload.net || matrixPayload.layers)) {
+                try {
+                  localStorage.setItem(STORAGE_PREFIX + entry.key, JSON.stringify(matrixPayload));
+                } catch (_) {}
+                return matrixPayload;
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 2. Try Google Apps Script google.script.run if hosted inside GAS iframe
+        if (g.google?.script?.run) {
+          try {
+            const gasData = await new Promise((resolve, reject) => {
+              g.google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .loadMatrixFromDriveFolder(GDRIVE_FOLDER_ID, entry.file);
+            });
+            if (gasData) {
+              const parsed = typeof gasData === "string" ? JSON.parse(gasData) : gasData;
+              return parsed;
+            }
+          } catch (_) {}
+        }
+
+        // 3. Try localStorage cache
+        try {
+          const cached = localStorage.getItem(STORAGE_PREFIX + entry.key);
+          if (cached) return JSON.parse(cached);
+        } catch (_) {}
+
+        // 4. Fallback to static local repository path
+        try {
+          const localRes = await fetch(`models/matrices_49/${entry.file}`, { cache: "no-store" });
+          if (localRes.ok) {
+            return await localRes.json();
+          }
+        } catch (_) {}
+
+        return null;
+      }
+
+      async function saveMatchupMatrix(riderA, riderB, payload) {
+        const entry = getEntry(riderA, riderB);
+        const enriched = {
+          ...payload,
+          matchupKey: entry.key,
+          fileName: entry.file,
+          folderId: GDRIVE_FOLDER_ID,
+          p1Rider: entry.p1Id,
+          p2Rider: entry.p2Id,
+          updatedAt: new Date().toISOString()
+        };
+
+        try {
+          localStorage.setItem(STORAGE_PREFIX + entry.key, JSON.stringify(enriched));
+        } catch (_) {}
+
+        const gasUrl = getGasWebAppUrl();
+        if (gasUrl) {
+          try {
+            const res = await fetch(gasUrl, {
+              method: "POST",
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({
+                action: "save",
+                folderId: GDRIVE_FOLDER_ID,
+                key: entry.key,
+                fileName: entry.file,
+                payload: enriched
+              })
+            });
+            if (res.ok) return await res.json();
+          } catch (_) {}
+        }
+
+        if (g.google?.script?.run) {
+          try {
+            return await new Promise((resolve, reject) => {
+              g.google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .saveMatrixToDriveFolder(GDRIVE_FOLDER_ID, entry.file, JSON.stringify(enriched));
+            });
+          } catch (_) {}
+        }
+
+        return enriched;
+      }
+
+      g.MATCHUP_49_MANIFEST = HARDCODED_49_MATRICES;
+      g.ACTIVE_RIDERS_7 = ACTIVE_RIDERS_7;
+      g.MatrixStorage = {
+        GDRIVE_FOLDER_ID,
+        HARDCODED_49_MATRICES,
+        ACTIVE_RIDERS_7,
+        resolveRiderIndex,
+        getEntry,
+        getGasWebAppUrl,
+        setGasWebAppUrl,
+        loadMatchupMatrix,
+        saveMatchupMatrix
+      };
+    })(globalThis);
+  </script>
+
   <!-- Shared rules and search -->
   <script src="js/common.js?v=v5-state256-action17-charge1-reset1"></script>
   <script src="js/combat_core.js?v=v5-state256-action17-charge1-reset1"></script>
@@ -462,6 +697,23 @@
   <script src="js/neural_core.js?v=v5-state256-action17-charge1-reset1"></script>
   <script src="js/soul_sim.js?v=v5-state256-action17-charge1-reset1"></script>
   <script src="js/soul_agent.js?v=v5-state256-action17-charge1-reset1"></script>
+
+  <!-- Activate Game Execution Mode (3-Move Foresight Live Search ON) & 49-Matrix Pool -->
+  <script>
+    (function (g) {
+      "use strict";
+      if (g.SoulEnv?.setExecutionMode) {
+        g.SoulEnv.setExecutionMode("game");
+      }
+      if (g.SoulNN?.MatchupMatrixPool) {
+        g.MatchupPool = new g.SoulNN.MatchupMatrixPool({
+          sizes: g.SoulNN.COMPACT_MATCHUP_SIZES,
+          numRiders: 7,
+          folderId: "15P5HeKqLxMYw3ykirJj2HMT726SZnkId"
+        });
+      }
+    })(globalThis);
+  </script>
 
   <!-- Dispatcher and live CPU service -->
   <script src="js/ai.js?v=v5-state256-action17-charge1-reset1"></script>

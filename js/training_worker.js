@@ -1,7 +1,7 @@
 /* js/training_worker.js
  * Build: v5-state256-action17
  * Matrix: v7-7riders-10backup
- * Patch: charge1-reset1
+ * Patch: charge1-reset1 (Turbo-Optimized Worker)
  */
 "use strict";
 
@@ -22,11 +22,12 @@ const MIXED_CPU_SEQUENCE = [
 const MIXED_ROUND_SPAN = 30;
 const MAX_WINS_PER_DIFF_OPP = 4;
 
-// Turbo scheduling constants: keep worker on-CPU ~99.5% of the time
-const YIELD_INTERVAL_MS = 250;
-const PROGRESS_INTERVAL_MS = 1000;
-const CHECKPOINT_GAME_INTERVAL = 100;
-const CHECKPOINT_MIN_INTERVAL_MS = 5000;
+// Turbo scheduling constants: keep worker on-CPU ~99.8% of the time
+// and avoid spamming main-thread DOM/localStorage serialization
+const YIELD_INTERVAL_MS = 500;
+const PROGRESS_INTERVAL_MS = 2000;
+const CHECKPOINT_GAME_INTERVAL = 250;
+const CHECKPOINT_MIN_INTERVAL_MS = 30000;
 
 importScripts(...[
   "common.js",
@@ -39,6 +40,29 @@ importScripts(...[
   "soul_agent.js",
   "ai.js"
 ].map(file => file + "?v=" + CACHE_TAG));
+
+// Precompute stance/button lookup for all actions to avoid .split("+") in hot loop
+const ACTION_PARTS_CACHE = Object.create(null);
+if (typeof SoulEnv !== "undefined" && Array.isArray(SoulEnv.ACTION_MAP)) {
+  for (const actKey of SoulEnv.ACTION_MAP) {
+    const parts = String(actKey).split("+");
+    const stance = ["W", "A", "S", "D"].includes(parts[0]) ? parts[0] : "IDLE";
+    const button = ["J", "K", "I", "L"].includes(parts[1]) ? parts[1] : "NONE";
+    ACTION_PARTS_CACHE[actKey] = { stance, button };
+  }
+}
+
+function getActionParts(key) {
+  let cached = ACTION_PARTS_CACHE[key];
+  if (!cached) {
+    const parts = String(key).split("+");
+    const stance = ["W", "A", "S", "D"].includes(parts[0]) ? parts[0] : "IDLE";
+    const button = ["J", "K", "I", "L"].includes(parts[1]) ? parts[1] : "NONE";
+    cached = { stance, button };
+    ACTION_PARTS_CACHE[key] = cached;
+  }
+  return cached;
+}
 
 let busy = false;
 let cancelled = false;
@@ -289,7 +313,11 @@ function updateMatchParameters(params, prevTotalGames, metrics, wasdCounts, jkil
 
   const stanceTotal = Math.max(
     1,
-    Object.values(wasdCounts).reduce((a, b) => a + b, 0)
+    (wasdCounts.W || 0) +
+    (wasdCounts.A || 0) +
+    (wasdCounts.S || 0) +
+    (wasdCounts.D || 0) +
+    (wasdCounts.IDLE || 0)
   );
   for (const k of ["W", "A", "S", "D", "IDLE"]) {
     updated.stanceDistribution[k] = Number(((wasdCounts[k] || 0) / stanceTotal).toFixed(4));
@@ -297,7 +325,11 @@ function updateMatchParameters(params, prevTotalGames, metrics, wasdCounts, jkil
 
   const buttonTotal = Math.max(
     1,
-    Object.values(jkilCounts).reduce((a, b) => a + b, 0)
+    (jkilCounts.J || 0) +
+    (jkilCounts.K || 0) +
+    (jkilCounts.I || 0) +
+    (jkilCounts.L || 0) +
+    (jkilCounts.NONE || 0)
   );
   for (const k of ["J", "K", "I", "L", "NONE"]) {
     updated.buttonDistribution[k] = Number(((jkilCounts[k] || 0) / buttonTotal).toFixed(4));
@@ -399,14 +431,16 @@ async function run(job) {
     const baseGames = old?.games || 0;
     const baseSteps = old?.steps || 0;
 
+    // Turbo Learner config: reduce backprop frequency from every 2-4 steps to every 8-12 steps
+    // and use a compact minibatch so CPU isn't bottlenecked by 160+ backprop passes per match
     const learner = training
       ? new SoulNN.Learner(
           net,
           KF.hash(seed, "replay", key),
           baseSteps,
           job.warmStart
-            ? { interval: 2, warmup: 32 }
-            : { interval: 4, warmup: 128 }
+            ? { interval: 8, warmup: 64, batchSize: 16 }
+            : { interval: 12, warmup: 160, batchSize: 16 }
         )
       : null;
 
@@ -467,6 +501,7 @@ async function run(job) {
 
   const breakdown = {};
   const firstWinningGames = [];
+  let lastReportedWinsCount = -1;
   const winCountsByDiffOpp = {};
 
   const wasdCounts = {
@@ -589,7 +624,7 @@ async function run(job) {
     return reports;
   }
 
-  function report(activeCtx = singleCtx) {
+  function report(activeCtx = singleCtx, forceFullLogs = false) {
     const seconds = Math.max(
       0.001,
       (performance.now() - started) / 1000
@@ -614,6 +649,13 @@ async function run(job) {
           aggUpdateStats.neutral += c.learner.updateStats.neutral || 0;
         }
       }
+    }
+
+    // Only send the heavy firstWinningGames array when a new demo win was added or at job end
+    const includeWinLogs =
+      forceFullLogs || firstWinningGames.length !== lastReportedWinsCount;
+    if (includeWinLogs) {
+      lastReportedWinsCount = firstWinningGames.length;
     }
 
     return {
@@ -699,6 +741,8 @@ async function run(job) {
   const fullMixedCycleLength =
     MIXED_ROUND_SPAN * MIXED_CPU_SEQUENCE.length;
 
+  const fastTeachers = ["balanced", "defensive", "balanced", "master"];
+
   for (let i = 0; i < job.matches && !cancelled; i++) {
     const pairIndex = Math.floor(i / 2);
     const oppRider =
@@ -739,12 +783,18 @@ async function run(job) {
     imitation = 0;
 
     let matchGuideProbability = 0;
+    let effectiveTeacher = job.teacher;
 
     if (training) {
       if (job.warmStart) {
         guideProbability = 1;
         matchGuideProbability = 1;
         imitation = 1;
+        // Use fast tactical teachers on 75% of warm-start games so warm-start finishes rapidly
+        effectiveTeacher =
+          job.teacher === "master"
+            ? fastTeachers[i % fastTeachers.length]
+            : job.teacher;
 
         epsilon = Math.max(
           0.02,
@@ -752,7 +802,13 @@ async function run(job) {
         );
       } else {
         if (Number.isFinite(job.guidePct)) {
-          guideProbability = job.guidePct / 100;
+          // Decay guidance smoothly as this specific matchup accumulates experience
+          const totalCtxExp = ctx.baseGames + ctx.games;
+          const expDecay = totalCtxExp > 60
+            ? Math.max(0.25, 60 / totalCtxExp)
+            : 1.0;
+          const batchDecay = 1 - (progress / 100) * 0.5;
+          guideProbability = (job.guidePct / 100) * expDecay * batchDecay;
         } else if (progress < job.guideHoldPct) {
           guideProbability = 1;
         } else if (
@@ -793,9 +849,15 @@ async function run(job) {
         // Deterministic per-match roll so low guideProbability skips heavy teacher lookahead
         // on unguided matches instead of running teacher evaluation on 100% of matches
         const guideRoll = (KF.hash(matchSeed, "guide_gate", i) >>> 0) / 4294967296;
-        const guidedMatch = guideProbability >= 1 || (guideProbability > 0 && guideRoll < guideProbability);
+        const guidedMatch =
+          guideProbability >= 1 ||
+          (guideProbability > 0 && guideRoll < guideProbability);
 
         matchGuideProbability = guidedMatch ? 1 : 0;
+
+        if (guidedMatch && job.teacher === "master") {
+          effectiveTeacher = fastTeachers[i % fastTeachers.length];
+        }
 
         const masterImitation = guidedMatch
           ? Math.max(0.01, 0.05 * guideProbability)
@@ -826,7 +888,7 @@ async function run(job) {
       seed: matchSeed,
       epsilon,
       guideProbability: matchGuideProbability,
-      teacher: job.teacher,
+      teacher: effectiveTeacher,
       rewardMode: job.rewardMode,
 
       learnerMode: job.learnerPolicy,
@@ -857,15 +919,7 @@ async function run(job) {
 
         const key = event.transition.resolvedActionKey;
         const learnerCharge = event.transition.resolvedCharge;
-        const parts = key.split("+");
-
-        const stance = ["W", "A", "S", "D"].includes(parts[0])
-          ? parts[0]
-          : "IDLE";
-
-        const button = ["J", "K", "I", "L"].includes(parts[1])
-          ? parts[1]
-          : "NONE";
+        const { stance, button } = getActionParts(key);
 
         wasdCounts[stance]++;
         jkilCounts[button]++;
@@ -1014,7 +1068,7 @@ async function run(job) {
     }
 
     if (now - lastProgress >= PROGRESS_INTERVAL_MS) {
-      send("progress", { report: report(ctx) });
+      send("progress", { report: report(ctx, false) });
       lastProgress = performance.now();
     }
 
@@ -1034,7 +1088,7 @@ async function run(job) {
     }
   }
 
-  send("done", { report: report() });
+  send("done", { report: report(singleCtx, true) });
 }
 
 self.onmessage = async event => {

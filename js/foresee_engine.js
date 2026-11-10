@@ -18,6 +18,51 @@
 
   const DIRS = ["W", "A", "S", "D"];
 
+  // WeakMap cache for static per-fighter moveset metadata to eliminate Object.entries/keys in hot loops
+  const MOVESET_META_CACHE = new WeakMap();
+
+  function getMovesetMeta(movesForSlot) {
+    if (!movesForSlot || typeof movesForSlot !== "object") {
+      return { minSCost: 4, keys: [], sKeys: [], omniKeys: [] };
+    }
+    let meta = MOVESET_META_CACHE.get(movesForSlot);
+    if (!meta) {
+      let minSCost = Infinity;
+      const keys = Object.keys(movesForSlot);
+      const sKeys = [];
+      const omniKeys = [];
+
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const move = movesForSlot[key];
+        if (!move) continue;
+        if (move.direction === "S" || key.startsWith("S+")) {
+          sKeys.push(key);
+          const cost = Number(move.chiCost);
+          if (Number.isFinite(cost) && cost > 0 && cost < minSCost) {
+            minSCost = cost;
+          }
+        }
+        if (
+          move.guardKind === "omni" ||
+          move.guardKind === "all" ||
+          move.omniGuard === true
+        ) {
+          omniKeys.push(key);
+        }
+      }
+
+      meta = {
+        minSCost: Number.isFinite(minSCost) ? minSCost : 4,
+        keys,
+        sKeys,
+        omniKeys
+      };
+      MOVESET_META_CACHE.set(movesForSlot, meta);
+    }
+    return meta;
+  }
+
   // Base tactical anchors (each receives a +1% to +12% randomizer per move/turn):
   //   24 -> 25..36% (Fast Utility/Guard)
   //   34 -> 35..46% (Standard Utility/Guard)
@@ -202,46 +247,59 @@
     if (!key || key === "DO_NOTHING") {
       return "IDLE";
     }
+    const c0 = key.charCodeAt(0);
+    if (key.charCodeAt(1) === 43) {
+      if (c0 === 87) return "W";
+      if (c0 === 65) return "A";
+      if (c0 === 83) return "S";
+      if (c0 === 68) return "D";
+    }
     const move = state?.moves?.[slot]?.[key];
-    if (move?.direction) {
-      return move.direction;
-    }
-    if (typeof key === "string" && key.includes("+")) {
-      return key.split("+")[0];
-    }
-    return "IDLE";
+    return move?.direction || "IDLE";
   }
 
   function isSMove(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 83 && key.charCodeAt(1) === 43) {
+      return true;
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "S" || key.startsWith("S+");
+    return move?.direction === "S";
   }
 
   function isDMove(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 68 && key.charCodeAt(1) === 43) {
+      return true;
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "D" || key.startsWith("D+");
+    return move?.direction === "D";
   }
 
   function isWMove(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 87 && key.charCodeAt(1) === 43) {
+      return true;
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "W" || key.startsWith("W+");
+    return move?.direction === "W";
   }
 
   function isAGuardMove(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 65 && key.charCodeAt(1) === 43) {
+      return true;
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "A" || key.startsWith("A+");
+    return move?.direction === "A";
   }
 
   function isOffensiveMove(state, slot, key) {
@@ -277,16 +335,38 @@
     );
   }
 
-  function canUseOmniGuard(state, slot, dirConstraints = null) {
+  function canUseMoveKey(state, slot, key, dirConstraints = null) {
     if (!state || !state[slot] || state[slot].isFainted) {
+      return false;
+    }
+    const move = state.moves?.[slot]?.[key];
+    if (!move) {
+      return false;
+    }
+    const dc = dirConstraints && move.direction ? dirConstraints[move.direction] : null;
+    if (dc && dc.allowed === false) {
+      return false;
+    }
+    const availMs = dc && Number.isFinite(dc.availableMs) ? dc.availableMs : undefined;
+    const maxChg = C.maxCharge(state[slot], move.direction, availMs);
+    if (!Number.isFinite(maxChg) || maxChg < 1) {
+      return false;
+    }
+    return C.isLegal(state, slot, { key, charge: maxChg });
+  }
+
+  function canUseOmniGuard(state, slot, dirConstraints = null) {
+    const fighter = state?.[slot];
+    if (!fighter || fighter.isFainted) {
       return false;
     }
     const moves = state.moves?.[slot];
     if (!moves) {
       return false;
     }
-    for (const key of Object.keys(moves)) {
-      if (isOmniGuardMove(state, slot, key) && canUseMoveKey(state, slot, key, dirConstraints)) {
+    const { omniKeys } = getMovesetMeta(moves);
+    for (let i = 0; i < omniKeys.length; i++) {
+      if (canUseMoveKey(state, slot, omniKeys[i], dirConstraints)) {
         return true;
       }
     }
@@ -309,51 +389,24 @@
     if (!moves) {
       return 4;
     }
-
-    let minCost = Infinity;
-    for (const [key, move] of Object.entries(moves)) {
-      if (!move) continue;
-      if (move.direction === "S" || key.startsWith("S+")) {
-        const cost = Number(move.chiCost);
-        if (Number.isFinite(cost) && cost > 0 && cost < minCost) {
-          minCost = cost;
-        }
-      }
-    }
-
-    return Number.isFinite(minCost) ? minCost : 4;
-  }
-
-  function canUseMoveKey(state, slot, key, dirConstraints = null) {
-    if (!state || !state[slot] || state[slot].isFainted) {
-      return false;
-    }
-    const move = state.moves?.[slot]?.[key];
-    if (!move) {
-      return false;
-    }
-    const dc = dirConstraints && move.direction ? dirConstraints[move.direction] : null;
-    if (dc && dc.allowed === false) {
-      return false;
-    }
-    const availMs = dc && Number.isFinite(dc.availableMs) ? dc.availableMs : undefined;
-    const maxChg = C.maxCharge(state[slot], move.direction, availMs);
-    if (!Number.isFinite(maxChg) || maxChg < 1) {
-      return false;
-    }
-    return C.isLegal(state, slot, { key, charge: maxChg });
+    return getMovesetMeta(moves).minSCost;
   }
 
   function canUseSMove(state, slot, dirConstraints = null) {
-    if (!state || !state[slot] || state[slot].isFainted) {
+    const fighter = state?.[slot];
+    if (!fighter || fighter.isFainted) {
       return false;
     }
     const moves = state.moves?.[slot];
     if (!moves) {
       return false;
     }
-    for (const key of Object.keys(moves)) {
-      if (isSMove(state, slot, key) && canUseMoveKey(state, slot, key, dirConstraints)) {
+    const { minSCost, sKeys } = getMovesetMeta(moves);
+    if (Number(fighter.chi || 0) < minSCost) {
+      return false;
+    }
+    for (let i = 0; i < sKeys.length; i++) {
+      if (canUseMoveKey(state, slot, sKeys[i], dirConstraints)) {
         return true;
       }
     }
@@ -484,59 +537,55 @@
   }
 
   /*
-   * Generates legal candidate actions with a +1% to +12% randomizer applied per move,
-   * ensuring no difficulty is stuck at constant % values while preserving hit-chance floors.
+   * Direct O(moves) legal action builder with +1% to +12% randomizer applied per move.
+   * Avoids calling C.actions() with 20+ probe charges on every node.
    */
   function buildRandomizedActions(
     state,
     slot,
     extraCharges,
     dirConstraints,
-    rng
+    rng,
+    compactMode = false
   ) {
-    const probeCharges = [
-      1, 20, 28, 36, 45, 55, 62, 70, 78, 86, 94, 100,
-      ...(Array.isArray(extraCharges) ? extraCharges : [])
-    ];
-
-    const probed = C.actions(
-      state,
-      slot,
-      [...new Set(probeCharges)],
-      dirConstraints
-    );
-
-    if (!probed || probed.length === 0) {
+    const fighter = state?.[slot];
+    if (!fighter || fighter.isFainted) {
       return [{ key: "DO_NOTHING", charge: 0 }];
     }
 
-    const byKey = new Map();
-    for (const act of probed) {
-      if (!byKey.has(act.key)) {
-        byKey.set(act.key, []);
-      }
-      byKey.get(act.key).push(act.charge ?? 0);
+    const moves = state.moves?.[slot];
+    if (!moves) {
+      return [{ key: "DO_NOTHING", charge: 0 }];
     }
 
     const result = [];
-
-    for (const [key, legalCharges] of byKey.entries()) {
-      if (key === "DO_NOTHING") {
+    if (!dirConstraints || dirConstraints.allowDoNothing !== false) {
+      if (C.isLegal(state, slot, { key: "DO_NOTHING", charge: 0 })) {
         result.push({ key: "DO_NOTHING", charge: 0 });
-        continue;
       }
+    }
 
-      const move = state.moves?.[slot]?.[key];
-      const dc = dirConstraints && move?.direction ? dirConstraints[move.direction] : null;
+    const { keys } = getMovesetMeta(moves);
+    const offensiveAnchors = compactMode ? [62, 82] : [60, 68, 78, 88];
+    const utilityAnchors = compactMode ? [30] : [24, 34, 48];
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (key === "DO_NOTHING") continue;
+
+      const move = moves[key];
+      if (!move) continue;
+
+      const dc = dirConstraints && move.direction ? dirConstraints[move.direction] : null;
+      if (dc && dc.allowed === false) continue;
+
       const availMs = dc && Number.isFinite(dc.availableMs) ? dc.availableMs : undefined;
-      const coreMax = move
-        ? C.maxCharge(state[slot], move.direction, availMs)
-        : Math.max(...legalCharges);
+      const coreMax = C.maxCharge(fighter, move.direction, availMs);
+      if (!Number.isFinite(coreMax) || coreMax < 1) continue;
 
       const minAllowed = Math.max(
         1,
-        dc && Number.isFinite(dc.minCharge) ? dc.minCharge : 1,
-        Math.min(...legalCharges)
+        dc && Number.isFinite(dc.minCharge) ? dc.minCharge : 1
       );
       const maxAllowed = Math.max(
         minAllowed,
@@ -546,74 +595,70 @@
         )
       );
 
-      // If opponent is locked at an exact charge in live mode, preserve exact lock
+      // Quick legality check at maxAllowed before generating charge variants
+      if (!C.isLegal(state, slot, { key, charge: maxAllowed })) {
+        continue;
+      }
+
       if (minAllowed === maxAllowed) {
-        const lockedAct = { key, charge: minAllowed };
-        if (C.isLegal(state, slot, lockedAct)) {
-          result.push(lockedAct);
-        }
+        result.push({ key, charge: minAllowed });
         continue;
       }
 
       const offensive = isOffensiveMove(state, slot, key);
-      const baseAnchors = offensive
-        ? [60, 68, 78, 88]
-        : [24, 34, 48];
+      const baseAnchors = offensive ? offensiveAnchors : utilityAnchors;
 
-      const chosenCharges = new Set();
+      let prevChg1 = -1;
+      let prevChg2 = -1;
+      let addedForMove = 0;
 
-      for (const anchor of baseAnchors) {
-        const jittered = jitterChargeAnchor(
-          anchor,
+      for (let aIdx = 0; aIdx < baseAnchors.length; aIdx++) {
+        const chg = jitterChargeAnchor(
+          baseAnchors[aIdx],
           minAllowed,
           maxAllowed,
           offensive,
           rng
         );
-        if (jittered >= 1) {
-          chosenCharges.add(jittered);
+        if (chg >= 1 && chg !== prevChg1 && chg !== prevChg2) {
+          const candidate = { key, charge: chg };
+          if (C.isLegal(state, slot, candidate)) {
+            result.push(candidate);
+            if (addedForMove === 0) prevChg1 = chg;
+            else if (addedForMove === 1) prevChg2 = chg;
+            addedForMove++;
+          }
         }
       }
 
-      if (Array.isArray(extraCharges)) {
-        for (const extra of extraCharges) {
+      if (!compactMode && Array.isArray(extraCharges)) {
+        for (let eIdx = 0; eIdx < extraCharges.length; eIdx++) {
+          const extra = extraCharges[eIdx];
           if (!Number.isFinite(extra) || extra < 1) continue;
-          const jittered = jitterChargeAnchor(
+          const chg = jitterChargeAnchor(
             extra,
             minAllowed,
             maxAllowed,
             offensive,
             rng
           );
-          if (jittered >= 1) {
-            chosenCharges.add(jittered);
+          if (chg >= 1 && chg !== prevChg1 && chg !== prevChg2) {
+            const candidate = { key, charge: chg };
+            if (C.isLegal(state, slot, candidate)) {
+              result.push(candidate);
+              prevChg2 = chg;
+              addedForMove++;
+            }
           }
         }
       }
 
-      let addedForMove = 0;
-      for (const chg of chosenCharges) {
-        const candidate = { key, charge: chg };
-        if (C.isLegal(state, slot, candidate)) {
-          result.push(candidate);
-          addedForMove++;
-        }
-      }
-
       if (addedForMove === 0) {
-        const fallbackCharge = K.clamp(
-          maxAllowed,
-          1,
-          100
-        );
-        const fallback = { key, charge: fallbackCharge };
-        if (C.isLegal(state, slot, fallback)) {
-          result.push(fallback);
-        }
+        result.push({ key, charge: K.clamp(maxAllowed, 1, 100) });
       }
     }
 
-    return result.length > 0 ? result : probed;
+    return result.length > 0 ? result : [{ key: "DO_NOTHING", charge: 0 }];
   }
 
   /*
@@ -764,45 +809,54 @@
     if (!player || player.lp <= 0) {
       return 0;
     }
+    const buffs = player.activeBuffs;
+    const airTicks = Number(player.airborneTicks || 0);
+    if ((!buffs || buffs.length === 0) && airTicks <= 0) {
+      return 0;
+    }
+
     const maxLp = Math.max(1, Number(player.maxLp || 1600));
     let units = 0;
 
-    for (const buff of player.activeBuffs || []) {
-      const rounds = Math.max(0, Math.min(4, Number(buff.roundsLeft || 0)));
-      if (rounds <= 0) continue;
-      const eff = buff.effects || {};
-      const durScale = 0.55 + 0.25 * rounds;
+    if (buffs) {
+      for (let i = 0; i < buffs.length; i++) {
+        const buff = buffs[i];
+        const rounds = Math.max(0, Math.min(4, Number(buff.roundsLeft || 0)));
+        if (rounds <= 0) continue;
+        const eff = buff.effects || {};
+        const durScale = 0.55 + 0.25 * rounds;
 
-      if (Number(eff.evasion) > 0) {
-        units += Number(eff.evasion) * 1.25 * durScale;
-      }
-      const lpRegen = Number(buff.lpRegen ?? eff.lpRegen ?? 0);
-      if (lpRegen > 0) {
-        units += ((lpRegen * rounds) / maxLp) * 1.40;
-      }
-      const lpBleed = Number(buff.lpBleed ?? eff.lpBleed ?? 0);
-      if (lpBleed > 0) {
-        units -= ((lpBleed * rounds) / maxLp) * 1.40;
-      }
-      if (Number(eff.attack) > 1) {
-        units += (Number(eff.attack) - 1) * 0.85 * durScale;
-      }
-      if (Number(eff.dAttack) > 1) {
-        units += (Number(eff.dAttack) - 1) * 0.70 * durScale;
-      }
-      if (Number(eff.sAttack) > 1) {
-        units += (Number(eff.sAttack) - 1) * 0.70 * durScale;
-      }
-      if (eff.armor !== undefined && Number(eff.armor) < 1) {
-        units += (1 - Number(eff.armor)) * 0.90 * durScale;
-      }
-      if (eff.speed !== undefined && Number(eff.speed) !== 1) {
-        units += (Number(eff.speed) - 1) * 0.60 * durScale;
+        if (Number(eff.evasion) > 0) {
+          units += Number(eff.evasion) * 1.25 * durScale;
+        }
+        const lpRegen = Number(buff.lpRegen ?? eff.lpRegen ?? 0);
+        if (lpRegen > 0) {
+          units += ((lpRegen * rounds) / maxLp) * 1.40;
+        }
+        const lpBleed = Number(buff.lpBleed ?? eff.lpBleed ?? 0);
+        if (lpBleed > 0) {
+          units -= ((lpBleed * rounds) / maxLp) * 1.40;
+        }
+        if (Number(eff.attack) > 1) {
+          units += (Number(eff.attack) - 1) * 0.85 * durScale;
+        }
+        if (Number(eff.dAttack) > 1) {
+          units += (Number(eff.dAttack) - 1) * 0.70 * durScale;
+        }
+        if (Number(eff.sAttack) > 1) {
+          units += (Number(eff.sAttack) - 1) * 0.70 * durScale;
+        }
+        if (eff.armor !== undefined && Number(eff.armor) < 1) {
+          units += (1 - Number(eff.armor)) * 0.90 * durScale;
+        }
+        if (eff.speed !== undefined && Number(eff.speed) !== 1) {
+          units += (Number(eff.speed) - 1) * 0.60 * durScale;
+        }
       }
     }
 
-    if (Number(player.airborneTicks) > 0) {
-      units += 0.20 * Math.min(2, Number(player.airborneTicks));
+    if (airTicks > 0) {
+      units += 0.20 * Math.min(2, airTicks);
     }
 
     return K.clamp(units, -2.5, 2.5);
@@ -832,8 +886,8 @@
     const ownMinS = minSChiCost(state, slot);
     const enemyMinS = minSChiCost(state, enemySlot);
 
-    const ownHasS = !own.isFainted && canUseSMove(state, slot);
-    const enemyHasS = !enemy.isFainted && canUseSMove(state, enemySlot);
+    const ownHasS = !own.isFainted && ownChi >= ownMinS && canUseSMove(state, slot);
+    const enemyHasS = !enemy.isFainted && enemyChi >= enemyMinS && canUseSMove(state, enemySlot);
 
     let score = 0;
 
@@ -1201,7 +1255,6 @@
       return sortedFinalists;
     }
 
-    // Merge finalists + remaining root rows in score order
     const seenIds = new Set(sortedFinalists.map(r => actionId(r.action)));
     const pool = [
       ...sortedFinalists,
@@ -1214,8 +1267,6 @@
     const usedKeys = new Set();
     const dirCounts = { W: 0, A: 0, S: 0, D: 0, IDLE: 0 };
 
-    // Pass 1: Pick up to 4 unique move keys respecting max 2 per S/D direction
-    // as long as the candidate is within a competitive window (38 pts of best)
     for (const row of pool) {
       if (top4.length >= 4) break;
       const key = row.action.key;
@@ -1223,8 +1274,7 @@
       if (usedKeys.has(key)) continue;
 
       const dir = getMoveDirection(state, slot, key);
-      const isOffensiveDir = dir === "S" || dir === "D";
-      const maxForDir = isOffensiveDir ? 2 : 2;
+      const maxForDir = 2;
 
       if ((dirCounts[dir] || 0) >= maxForDir) {
         continue;
@@ -1240,7 +1290,6 @@
       dirCounts[dir] = (dirCounts[dir] || 0) + 1;
     }
 
-    // Pass 2: If fewer than 4 unique move keys fit Pass 1, fill up to 4 with unique move keys
     for (const row of pool) {
       if (top4.length >= 4) break;
       const key = row.action.key;
@@ -1252,7 +1301,6 @@
       usedKeys.add(key);
     }
 
-    // Pass 3: Fill any still-open Top-4 slots + append remaining rows in score order
     for (const row of pool) {
       const id = actionId(row.action);
       if (!usedIds.has(id)) {
@@ -1302,7 +1350,6 @@
         const omniMult = isOmniGuardMove(state, slot, action.key) ? 1.35 : 1.0;
         evLive += 28 * chargeScale * omniMult;
       } else if (ownMove?.offensive) {
-        // Check if our action can beat the opponent's probable attack in priority
         const oppSampleKey = liveOppDir + "+K";
         const oppSampleAction = {
           key: state?.moves?.[enemySlot]?.[oppSampleKey] ? oppSampleKey : liveOppDir + "+J",
@@ -1372,11 +1419,11 @@
   function sample(entries, rng) {
     let remaining = rng();
 
-    for (const entry of entries) {
-      remaining -= entry.probability;
+    for (let i = 0; i < entries.length; i++) {
+      remaining -= entries[i].probability;
 
       if (remaining <= 0) {
-        return entry.action;
+        return entries[i].action;
       }
     }
 
@@ -1441,6 +1488,21 @@
     let recentTurns = 0;
     let recentAICount = 0;
     let recentSCount = 0;
+
+    if (!Array.isArray(history) || history.length === 0) {
+      return {
+        counts,
+        charges,
+        buttonCounts,
+        dirCounts,
+        guardWeight: 0,
+        aIWeight: 0,
+        aIVsSWeight: 0,
+        aIConsecutive: 0,
+        recentAIMoveRate: 0,
+        recentSMoveRate: 0
+      };
+    }
 
     for (let i = history.length - 1; i >= 0; i--) {
       const turn = history[i];
@@ -1510,16 +1572,17 @@
         }
       }
 
-      if (key.includes("+")) {
-        const [dir, btn] = key.split("+");
-        if (Object.prototype.hasOwnProperty.call(dirCounts, dir)) {
+      if (key.length >= 3 && key.charCodeAt(1) === 43) {
+        const dir = key[0];
+        const btn = key[2];
+        if (dirCounts[dir] !== undefined) {
           dirCounts[dir] += weight;
         }
         if (dir === "A") {
           guardWeight += weight;
         } else if (
           (dir === "D" || dir === "S" || dir === "W") &&
-          Object.prototype.hasOwnProperty.call(buttonCounts, btn)
+          buttonCounts[btn] !== undefined
         ) {
           buttonCounts[btn] += weight;
         }
@@ -1569,13 +1632,15 @@
     rolloutSelf = false,
     counterRead = false,
     dirConstraints = null,
-    liveContext = null
+    liveContext = null,
+    compactMode = false,
+    precomputedObs = null
   ) {
     const normDiff = normalizeDifficulty(difficulty);
     const brainDiff = brainDifficultyKey(normDiff);
     const otherSlot = C.other(slot);
-    const observed = observations(history || [], slot, state);
-    const otherObserved = observations(history || [], otherSlot, state);
+    const observed = precomputedObs?.own || observations(history || [], slot, state);
+    const otherObserved = precomputedObs?.other || observations(history || [], otherSlot, state);
 
     const isSmartTier =
       counterRead ||
@@ -1588,12 +1653,12 @@
     const otherCanUseAI = canUseOmniGuard(state, otherSlot);
 
     const extraCharges = [];
-
-    for (const item of observed.charges.slice(-3)) {
-      extraCharges.push(item.charge);
-      extraCharges.push(
-        Math.max(1, item.charge - 1)
-      );
+    if (!compactMode && observed.charges.length > 0) {
+      const startIdx = Math.max(0, observed.charges.length - 2);
+      for (let i = startIdx; i < observed.charges.length; i++) {
+        const c = observed.charges[i].charge;
+        extraCharges.push(c);
+      }
     }
 
     if (
@@ -1619,12 +1684,14 @@
       slot,
       extraCharges,
       dirConstraints,
-      policyRng
+      policyRng,
+      compactMode
     );
 
     const groups = {};
 
-    for (const action of available) {
+    for (let i = 0; i < available.length; i++) {
+      const action = available[i];
       (groups[action.key] ||= []).push(action);
     }
 
@@ -1824,14 +1891,25 @@
         }
       }
 
-      const local = group.map(action => {
+      if (group.length === 1) {
+        entries.push({
+          action: group[0],
+          weight: keyWeight
+        });
+        continue;
+      }
+
+      let localTotal = 0;
+      const localWeights = new Float64Array(group.length);
+
+      for (let gIdx = 0; gIdx < group.length; gIdx++) {
+        const action = group[gIdx];
         const actCharge = action.charge ?? 0;
         const offensive = isOffensiveMove(state, slot, action.key);
 
         let weight = 1.0;
         if (offensive) {
           if (slotUnderHighFaintRisk) {
-            // Under >75% faint + opponent Chi threat: prefer 60-76% fast priority band
             weight = actCharge >= 60 && actCharge <= 76 ? 1.55 : actCharge > 82 ? 0.45 : 0.85;
           } else {
             weight = actCharge >= 68 && actCharge <= 92 ? 1.30 : actCharge >= 60 ? 1.0 : 0.40;
@@ -1840,7 +1918,8 @@
           weight = actCharge >= 24 && actCharge <= 48 ? 1.35 : 0.70;
         }
 
-        for (const item of observed.charges) {
+        for (let cIdx = 0; cIdx < observed.charges.length; cIdx++) {
+          const item = observed.charges[cIdx];
           weight +=
             item.weight *
             Math.exp(
@@ -1854,39 +1933,35 @@
             : 0.35;
         }
 
-        return { action, weight };
-      });
+        localWeights[gIdx] = weight;
+        localTotal += weight;
+      }
 
-      const localTotal = local.reduce(
-        (sum, entry) => sum + entry.weight,
-        0
-      );
-
-      for (const entry of local) {
+      for (let gIdx = 0; gIdx < group.length; gIdx++) {
         entries.push({
-          action: entry.action,
+          action: group[gIdx],
           weight:
             keyWeight *
             (
               localTotal > 0
-                ? entry.weight / localTotal
+                ? localWeights[gIdx] / localTotal
                 : 1.0
             )
         });
       }
     }
 
-    const total = entries.reduce(
-      (sum, entry) => sum + entry.weight,
-      0
-    );
+    let total = 0;
+    for (let i = 0; i < entries.length; i++) {
+      total += entries[i].weight;
+    }
 
-    return entries.map(entry => ({
-      action: entry.action,
-      probability: total > 0
-        ? entry.weight / total
-        : 1 / entries.length
-    }));
+    const invTotal = total > 0 ? 1 / total : 1 / Math.max(1, entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      entries[i].probability = total > 0 ? entries[i].weight * invTotal : invTotal;
+    }
+
+    return entries;
   }
 
   function orderedActions(
@@ -1915,22 +1990,18 @@
       opponentAction
     );
 
-    const nextHistory = appendForecastHistory(
-      history,
-      state,
-      a1,
-      a2
-    );
+    const dist = C.distribution(state, a1, a2);
+    let sum = 0;
 
-    return C.distribution(state, a1, a2).reduce(
-      (sum, result) =>
-        sum +
+    for (let i = 0; i < dist.length; i++) {
+      const result = dist[i];
+      sum +=
         result.probability *
         (
           evaluatePosition(
             result.state,
             slot,
-            nextHistory,
+            history,
             evaluator,
             isRider
           ) +
@@ -1942,9 +2013,10 @@
             opponentAction,
             difficulty
           )
-        ),
-      0
-    );
+        );
+    }
+
+    return sum;
   }
 
   function search(context) {
@@ -2011,20 +2083,11 @@
     let maxRollouts = settings.rollouts;
 
     if (isTraining) {
-      settings.horizon = Math.min(
-        settings.horizon,
-        2
-      );
-
-      settings.rollouts = Math.min(
-        settings.rollouts,
-        4
-      );
-
-      settings.finalists = Math.min(
-        settings.finalists,
-        2
-      );
+      // In training, 1-step full expectimax handles easy/balanced/defensive;
+      // master/rider use 2-ply with 2 focused rollouts.
+      settings.horizon = (isRider || isBulletAnt) ? 2 : 1;
+      settings.rollouts = (isRider || isBulletAnt) ? 2 : 0;
+      settings.finalists = 2;
 
       minRollouts = settings.rollouts;
       maxRollouts = settings.rollouts;
@@ -2044,20 +2107,24 @@
     const opponentSlot = C.other(slot);
     const extraCharges = [];
 
-    for (const turn of history) {
-      const observed = turn[opponentSlot] || turn.actions?.[opponentSlot];
+    if (!isTraining && history.length > 0) {
+      for (let i = history.length - 1; i >= 0 && extraCharges.length < 2; i--) {
+        const turn = history[i];
+        const observed = turn[opponentSlot] || turn.actions?.[opponentSlot];
 
-      if (
-        observed &&
-        observed.key !== "DO_NOTHING" &&
-        !turn.fainted?.[opponentSlot] &&
-        Number.isFinite(observed.charge) &&
-        observed.charge >= 1 &&
-        observed.charge <= 100
-      ) {
-        extraCharges.push(
-          Math.max(1, observed.charge - 1)
-        );
+        if (
+          observed &&
+          observed.key !== "DO_NOTHING" &&
+          !turn.fainted?.[opponentSlot] &&
+          Number.isFinite(observed.charge) &&
+          observed.charge >= 1 &&
+          observed.charge <= 100
+        ) {
+          const targetChg = Math.max(1, observed.charge - 1);
+          if (!extraCharges.includes(targetChg)) {
+            extraCharges.push(targetChg);
+          }
+        }
       }
     }
 
@@ -2100,11 +2167,46 @@
       slot,
       extraCharges,
       selfConstraints,
-      chargeJitterRng
+      chargeJitterRng,
+      isTraining
     );
 
     let ownActions = allOwnActions;
 
+    // Fast path for Tree-hopper (easy) when no debug table is needed in training
+    if (difficulty === "easy" && isTraining) {
+      const rng = K.rng(
+        K.hash(seed, "tree_hopper_foresee", history.length + 1, slot)
+      );
+      const roll = rng();
+      const legalD = ownActions.filter(a => isDMove(state, slot, a.key));
+      const legalS = ownActions.filter(a => isSMove(state, slot, a.key));
+      let chosenAction = null;
+
+      if (roll < 0.10) {
+        chosenAction = { key: "DO_NOTHING", charge: 0 };
+      } else if (roll < 0.40 && legalD.length > 0) {
+        chosenAction = legalD[Math.floor(rng() * legalD.length)];
+      } else if (roll < 0.60 && legalS.length > 0) {
+        chosenAction = legalS[Math.floor(rng() * legalS.length)];
+      } else {
+        chosenAction = ownActions[Math.floor(rng() * ownActions.length)];
+      }
+
+      if (chosenAction && C.isLegal(state, slot, chosenAction)) {
+        return {
+          rows: [{ action: { ...chosenAction }, score: 0 }],
+          debug: {
+            difficulty,
+            strategy: "Tree-hopper fast training path",
+            rootActions: ownActions.length,
+            completedHorizon: 1
+          }
+        };
+      }
+    }
+
+    const ownObserved = observations(history, slot, state);
     const enemyObserved = observations(history, opponentSlot, state);
     const enemyCanUseS = canUseSMove(state, opponentSlot, oppConstraints);
     const ownCanUseS = canUseSMove(state, slot, selfConstraints);
@@ -2166,21 +2268,37 @@
       false,
       isSmartDifficulty,
       oppConstraints,
-      liveContext
+      liveContext,
+      isTraining,
+      { own: enemyObserved, other: ownObserved }
     );
+
+    // Filter out tiny tail probabilities during expectimax to avoid wasted pairValue calls
+    const expectimaxOpponents = [];
+    let keptProbSum = 0;
+    const minProbCutoff = isTraining ? 0.015 : 0.004;
+    for (let i = 0; i < opponentPolicy.length; i++) {
+      if (opponentPolicy[i].probability >= minProbCutoff) {
+        expectimaxOpponents.push(opponentPolicy[i]);
+        keptProbSum += opponentPolicy[i].probability;
+      }
+    }
+    const activeOpponents = expectimaxOpponents.length > 0 ? expectimaxOpponents : opponentPolicy;
+    const probNorm = keptProbSum > 0 && expectimaxOpponents.length > 0 ? 1 / keptProbSum : 1;
 
     let enemySProb = 0;
     let enemyAIProb = 0;
     const enemySProbByButton = { J: 0, K: 0, I: 0, L: 0 };
 
-    for (const entry of opponentPolicy) {
+    for (let i = 0; i < opponentPolicy.length; i++) {
+      const entry = opponentPolicy[i];
       const k = entry.action.key;
       if (isOmniGuardMove(state, opponentSlot, k)) {
         enemyAIProb += entry.probability;
       } else if (isSMove(state, opponentSlot, k)) {
         enemySProb += entry.probability;
         const oppMove = state.moves?.[opponentSlot]?.[k];
-        if (oppMove?.button && Object.prototype.hasOwnProperty.call(enemySProbByButton, oppMove.button)) {
+        if (oppMove?.button && enemySProbByButton[oppMove.button] !== undefined) {
           enemySProbByButton[oppMove.button] += entry.probability;
         }
       }
@@ -2193,7 +2311,7 @@
         : null;
 
     const rootNeuralBonuses =
-      usingNeural && typeof evaluator.actionBonuses === "function"
+      !rootMatrixMetrics && usingNeural && typeof evaluator.actionBonuses === "function"
         ? evaluator.actionBonuses(state, slot, history)
         : null;
 
@@ -2236,11 +2354,13 @@
     /*
      * Step 1: one-turn expectimax evaluation.
      */
-    for (const action of ownActions) {
+    for (let aIdx = 0; aIdx < ownActions.length; aIdx++) {
+      const action = ownActions[aIdx];
       let expected = 0;
       let worst = Infinity;
 
-      for (const opponent of opponentPolicy) {
+      for (let oIdx = 0; oIdx < activeOpponents.length; oIdx++) {
+        const opponent = activeOpponents[oIdx];
         const value = pairValue(
           state,
           slot,
@@ -2252,8 +2372,8 @@
           isRider
         );
 
-        expected += opponent.probability * value;
-        worst = Math.min(worst, value);
+        expected += (opponent.probability * probNorm) * value;
+        if (value < worst) worst = value;
       }
 
       const evMatrix =
@@ -2291,7 +2411,6 @@
           enemyCanUseS &&
           enemySProbByButton[ownMove.guardButton] > 0
         ) {
-          // For Riders without Omni Guard (V3, Riderman, X, Amazon), boost the exact matching guard against enemy S moves
           tacticalRootBonus +=
             32 * enemySProbByButton[ownMove.guardButton] +
             (oppChi >= oppMinS + 2 ? 6 : 0);
@@ -2443,6 +2562,7 @@
      */
     if (
       settings.horizon > 1 &&
+      maxRollouts > 0 &&
       rows.length > 1 &&
       !state.winner
     ) {
@@ -2538,7 +2658,10 @@
               futureHistory,
               difficulty,
               true,
-              isSmartDifficulty
+              isSmartDifficulty,
+              null,
+              null,
+              true
             );
 
             const enemyPolicy = policy(
@@ -2547,7 +2670,10 @@
               futureHistory,
               "master",
               false,
-              isSmartDifficulty
+              isSmartDifficulty,
+              null,
+              null,
+              true
             );
 
             const ownNext = sample(

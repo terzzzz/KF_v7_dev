@@ -1,6 +1,6 @@
 /* js/training_ui.js
  * Build: v5-state256-action17
- * Matrix: v7-7riders-10backup
+ * Matrix: v7-7riders-10backup (49-Matrix Header Drive Sync Edition)
  * Patch: charge1-reset1
  */
 (function (g) {
@@ -36,13 +36,13 @@
     host.classList.add("soul-tools");
 
     host.innerHTML = `
-      <h2>KAMEN FIGHT — v7 RIDER MATRIX TRAINER (7 RIDERS + 10 BACKUP SLOTS)</h2>
+      <h2>KAMEN FIGHT — v7 RIDER MATRIX TRAINER (49 MATCHUPS + 10 BACKUP SLOTS)</h2>
 
       <p>
         Build: <strong>${BUILD}</strong> |
-        Matrix: <strong>v7 Per-Rider Bundle (001.json – 007.json)</strong> |
+        Matrix: <strong>49-Matchup Matrix (7×7 Riders, Header Drive Sync)</strong> |
         Patch: <strong>${PATCH}</strong><br>
-        256 inputs / 17 actions (42,257 params/matchup | 295,799 params/Rider bundle | 10 backup slots reserved).
+        256 inputs / 17 actions (42,257 params/matchup | 295,799 params/Rider | 10 backup slots reserved).
       </p>
 
       <p>
@@ -51,10 +51,11 @@
         Repeating the same direction preserves its charge clock.
         Training against <strong>ALL OPPONENTS</strong> cycles across 001..007
         with isolated networks and replay buffers (zero cross-matchup weight pollution).
+        Use the <strong>Top Header Panel</strong> to Import/Export all 49 matrices to and from Google Drive.
       </p>
 
       <div class="soul-fields">
-        <label>Learner (Rider Matrix File)
+        <label>Learner (Rider)
           <select data-field="learner"></select>
         </label>
 
@@ -145,22 +146,11 @@
         <button type="button" data-action="eval-active">EVALUATE ACTIVE</button>
         <button type="button" data-action="promote">ACTIVATE CANDIDATE(S)</button>
         <button type="button" data-action="stop" disabled>STOP</button>
-      </div>
-
-      <div class="soul-buttons">
-        <button type="button" data-action="export">EXPORT RIDER MATRIX (00X.json)</button>
-        <button type="button" data-action="import">IMPORT MATRIX / CHECKPOINT</button>
-        <button type="button" data-action="sync">LOAD REPO RIDER MATRIX</button>
         <button type="button" data-action="tests">RUN PIPELINE TESTS</button>
         ${dedicated
           ? ""
           : '<button type="button" data-action="close">CLOSE</button>'}
       </div>
-
-      <input data-field="file"
-             type="file"
-             accept=".json,application/json"
-             hidden>
 
       <pre data-field="status"></pre>
       <pre data-field="output" aria-live="polite">Loading…</pre>
@@ -266,7 +256,7 @@
     const statusEl = field("status");
     const allButtons = Array.from(host.querySelectorAll("button"));
     const allInputs = Array.from(
-      host.querySelectorAll("select, input:not([type=file])")
+      host.querySelectorAll("select, input")
     );
 
     let data = null;
@@ -294,6 +284,35 @@
       };
     }
 
+    // Bridge checkpoint updates to the 49-Matrix Header Panel (g.MatchupPool) if present
+    function syncToHeaderPool(cp, selectedLearner) {
+      if (!cp || !g.MatchupPool || !g.SoulAgent) return;
+      try {
+        const lCode = g.SoulAgent.toCode(cp.learnerId || selectedLearner);
+        const oCode = g.SoulAgent.toCode(cp.opponentId);
+        const p1Idx = parseInt(lCode, 10) - 1;
+        const p2Idx = parseInt(oCode, 10) - 1;
+        if (
+          Number.isInteger(p1Idx) && p1Idx >= 0 && p1Idx < 7 &&
+          Number.isInteger(p2Idx) && p2Idx >= 0 && p2Idx < 7
+        ) {
+          const mId = `r${p1Idx}_vs_r${p2Idx}`;
+          const entry = g.MatchupPool.pool?.[mId];
+          if (entry) {
+            entry.steps = cp.steps || 0;
+            entry.games = cp.games || 0;
+            entry.checkpoint = cp;
+            entry.updatedAt = new Date().toISOString();
+            if (typeof g.MatchupPool.saveMatchup === "function") {
+              g.MatchupPool.saveMatchup(mId);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[Training UI] Header pool sync warning:", err);
+      }
+    }
+
     function flushPendingCheckpoints(selectedLearner) {
       if (pendingCheckpoints.size === 0) return false;
 
@@ -309,6 +328,7 @@
         }
 
         g.SoulAgent.setCandidate(cp);
+        syncToHeaderPool(cp, selectedLearner);
       }
 
       pendingCheckpoints.clear();
@@ -365,12 +385,12 @@
       const lines = [
         validSelection
           ? isMulti
-            ? `Selected Bundle: ${learnerCode}.json (${learnerCode}_001 .. ${learnerCode}_${codes[codes.length - 1] || "007"} Auto-Cycle + 10 backup slots)`
-            : `Selected Matchup: ${agent.getCanonicalKey(selected.learner, selected.opponent)} (in ${learnerCode}.json)`
+            ? `Selected Learner: Rider ${learnerCode} (${learnerCode}_001 .. ${learnerCode}_${codes[codes.length - 1] || "007"} Auto-Cycle + 10 backup slots)`
+            : `Selected Matchup: ${agent.getCanonicalKey(selected.learner, selected.opponent)}`
           : "Loading matchup data…",
 
         isMulti
-          ? `Rider ${learnerCode} Candidate Bundle: ${candCount} / ${codes.length} active matchups populated`
+          ? `Rider ${learnerCode} Candidate Matchups: ${candCount} / ${codes.length} active matchups populated`
           : `Candidate: ${
               candidate
                 ? `${candidate.games} games / ${candidate.steps} accepted decisions`
@@ -378,7 +398,7 @@
             }`,
 
         isMulti
-          ? `Rider ${learnerCode} Active Bundle: ${actCount} / ${codes.length} active matchups populated`
+          ? `Rider ${learnerCode} Active Matchups: ${actCount} / ${codes.length} active matchups populated`
           : `Active: ${
               active
                 ? `${active.games} games / ${active.steps} accepted decisions`
@@ -447,9 +467,6 @@
       if (close) close.disabled = busy;
 
       if (!busy && data) {
-        const hasAnyLearnerModel = candCount > 0 || actCount > 0;
-        button("export").disabled = !hasAnyLearnerModel;
-
         if (isMulti) {
           button("eval-candidate").disabled = candCount === 0;
           button("eval-active").disabled = actCount === 0;
@@ -1007,7 +1024,7 @@
                 formatReport(report) +
                 (
                   training
-                    ? `\n\nCandidate matchup(s) retained in RAM/LocalStorage. Click EXPORT RIDER MATRIX (${g.SoulAgent.toCode(selected.learner)}.json) to save all matchups.`
+                    ? "\n\nCandidate matchup(s) retained in RAM/LocalStorage and synced to the 49-Matrix Header Panel."
                     : report.cancelled
                       ? "\n\nIncomplete evaluation was not recorded for activation."
                       : "\n\nEvaluation finished and recorded."
@@ -1107,51 +1124,6 @@
             break;
           }
 
-          case "export": {
-            const result = g.SoulAgent.downloadRiderBundle(
-              selected.learner,
-              "candidate"
-            );
-
-            output(
-              `Exported Master Rider Bundle: ${result.fileName}\n` +
-              `Populated Matchups: ${result.populatedMatchups} / ${result.activeRosterCount} active (+ ${result.backupSlotCount} backup slots reserved)\n` +
-              `Total Games in Bundle: ${result.games}; Size: ${result.sizeMB} MB\n` +
-              `Place ${result.fileName} inside data/matrix/${result.fileName}`
-            );
-            break;
-          }
-
-          case "import":
-            field("file").click();
-            break;
-
-          case "sync": {
-            const code = g.SoulAgent.toCode(selected.learner);
-            if (!g.confirm(
-              `Load data/matrix/${code}.json from repository into ACTIVE?`
-            )) {
-              break;
-            }
-
-            busy = true;
-            refresh();
-
-            try {
-              const res = await g.SoulAgent.fetchRiderBundleFromCDN(
-                selected.learner
-              );
-
-              output(
-                `Loaded data/matrix/${res.learnerCode}.json into ACTIVE (${res.loadedCount} matchups).`
-              );
-            } finally {
-              busy = false;
-              refresh();
-            }
-            break;
-          }
-
           case "tests":
             busy = true;
             refresh();
@@ -1178,37 +1150,6 @@
         }
       } catch (error) {
         output("ERROR\n" + (error?.message || String(error)));
-        refresh();
-      }
-    });
-
-    field("file").addEventListener("change", async event => {
-      const input = event.target;
-      const file = input.files?.[0];
-
-      if (!file || busy) {
-        input.value = "";
-        return;
-      }
-
-      busy = true;
-      refresh();
-
-      try {
-        const payload = JSON.parse(await file.text());
-        const imported = g.SoulAgent.importCandidate(payload);
-
-        output(
-          imported.isBundle
-            ? `Imported Rider Matrix Bundle (${imported.learnerCode}.json) into CANDIDATE.\n` +
-              `Matchups loaded (${imported.importedKeys.length}): ${imported.importedKeys.join(", ")}`
-            : `Imported single matchup checkpoint into CANDIDATE: ${imported.canonicalKey}`
-        );
-      } catch (error) {
-        output("IMPORT ERROR\n" + error.message);
-      } finally {
-        input.value = "";
-        busy = false;
         refresh();
       }
     });
@@ -1263,9 +1204,9 @@
       field("opponent").value = "*";
 
       output(
-        "Ready (v7 Per-Rider Matrix Mode).\n" +
-        "Select ALL OPPONENTS to auto-cycle training across all Riders with isolated matchup networks,\n" +
-        "then click EXPORT RIDER MATRIX to save a single 001.json bundle."
+        "Ready (v7 49-Matrix Mode).\n" +
+        "Select ALL OPPONENTS to auto-cycle training across all Riders with isolated matchup networks.\n" +
+        "Use the Top Header Panel to Import/Export all 49 matrices to and from Google Drive."
       );
     } catch (error) {
       data = null;
@@ -1298,4 +1239,4 @@
   } else {
     launch();
   }
-})(window);  
+})(window);

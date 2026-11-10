@@ -27,7 +27,7 @@
   const C = g.CombatCore;
   const K = g.KF;
 
-  // Cache static S-move metadata per rider moveset object to avoid Object.entries() in hot loops
+  // Cache static move metadata per rider moveset object to avoid Object.entries() in hot loops
   const MOVESET_S_CACHE = new WeakMap();
 
   function getSMoveMeta(movesForSlot) {
@@ -107,7 +107,10 @@
       );
     }
 
-    const copy = new Float32Array(vector);
+    const copy =
+      vector instanceof Float32Array
+        ? vector
+        : new Float32Array(vector);
 
     for (let i = 0; i < copy.length; i++) {
       if (!Number.isFinite(copy[i])) {
@@ -127,7 +130,8 @@
       );
     }
 
-    const copy = new Uint8Array(mask.length);
+    const isUint8 = mask instanceof Uint8Array;
+    const copy = isUint8 ? mask : new Uint8Array(mask.length);
     let hasLegalAction = false;
 
     for (let i = 0; i < mask.length; i++) {
@@ -144,9 +148,12 @@
         );
       }
 
-      copy[i] = value ? 1 : 0;
+      const bit = value ? 1 : 0;
+      if (!isUint8) {
+        copy[i] = bit;
+      }
 
-      if (copy[i]) {
+      if (bit) {
         hasLegalAction = true;
       }
     }
@@ -167,7 +174,10 @@
       );
     }
 
-    const copy = new Float32Array(values);
+    const copy =
+      values instanceof Float32Array
+        ? values
+        : new Float32Array(values);
 
     for (let i = 0; i < copy.length; i++) {
       if (!Number.isFinite(copy[i])) {
@@ -257,7 +267,7 @@
   }
 
   function findActiveBuff(player, buffId) {
-    if (!player || !buffId || !Array.isArray(player.activeBuffs)) {
+    if (!player || !buffId || !Array.isArray(player.activeBuffs) || player.activeBuffs.length === 0) {
       return null;
     }
     const buffs = player.activeBuffs;
@@ -365,7 +375,7 @@
 
     let score = 0;
 
-    if (buffs) {
+    if (buffs && buffs.length > 0) {
       for (let i = 0; i < buffs.length; i++) {
         const buff = buffs[i];
         const rounds = Math.max(0, Math.min(4, Number(buff.roundsLeft || 0)));
@@ -510,23 +520,26 @@
 
     let periodicDelta = 0;
 
-    if (afterBuffs) {
+    if (afterBuffs && afterBuffs.length > 0) {
       for (let i = 0; i < afterBuffs.length; i++) {
         const afterBuff = afterBuffs[i];
         const regen = Number(afterBuff.lpRegen ?? afterBuff.effects?.lpRegen ?? 0);
         const bleed = Number(afterBuff.lpBleed ?? afterBuff.effects?.lpBleed ?? 0);
         if (regen <= 0 && bleed <= 0) continue;
 
-        const matchedBefore = beforeBuffs?.find(
-          b => b.id === afterBuff.id && Number(b.roundsLeft) > Number(afterBuff.roundsLeft)
-        );
-        if (matchedBefore) {
-          periodicDelta += regen - bleed;
+        if (beforeBuffs) {
+          for (let j = 0; j < beforeBuffs.length; j++) {
+            const b = beforeBuffs[j];
+            if (b.id === afterBuff.id && Number(b.roundsLeft) > Number(afterBuff.roundsLeft)) {
+              periodicDelta += regen - bleed;
+              break;
+            }
+          }
         }
       }
     }
 
-    if (beforeBuffs) {
+    if (beforeBuffs && beforeBuffs.length > 0) {
       for (let i = 0; i < beforeBuffs.length; i++) {
         const beforeBuff = beforeBuffs[i];
         if (Number(beforeBuff.roundsLeft) !== 1) continue;
@@ -534,9 +547,15 @@
         const bleed = Number(beforeBuff.lpBleed ?? beforeBuff.effects?.lpBleed ?? 0);
         if (regen <= 0 && bleed <= 0) continue;
 
-        const stillPresent = afterBuffs?.some(
-          b => b.id === beforeBuff.id
-        );
+        let stillPresent = false;
+        if (afterBuffs) {
+          for (let j = 0; j < afterBuffs.length; j++) {
+            if (afterBuffs[j].id === beforeBuff.id) {
+              stillPresent = true;
+              break;
+            }
+          }
+        }
         if (!stillPresent) {
           periodicDelta += regen - bleed;
         }
@@ -573,23 +592,16 @@
     }
 
     const attackerMove = before.moves?.[attackerSlot]?.[attackerAction.key];
-    const evaderMove = before.moves?.[evaderSlot]?.[evaderAction.key];
-
     if (!attackerMove || !attackerMove.offensive) {
       return 0;
     }
 
+    const evaderMove = before.moves?.[evaderSlot]?.[evaderAction.key];
     if (evaderMove?.guardKind) {
       return 0;
     }
 
-    const attackerPeriodic = estimatePeriodicLpDelta(attackerBefore, after[attackerSlot]);
     const evaderPeriodic = estimatePeriodicLpDelta(evaderBefore, after[evaderSlot]);
-
-    const directDamageToAttacker = Math.max(
-      0,
-      (attackerBefore.lp + attackerPeriodic) - after[attackerSlot].lp
-    );
     const directDamageToEvader = Math.max(
       0,
       (evaderBefore.lp + evaderPeriodic) - after[evaderSlot].lp
@@ -599,28 +611,31 @@
       return 0;
     }
 
-    const priorityCmp =
-      C.comparePriority(
-        before,
-        evaderSlot === "p1" ? evaderAction : attackerAction,
-        evaderSlot === "p1" ? attackerAction : evaderAction
-      ) * (evaderSlot === "p1" ? 1 : -1);
-
-    const evaderInterruptedAttacker =
-      Boolean(evaderMove?.offensive) &&
-      directDamageToAttacker > 1 &&
-      priorityCmp > 0;
-
-    if (evaderInterruptedAttacker) {
-      return 0;
-    }
-
     const evaderFaintIncreased =
       after[evaderSlot].faintMeter > before[evaderSlot].faintMeter ||
       (after[evaderSlot].isFainted && !before[evaderSlot].isFainted);
 
     if (evaderFaintIncreased) {
       return 0;
+    }
+
+    const attackerPeriodic = estimatePeriodicLpDelta(attackerBefore, after[attackerSlot]);
+    const directDamageToAttacker = Math.max(
+      0,
+      (attackerBefore.lp + attackerPeriodic) - after[attackerSlot].lp
+    );
+
+    if (evaderMove?.offensive && directDamageToAttacker > 1) {
+      const priorityCmp =
+        C.comparePriority(
+          before,
+          evaderSlot === "p1" ? evaderAction : attackerAction,
+          evaderSlot === "p1" ? attackerAction : evaderAction
+        ) * (evaderSlot === "p1" ? 1 : -1);
+
+      if (priorityCmp > 0) {
+        return 0;
+      }
     }
 
     const maxLp = Math.max(1, Number(evaderBefore.maxLp || 1600));
@@ -643,8 +658,16 @@
   }
 
   function extractCastBuffContributions(before, after, learnerSlot, resolvedActionKey) {
+    if (!resolvedActionKey || resolvedActionKey === "DO_NOTHING") {
+      return null;
+    }
     const move = before.moves?.[learnerSlot]?.[resolvedActionKey];
     if (!move) {
+      return null;
+    }
+
+    const debuffSpec = move.debuff || move.targetDebuff;
+    if (!move.buff && !debuffSpec && !move.grantsAirborne) {
       return null;
     }
 
@@ -654,7 +677,6 @@
     const ownBefore = before[learnerSlot];
     const enemyBefore = before[enemySlot];
 
-    const debuffSpec = move.debuff || move.targetDebuff;
     const eff = move.buff?.effects || {};
     const evasionBoost = Number(eff.evasion || 0);
     const attackMult = Number(eff.attack || 1);
@@ -725,10 +747,10 @@
 
     const ownBuffActive =
       grantsAirborne ||
-      (ownAfter.activeBuffs || []).some(b => b.id === buffId && b.roundsLeft > 0);
+      Boolean(findActiveBuff(ownAfter, buffId));
     const enemyDebuffActive =
       lpBleed > 0 &&
-      (enemyAfter.activeBuffs || []).some(b => b.id === debuffId && b.roundsLeft > 0);
+      Boolean(findActiveBuff(enemyAfter, debuffId));
 
     if (!ownBuffActive && !enemyDebuffActive) {
       return null;
@@ -761,6 +783,19 @@
       return;
     }
 
+    // Fast-path check: any active buffMeta in window?
+    let hasActiveMeta = false;
+    for (let i = 0; i < pendingWindow.length; i++) {
+      const bm = pendingWindow[i].buffMeta;
+      if (bm && bm.roundsRemaining > 0) {
+        hasActiveMeta = true;
+        break;
+      }
+    }
+    if (!hasActiveMeta) {
+      return;
+    }
+
     const enemySlot = C.other(learnerSlot);
     const ownBefore = before[learnerSlot];
     const enemyBefore = before[enemySlot];
@@ -775,11 +810,11 @@
 
       const meta = entry.buffMeta;
       const stillHasOwnBuff =
-        (ownBefore.activeBuffs || []).some(b => b.id === meta.buffId && b.roundsLeft > 0) ||
+        Boolean(findActiveBuff(ownBefore, meta.buffId)) ||
         (Number(ownBefore.airborneTicks) > 0 && meta.evasionBoost > 0);
       const stillHasEnemyDebuff =
         meta.lpBleed > 0 &&
-        (enemyBefore.activeBuffs || []).some(b => b.id === meta.debuffId && b.roundsLeft > 0);
+        Boolean(findActiveBuff(enemyBefore, meta.debuffId));
 
       if (stillHasOwnBuff || stillHasEnemyDebuff) {
         const dedupKey = `${meta.buffId || ""}|${meta.debuffId || ""}`;
@@ -821,14 +856,14 @@
 
     if (directDamageDealt > 1 && ownMove?.offensive) {
       let totalAttackBonus = 0;
-      const entryWeights = [];
+      const entryWeights = new Float64Array(activeEntries.length);
 
-      for (const entry of activeEntries) {
-        const m = entry.buffMeta;
+      for (let i = 0; i < activeEntries.length; i++) {
+        const m = activeEntries[i].buffMeta;
         let bonus = m.attackBonus;
         if (ownMoveDir === "D") bonus += m.dAttackBonus;
         if (ownMoveDir === "S") bonus += m.sAttackBonus;
-        entryWeights.push(bonus);
+        entryWeights[i] = bonus;
         totalAttackBonus += bonus;
       }
 
@@ -857,14 +892,15 @@
         Math.max(0, Number(ownBefore.evasionRate || 0));
       let totalBuffEvasion = 0;
 
-      for (const entry of activeEntries) {
-        totalBuffEvasion += Math.max(0, entry.buffMeta.evasionBoost);
+      for (let i = 0; i < activeEntries.length; i++) {
+        totalBuffEvasion += Math.max(0, activeEntries[i].buffMeta.evasionBoost);
       }
 
       if (totalBuffEvasion > 0) {
         const totalEffectiveEvasion = baseEvasion + totalBuffEvasion;
 
-        for (const entry of activeEntries) {
+        for (let i = 0; i < activeEntries.length; i++) {
+          const entry = activeEntries[i];
           const boost = Math.max(0, entry.buffMeta.evasionBoost);
           if (boost <= 0) continue;
 
@@ -883,15 +919,16 @@
 
     if (directDamageTaken > 1) {
       let totalArmorReduction = 0;
-      for (const entry of activeEntries) {
-        totalArmorReduction += Math.max(0, entry.buffMeta.armorReduction);
+      for (let i = 0; i < activeEntries.length; i++) {
+        totalArmorReduction += Math.max(0, activeEntries[i].buffMeta.armorReduction);
       }
       if (totalArmorReduction > 0 && totalArmorReduction < 0.95) {
         const mitigatedDamageRatio =
           (directDamageTaken * (totalArmorReduction / (1 - totalArmorReduction))) /
           ownMaxLp;
 
-        for (const entry of activeEntries) {
+        for (let i = 0; i < activeEntries.length; i++) {
+          const entry = activeEntries[i];
           const red = Math.max(0, entry.buffMeta.armorReduction);
           if (red <= 0) continue;
           const share = red / totalArmorReduction;
@@ -907,12 +944,13 @@
       );
       if (actualLpHealed > 0) {
         let totalRegen = 0;
-        for (const entry of activeEntries) {
-          totalRegen += Math.max(0, entry.buffMeta.lpRegen);
+        for (let i = 0; i < activeEntries.length; i++) {
+          totalRegen += Math.max(0, activeEntries[i].buffMeta.lpRegen);
         }
         if (totalRegen > 0) {
           const healedRatio = actualLpHealed / ownMaxLp;
-          for (const entry of activeEntries) {
+          for (let i = 0; i < activeEntries.length; i++) {
+            const entry = activeEntries[i];
             const reg = Math.max(0, entry.buffMeta.lpRegen);
             if (reg <= 0) continue;
             const share = reg / totalRegen;
@@ -930,12 +968,13 @@
     if (enemyPeriodic < 0) {
       const bleedDamage = Math.abs(enemyPeriodic);
       let totalBleed = 0;
-      for (const entry of activeEntries) {
-        totalBleed += Math.max(0, entry.buffMeta.lpBleed);
+      for (let i = 0; i < activeEntries.length; i++) {
+        totalBleed += Math.max(0, activeEntries[i].buffMeta.lpBleed);
       }
       if (totalBleed > 0) {
         const bleedRatio = bleedDamage / enemyMaxLp;
-        for (const entry of activeEntries) {
+        for (let i = 0; i < activeEntries.length; i++) {
+          const entry = activeEntries[i];
           const bld = Math.max(0, entry.buffMeta.lpBleed);
           if (bld <= 0) continue;
           const share = bld / totalBleed;
@@ -949,10 +988,10 @@
       }
     }
 
-    for (const entry of activeEntries) {
-      entry.buffMeta.roundsRemaining = Math.max(
+    for (let i = 0; i < activeEntries.length; i++) {
+      activeEntries[i].buffMeta.roundsRemaining = Math.max(
         0,
-        entry.buffMeta.roundsRemaining - 1
+        activeEntries[i].buffMeta.roundsRemaining - 1
       );
     }
   }
@@ -1157,12 +1196,23 @@
     assertSlot(learnerSlot);
     assertNetworkSize(spec, net);
 
+    // Cache root network evaluation per state reference to avoid triple evaluation in ForeseeEngine.search
+    let cachedStateRef = null;
+    let cachedHistoryLen = -1;
+    let cachedRootQuery = null;
+    let cachedMetrics = undefined;
+
     function queryRootNetwork(state, history = rootHistory) {
+      const hLen = Array.isArray(history) ? history.length : 0;
+      if (state === cachedStateRef && hLen === cachedHistoryLen && cachedRootQuery) {
+        return cachedRootQuery;
+      }
+
       const env = E.create(state);
       env.history = history;
 
       const { s, m } = readState(env, learnerSlot, spec);
-      const q = predictValues(net, s, spec);
+      const q = new Float32Array(predictValues(net, s, spec));
 
       let maxQ = -Infinity;
       let minQ = Infinity;
@@ -1189,7 +1239,11 @@
         }
       }
 
-      return { q, m };
+      cachedStateRef = state;
+      cachedHistoryLen = hLen;
+      cachedRootQuery = { q, m };
+      cachedMetrics = undefined;
+      return cachedRootQuery;
     }
 
     function evaluateLeaf(state, perspective, history = rootHistory) {
@@ -1224,6 +1278,9 @@
       }
 
       const { q, m } = queryRootNetwork(state, history);
+      if (cachedMetrics !== undefined) {
+        return cachedMetrics;
+      }
 
       let sum = 0;
       let count = 0;
@@ -1239,6 +1296,7 @@
       }
 
       if (count <= 1 || !(maxQ - minQ > 1e-6)) {
+        cachedMetrics = null;
         return null;
       }
 
@@ -1269,6 +1327,7 @@
         };
       }
 
+      cachedMetrics = metrics;
       return metrics;
     };
 
@@ -1317,6 +1376,173 @@
     return evaluateLeaf;
   }
 
+  function decideActionWithController(
+    env,
+    slot,
+    spec,
+    net,
+    rng,
+    options,
+    precomputedState = null
+  ) {
+    if (env.state.winner) {
+      return null;
+    }
+
+    const history = options.history ?? env.history ?? [];
+    env.history = history;
+
+    const { s, m } = precomputedState || readState(env, slot, spec);
+    const q = net ? predictValues(net, s, spec) : null;
+
+    let action;
+    let demo = false;
+
+    if (env.state[slot].isFainted) {
+      action = {
+        key: "DO_NOTHING",
+        charge: 0
+      };
+    } else if (options.guide) {
+      demo = true;
+
+      if (typeof options.teacher === "function") {
+        action = options.teacher(env, slot);
+      } else {
+        action = getAI().choose({
+          state: env.state,
+          slot,
+          history,
+          difficulty: options.teacherDifficulty || "master",
+          isTeacher: true,
+          isTraining: Boolean(options.isTraining),
+          disableAgent: true,
+          seed: options.seed ?? 1
+        }).action;
+      }
+    } else if (options.mode === "rider") {
+      demo = Boolean(options.distillRider);
+
+      action = getAI().choose({
+        state: env.state,
+        slot,
+        history,
+        difficulty: net ? "rider" : "master",
+        neuralNetwork: net || null,
+        neuralSpec: spec,
+        isTraining: Boolean(options.isTraining),
+        disableAgent: true,
+        seed: options.seed ?? 1
+      }).action;
+    } else {
+      let index;
+
+      if (!net) {
+        index = E.scripted(rng)(
+          E.observe(env, slot),
+          m
+        );
+      } else if (options.isTraining && rng() < options.epsilon) {
+        index = N.randomAction(m, rng);
+      } else if (options.isTraining) {
+        index = N.sampleAction(q, m, 0.15, rng);
+      } else {
+        index = N.argmax(q, m);
+      }
+
+      if (!Number.isInteger(index) || !m[index]) {
+        throw new Error(
+          "Controller selected a masked or invalid action."
+        );
+      }
+
+      action = actionForIndex(env, slot, index, rng);
+    }
+
+    const proposedAction = normalizeLegalAction(
+      env.state,
+      slot,
+      action,
+      "Learner planner"
+    );
+
+    const a = E.getActionIndexByKey(proposedAction.key);
+
+    if (
+      !Number.isInteger(a) ||
+      a < 0 ||
+      a >= spec.output ||
+      !m[a]
+    ) {
+      throw new Error(
+        "Planner action is not legal in the neural action schema: " +
+        proposedAction.key
+      );
+    }
+
+    const chosenKey = E.ACTION_MAP[a];
+    const canUseProposedCharge =
+      proposedAction &&
+      proposedAction.key === chosenKey &&
+      chosenKey !== "DO_NOTHING" &&
+      Number.isFinite(proposedAction.charge) &&
+      proposedAction.charge > 0;
+
+    if (canUseProposedCharge) {
+      const move = env.state.moves?.[slot]?.[chosenKey];
+      const maxCharge = move ? C.maxCharge(env.state[slot], move.direction) : 100;
+      const isAttack =
+        Boolean(move?.offensive) ||
+        move?.direction === "D" ||
+        move?.direction === "S";
+      const minFloor = isAttack ? 58 : 20;
+
+      const rawC = Math.round(proposedAction.charge);
+      const isStaticBucket =
+        rawC === 1 ||
+        rawC === 25 ||
+        rawC === 50 ||
+        rawC === 75 ||
+        rawC === 90 ||
+        rawC === 100 ||
+        rawC < minFloor;
+
+      const finalCharge = isStaticBucket
+        ? clampChargeWithJitter(
+            rawC < minFloor ? (isAttack ? 60 : 24) : rawC,
+            maxCharge,
+            minFloor,
+            rng
+          )
+        : K.clamp(rawC, 1, maxCharge);
+
+      action = normalizeLegalAction(
+        env.state,
+        slot,
+        { key: chosenKey, charge: finalCharge },
+        "Learner charge resolver"
+      );
+    } else {
+      action = actionForIndex(env, slot, a, rng);
+    }
+
+    const selectedQ = q ? q[a] : 0;
+
+    if (typeof options.onQ === "function") {
+      options.onQ(selectedQ);
+    }
+
+    return {
+      s,
+      m,
+      a,
+      action,
+      proposedAction,
+      demo,
+      q: selectedQ
+    };
+  }
+
   function reactor(spec, net, rng, options = {}) {
     E.assertSpec(spec);
 
@@ -1330,6 +1556,7 @@
 
     const epsilon = options.epsilon ?? 0;
     const mode = normalizeMode(options.mode || "network");
+    const teacherDifficulty = normalizeMode(options.teacherDifficulty || "master");
 
     assertProbability("epsilon", epsilon);
 
@@ -1337,168 +1564,25 @@
       throw new Error("Unknown learner controller: " + mode);
     }
 
+    const normalizedOptions = {
+      ...options,
+      epsilon,
+      mode,
+      teacherDifficulty
+    };
+
     return {
       decide(env, slot, precomputedState = null) {
         assertSlot(slot);
-
-        if (env.state.winner) {
-          return null;
-        }
-
-        const history = options.history ?? env.history ?? [];
-        env.history = history;
-
-        const { s, m } = precomputedState || readState(env, slot, spec);
-        const q = net ? predictValues(net, s, spec) : null;
-
-        let action;
-        let demo = false;
-
-        if (env.state[slot].isFainted) {
-          action = {
-            key: "DO_NOTHING",
-            charge: 0
-          };
-        } else if (options.guide) {
-          demo = true;
-
-          if (typeof options.teacher === "function") {
-            action = options.teacher(env, slot);
-          } else {
-            action = getAI().choose({
-              state: C.copyState(env.state),
-              slot,
-              history,
-              difficulty: normalizeMode(options.teacherDifficulty || "master"),
-              isTeacher: true,
-              isTraining: Boolean(options.isTraining),
-              disableAgent: true,
-              seed: options.seed ?? 1
-            }).action;
-          }
-        } else if (mode === "rider") {
-          demo = Boolean(options.distillRider);
-
-          action = getAI().choose({
-            state: C.copyState(env.state),
-            slot,
-            history,
-            difficulty: net ? "rider" : "master",
-            neuralNetwork: net || null,
-            neuralSpec: spec,
-            isTraining: Boolean(options.isTraining),
-            disableAgent: true,
-            seed: options.seed ?? 1
-          }).action;
-        } else {
-          let index;
-
-          if (!net) {
-            index = E.scripted(rng)(
-              E.observe(env, slot),
-              m
-            );
-          } else if (options.isTraining && rng() < epsilon) {
-            index = N.randomAction(m, rng);
-          } else if (options.isTraining) {
-            index = N.sampleAction(q, m, 0.15, rng);
-          } else {
-            index = N.argmax(q, m);
-          }
-
-          if (!Number.isInteger(index) || !m[index]) {
-            throw new Error(
-              "Controller selected a masked or invalid action."
-            );
-          }
-
-          action = actionForIndex(env, slot, index, rng);
-        }
-
-        const proposedAction = normalizeLegalAction(
-          env.state,
+        return decideActionWithController(
+          env,
           slot,
-          action,
-          "Learner planner"
+          spec,
+          net,
+          rng,
+          normalizedOptions,
+          precomputedState
         );
-
-        const a = E.getActionIndexByKey(proposedAction.key);
-
-        if (
-          !Number.isInteger(a) ||
-          a < 0 ||
-          a >= spec.output ||
-          !m[a]
-        ) {
-          throw new Error(
-            "Planner action is not legal in the neural action schema: " +
-            proposedAction.key
-          );
-        }
-
-        const chosenKey = E.ACTION_MAP[a];
-        const canUseProposedCharge =
-          proposedAction &&
-          proposedAction.key === chosenKey &&
-          chosenKey !== "DO_NOTHING" &&
-          Number.isFinite(proposedAction.charge) &&
-          proposedAction.charge > 0;
-
-        if (canUseProposedCharge) {
-          const move = env.state.moves?.[slot]?.[chosenKey];
-          const maxCharge = move ? C.maxCharge(env.state[slot], move.direction) : 100;
-          const isAttack =
-            Boolean(move?.offensive) ||
-            move?.direction === "D" ||
-            move?.direction === "S";
-          const minFloor = isAttack ? 58 : 20;
-
-          // If a custom teacher returned a static bucket (1, 25, 50, 75, 90, 100),
-          // lift to tactical floor and apply +1..12% jitter; otherwise keep ForeseeEngine's jittered charge
-          const rawC = Math.round(proposedAction.charge);
-          const isStaticBucket =
-            rawC === 1 ||
-            rawC === 25 ||
-            rawC === 50 ||
-            rawC === 75 ||
-            rawC === 90 ||
-            rawC === 100 ||
-            rawC < minFloor;
-
-          const finalCharge = isStaticBucket
-            ? clampChargeWithJitter(
-                rawC < minFloor ? (isAttack ? 60 : 24) : rawC,
-                maxCharge,
-                minFloor,
-                rng
-              )
-            : K.clamp(rawC, 1, maxCharge);
-
-          action = normalizeLegalAction(
-            env.state,
-            slot,
-            { key: chosenKey, charge: finalCharge },
-            "Learner charge resolver"
-          );
-        } else {
-          action = actionForIndex(env, slot, a, rng);
-        }
-
-        const selectedQ = q ? q[a] : 0;
-
-        if (typeof options.onQ === "function") {
-          options.onQ(selectedQ);
-        }
-
-        return {
-          s,
-          m,
-          a,
-          action,
-          proposedAction,
-          demo,
-          q: selectedQ
-        };
       }
     };
   }
@@ -1807,6 +1891,30 @@
     let cachedDoomedPotential =
       rewardMode === "standard" ? doomedPotential(state, learnerSlot) : 0;
 
+    const learnerControllerOpts = {
+      history,
+      guide: false,
+      teacher: teacherFn,
+      teacherDifficulty,
+      epsilon: isEvaluation ? 0 : epsilon,
+      isTraining: !isEvaluation,
+      mode: activeLearnerMode,
+      distillRider: !isEvaluation && Boolean(distillRider),
+      seed: 1
+    };
+
+    const opponentNetworkOpts = {
+      history,
+      guide: false,
+      teacher: null,
+      teacherDifficulty: "master",
+      epsilon: 0,
+      isTraining: false,
+      mode: "network",
+      distillRider: false,
+      seed: 1
+    };
+
     while (!state.winner) {
       if (rounds > maxRounds + 1) {
         throw new Error(
@@ -1824,24 +1932,19 @@
         guideProbability > 0 &&
         choices() < guideProbability;
 
-      const controller = reactor(
+      learnerControllerOpts.history = history;
+      learnerControllerOpts.guide = guided;
+      learnerControllerOpts.seed = roundSeed;
+
+      const decision = decideActionWithController(
+        env,
+        learnerSlot,
         spec,
         net,
         K.rng(K.hash(roundSeed, learnerSlot)),
-        {
-          history,
-          guide: guided,
-          teacher: teacherFn,
-          teacherDifficulty,
-          epsilon: isEvaluation ? 0 : epsilon,
-          isTraining: !isEvaluation,
-          mode: activeLearnerMode,
-          distillRider: !isEvaluation && Boolean(distillRider),
-          seed: roundSeed
-        }
+        learnerControllerOpts,
+        cachedLearnerObs
       );
-
-      const decision = controller.decide(env, learnerSlot, cachedLearnerObs);
 
       if (!decision) {
         throw new Error(
@@ -1877,17 +1980,16 @@
 
         opposingAction = actionForIndex(env, enemySlot, index, scriptedRng);
       } else if (activeOpponentMode === "network") {
-        opposingAction = reactor(
+        opponentNetworkOpts.history = history;
+        opponentNetworkOpts.seed = K.hash(roundSeed, "opponent");
+        opposingAction = decideActionWithController(
+          env,
+          enemySlot,
           spec,
           opponentNet,
           K.rng(K.hash(roundSeed, enemySlot)),
-          {
-            history,
-            isTraining: false,
-            mode: "network",
-            seed: K.hash(roundSeed, "opponent")
-          }
-        ).decide(env, enemySlot).action;
+          opponentNetworkOpts
+        ).action;
       } else {
         const useOpponentNetwork =
           activeOpponentMode === "rider" &&
@@ -1899,7 +2001,7 @@
             : activeOpponentMode;
 
         opposingAction = ai.choose({
-          state: C.copyState(state),
+          state,
           slot: enemySlot,
           history,
           difficulty,
@@ -2126,7 +2228,8 @@
         (!resolvedMoveObj?.offensive ? resolvedMoveObj?.buff?.id : null);
 
       if (overwrittenBuffId) {
-        for (const item of pendingWindow) {
+        for (let i = 0; i < pendingWindow.length; i++) {
+          const item = pendingWindow[i];
           if (item.buffMeta && item.buffMeta.buffId === overwrittenBuffId) {
             item.buffMeta.roundsRemaining = 0;
           }

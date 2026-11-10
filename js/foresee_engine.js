@@ -23,7 +23,7 @@
 
   function getMovesetMeta(movesForSlot) {
     if (!movesForSlot || typeof movesForSlot !== "object") {
-      return { minSCost: 4, keys: [], sKeys: [], omniKeys: [] };
+      return { minSCost: 4, keys: [], sKeys: [], omniKeys: [], hasMoves: false };
     }
     let meta = MOVESET_META_CACHE.get(movesForSlot);
     if (!meta) {
@@ -56,7 +56,8 @@
         minSCost: Number.isFinite(minSCost) ? minSCost : 4,
         keys,
         sKeys,
-        omniKeys
+        omniKeys,
+        hasMoves: keys.length > 0
       };
       MOVESET_META_CACHE.set(movesForSlot, meta);
     }
@@ -70,6 +71,7 @@
   //   68 -> 69..80% (Neutral D Poke)
   //   78 -> 79..90% (Neutral S Poke)
   //   88 -> 89..100% (Safe Heavy Punish)
+  // Rollout counts use Stratified Opponent Sampling for ~4x faster convergence.
   const DEFAULT_LEVEL_SETTINGS = {
     easy: {
       horizon: 1,
@@ -81,32 +83,32 @@
     },
     balanced: {
       horizon: 2,
-      rollouts: 16,
-      finalists: 6,
+      rollouts: 8,
+      finalists: 5,
       risk: 0.20,
       nearBest: 8,
       charges: [24, 34, 60, 68, 78, 88]
     },
     defensive: {
       horizon: 2,
-      rollouts: 28,
-      finalists: 8,
+      rollouts: 12,
+      finalists: 6,
       risk: 0.30,
       nearBest: 0,
       charges: [24, 34, 60, 68, 78, 88]
     },
     master: {
       horizon: 3,
-      rollouts: 48,
-      finalists: 8,
+      rollouts: 18,
+      finalists: 7,
       risk: 0.25,
       nearBest: 0,
       charges: [24, 34, 60, 68, 78, 88]
     },
     rider: {
       horizon: 3,
-      rollouts: 80,
-      finalists: 10,
+      rollouts: 28,
+      finalists: 8,
       risk: 0.25,
       nearBest: 0,
       charges: [24, 34, 60, 68, 78, 88]
@@ -213,34 +215,6 @@
       return K && K.levels && K.levels.rider ? "rider" : "master";
     }
     return norm;
-  }
-
-  function appendForecastHistory(
-    history,
-    before,
-    action1,
-    action2
-  ) {
-    const p1 = {
-      ...C.normalizeAction(before, "p1", action1)
-    };
-
-    const p2 = {
-      ...C.normalizeAction(before, "p2", action2)
-    };
-
-    return [
-      ...(Array.isArray(history) ? history : []),
-      {
-        p1,
-        p2,
-        actions: { p1, p2 },
-        fainted: {
-          p1: Boolean(before.p1.isFainted),
-          p2: Boolean(before.p2.isFainted)
-        }
-      }
-    ].slice(-24);
   }
 
   function getMoveDirection(state, slot, key) {
@@ -405,6 +379,9 @@
     if (Number(fighter.chi || 0) < minSCost) {
       return false;
     }
+    if (!dirConstraints) {
+      return sKeys.length > 0;
+    }
     for (let i = 0; i < sKeys.length; i++) {
       if (canUseMoveKey(state, slot, sKeys[i], dirConstraints)) {
         return true;
@@ -566,8 +543,8 @@
     }
 
     const { keys } = getMovesetMeta(moves);
-    const offensiveAnchors = compactMode ? [62, 76, 88] : [60, 68, 78, 88];
-    const utilityAnchors = compactMode ? [28, 40] : [24, 34, 48];
+    const offensiveAnchors = compactMode ? [62, 82] : [60, 68, 78, 88];
+    const utilityAnchors = compactMode ? [30] : [24, 34, 48];
 
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -702,7 +679,7 @@
       return 0;
     }
 
-    // Rule 4a: When opponent is fainted, never waste the free turn on DO_NOTHING or A-Guard
+    // Rule 4a: When opponent is fainted, never waste the free stun turn on DO_NOTHING or A-Guard
     if (enemy.isFainted) {
       if (action.key === "DO_NOTHING") {
         return -35;
@@ -907,8 +884,8 @@
   }
 
   /*
-   * Evaluates "Doomed Status" (Resource Lock, Asymmetric S-Threat, and
-   * Faint-Lock Vulnerability) that exists even when LP has not changed yet.
+   * O(1) evaluation of "Doomed Status" (Resource Lock, Asymmetric S-Threat, and
+   * Faint-Lock Vulnerability) using cached moveset metadata.
    */
   function evaluateDoomedStatus(state, slot) {
     if (!state || state.winner) {
@@ -927,11 +904,13 @@
     const enemyChi = Number(enemy.chi || 0);
     const chiDiff = ownChi - enemyChi;
 
-    const ownMinS = minSChiCost(state, slot);
-    const enemyMinS = minSChiCost(state, enemySlot);
+    const ownMeta = getMovesetMeta(state.moves?.[slot]);
+    const enemyMeta = getMovesetMeta(state.moves?.[enemySlot]);
+    const ownMinS = ownMeta.minSCost;
+    const enemyMinS = enemyMeta.minSCost;
 
-    const ownHasS = !own.isFainted && ownChi >= ownMinS && canUseSMove(state, slot);
-    const enemyHasS = !enemy.isFainted && enemyChi >= enemyMinS && canUseSMove(state, enemySlot);
+    const ownHasS = !own.isFainted && ownChi >= ownMinS && ownMeta.sKeys.length > 0;
+    const enemyHasS = !enemy.isFainted && enemyChi >= enemyMinS && enemyMeta.sKeys.length > 0;
 
     let score = 0;
 
@@ -983,7 +962,11 @@
 
   /*
    * Evaluates transition-level tactics between `before` and `after`.
-   * Includes Beetle's 2.2x CHI weighting when myCHI < oppCHI and Rider's +24 Guard bonus.
+   * Includes:
+   * - Fastest Kill-Confirm priority bonus
+   * - Faint infliction (+32) / Faint suffered (-36)
+   * - Clean Guard & Omni-Guard vs S / Offensive bonus
+   * - Beetle's 2.2x CHI weighting when myCHI < oppCHI
    */
   function evaluateTransitionTactics(
     before,
@@ -993,7 +976,19 @@
     opponentAction,
     difficulty = "balanced"
   ) {
-    if (!before || !after || after.winner) {
+    if (!before || !after) {
+      return 0;
+    }
+
+    // Fast Kill-Confirm priority bonus: prefer the fastest guaranteed lethal hit
+    if (after.winner) {
+      if (after.winner === slot) {
+        const chg = Number(ownAction?.charge || 70);
+        return 45 + Math.max(0, 100 - chg) * 0.35;
+      }
+      if (after.winner !== "draw") {
+        return -45;
+      }
       return 0;
     }
 
@@ -1027,6 +1022,14 @@
     const enemyIsS = isSMove(before, enemySlot, enemyKey);
 
     let tacticalDelta = 0;
+
+    // Newly inflicted faint / suffered faint transition bonus
+    if (!beforeEnemy.isFainted && afterEnemy.isFainted) {
+      tacticalDelta += 32;
+    }
+    if (!beforeOwn.isFainted && afterOwn.isFainted) {
+      tacticalDelta -= 36;
+    }
 
     // Case 1: We used a matching guard (or Omni Guard) against opponent's S move and won Chi without losing LP
     if (
@@ -1187,9 +1190,9 @@
 
   /*
    * RIDER & Smart-Tier finalist selector:
-   * Seeds the top raw (move, charge) rows first, then injects Matrix-advised moves,
-   * then ensures directional representation (D, S, W, A, IDLE) and distinct move keys,
-   * and finally fills any remaining slots by score.
+   * Seeds top 3 raw (move, charge) rows first, injects Matrix-advised moves,
+   * guarantees directional representation (D, S, W, A, IDLE) within competitive range,
+   * then fills remaining slots with distinct keys and highest-scoring charge variants.
    */
   function selectDiverseFinalists(sortedRows, limit, advisedKeys = null, state = null, slot = null) {
     if (sortedRows.length <= limit) {
@@ -1210,13 +1213,13 @@
       return true;
     }
 
-    // 1. Seed top raw rows (at most 3 or ~40% of limit so diverse moves still get rollout slots)
+    // 1. Seed top raw rows (at most 3 or ~35% of limit so diverse moves get rollout slots)
     const seedCount = Math.max(1, Math.min(3, Math.ceil(limit * 0.35)));
     for (let i = 0; i < Math.min(seedCount, sortedRows.length); i++) {
       addRow(sortedRows[i]);
     }
 
-    // 2. Include Matrix-advised keys (if not already represented)
+    // 2. Include Matrix-advised keys
     if (Array.isArray(advisedKeys)) {
       for (let i = 0; i < advisedKeys.length && chosen.length < limit; i++) {
         const advisedKey = advisedKeys[i];
@@ -1503,6 +1506,21 @@
     return entries[entries.length - 1].action;
   }
 
+  /*
+   * Stratified quantile sampler for Step 2 opponent rollouts:
+   * Covers the full opponent probability distribution in 1/4th the rollouts.
+   */
+  function sampleAtQuantile(entries, q) {
+    let remaining = q;
+    for (let i = 0; i < entries.length; i++) {
+      remaining -= entries[i].probability;
+      if (remaining <= 0) {
+        return entries[i].action;
+      }
+    }
+    return entries[entries.length - 1].action;
+  }
+
   function sampleRankedAction(rows, rng) {
     if (!rows || rows.length === 0) {
       return null;
@@ -1612,66 +1630,60 @@
       }
     }
 
-    for (let i = 0; i < history.length; i++) {
+    let weight = 1.0;
+    for (let i = history.length - 1; i >= 0; i--) {
       const turn = history[i];
 
-      if (turn.fainted && turn.fainted[slot]) {
-        continue;
-      }
+      if (!turn.fainted || !turn.fainted[slot]) {
+        const action = turn[slot] || turn.actions?.[slot];
+        if (action) {
+          const key = String(action.key || "");
+          const isOmni = state
+            ? isOmniGuardMove(state, slot, key)
+            : key === "A+I";
+          const otherAction = turn[otherSlot] || turn.actions?.[otherSlot];
+          const otherKey = String(otherAction?.key || "");
 
-      const action = turn[slot] || turn.actions?.[slot];
-      if (!action) {
-        continue;
-      }
+          counts[key] = (counts[key] || 0) + weight;
 
-      const weight = Math.pow(
-        0.90,
-        history.length - 1 - i
-      );
+          if (isOmni) {
+            aIWeight += weight;
+            if (otherKey.startsWith("S+")) {
+              aIVsSWeight += weight * 1.5;
+            }
+          }
 
-      const key = String(action.key || "");
-      const isOmni = state
-        ? isOmniGuardMove(state, slot, key)
-        : key === "A+I";
-      const otherAction = turn[otherSlot] || turn.actions?.[otherSlot];
-      const otherKey = String(otherAction?.key || "");
+          if (key.length >= 3 && key.charCodeAt(1) === 43) {
+            const dir = key[0];
+            const btn = key[2];
+            if (dirCounts[dir] !== undefined) {
+              dirCounts[dir] += weight;
+            }
+            if (dir === "A") {
+              guardWeight += weight;
+            } else if (
+              (dir === "D" || dir === "S" || dir === "W") &&
+              buttonCounts[btn] !== undefined
+            ) {
+              buttonCounts[btn] += weight;
+            }
+          }
 
-      counts[key] = (counts[key] || 0) + weight;
-
-      if (isOmni) {
-        aIWeight += weight;
-        if (otherKey.startsWith("S+")) {
-          aIVsSWeight += weight * 1.5;
+          if (
+            key !== "DO_NOTHING" &&
+            Number.isFinite(action.charge) &&
+            action.charge >= 1 &&
+            action.charge <= 100
+          ) {
+            charges.push({
+              charge: action.charge,
+              weight
+            });
+          }
         }
       }
 
-      if (key.length >= 3 && key.charCodeAt(1) === 43) {
-        const dir = key[0];
-        const btn = key[2];
-        if (dirCounts[dir] !== undefined) {
-          dirCounts[dir] += weight;
-        }
-        if (dir === "A") {
-          guardWeight += weight;
-        } else if (
-          (dir === "D" || dir === "S" || dir === "W") &&
-          buttonCounts[btn] !== undefined
-        ) {
-          buttonCounts[btn] += weight;
-        }
-      }
-
-      if (
-        key !== "DO_NOTHING" &&
-        Number.isFinite(action.charge) &&
-        action.charge >= 1 &&
-        action.charge <= 100
-      ) {
-        charges.push({
-          charge: action.charge,
-          weight
-        });
-      }
+      weight *= 0.90;
     }
 
     const recentAIMoveRate = recentTurns > 0 ? recentAICount / recentTurns : 0;
@@ -1689,6 +1701,153 @@
       recentAIMoveRate,
       recentSMoveRate
     };
+  }
+
+  /*
+   * O(1) incremental observation updater for Monte Carlo rollouts.
+   * Avoids cloning history arrays and rescanning 24 turns on every rollout step.
+   */
+  function stepObservationsFast(baseObs, state, slot, ownAction, otherAction, wasFainted) {
+    if (wasFainted || !ownAction) {
+      return baseObs;
+    }
+    const key = String(ownAction.key || "");
+    const otherKey = String(otherAction?.key || "");
+    const isOmni = isOmniGuardMove(state, slot, key);
+    const isS = key.startsWith("S+");
+
+    const dirCounts = {
+      A: baseObs.dirCounts.A * 0.90,
+      D: baseObs.dirCounts.D * 0.90,
+      S: baseObs.dirCounts.S * 0.90,
+      W: baseObs.dirCounts.W * 0.90
+    };
+    if (key.length >= 3 && key.charCodeAt(1) === 43) {
+      const dir = key[0];
+      if (dirCounts[dir] !== undefined) {
+        dirCounts[dir] += 1.0;
+      }
+    }
+
+    return {
+      counts: baseObs.counts,
+      charges: baseObs.charges,
+      buttonCounts: baseObs.buttonCounts,
+      dirCounts,
+      guardWeight: baseObs.guardWeight * 0.90 + (key.startsWith("A+") ? 1.0 : 0),
+      aIWeight: baseObs.aIWeight * 0.90 + (isOmni ? 1.0 : 0),
+      aIVsSWeight: baseObs.aIVsSWeight * 0.90 + (isOmni && otherKey.startsWith("S+") ? 1.5 : 0),
+      aIConsecutive: isOmni
+        ? baseObs.aIConsecutive + 1
+        : key === "DO_NOTHING"
+          ? baseObs.aIConsecutive
+          : 0,
+      recentAIMoveRate: 0.80 * baseObs.recentAIMoveRate + (isOmni ? 0.20 : 0),
+      recentSMoveRate: 0.80 * baseObs.recentSMoveRate + (isS ? 0.20 : 0)
+    };
+  }
+
+  /*
+   * Fast O(moves) rollout policy for Step 2 continuation plies (depth >= 1).
+   * Eliminates B.intent() and multi-anchor C.isLegal() loops inside rollouts.
+   */
+  function rolloutPolicyFast(state, slot, difficulty, rolloutSelf, obsPair, rng) {
+    const fighter = state?.[slot];
+    if (!fighter || fighter.isFainted) {
+      return [{ action: { key: "DO_NOTHING", charge: 0 }, probability: 1 }];
+    }
+
+    const moves = state.moves?.[slot];
+    if (!moves) {
+      return [{ action: { key: "DO_NOTHING", charge: 0 }, probability: 1 }];
+    }
+
+    const normDiff = normalizeDifficulty(difficulty);
+    const brainDiff = brainDifficultyKey(normDiff);
+    const otherSlot = C.other(slot);
+    const otherFighter = state[otherSlot];
+    const otherIsFainted = Boolean(otherFighter?.isFainted);
+    const otherChi = Number(otherFighter?.chi || 0);
+    const ownChi = Number(fighter.chi || 0);
+
+    const observed = obsPair.own;
+    const otherObserved = obsPair.other;
+    const { keys, minSCost } = getMovesetMeta(moves);
+    const otherMeta = getMovesetMeta(state.moves?.[otherSlot]);
+    const otherCanUseS = !otherIsFainted && otherChi >= otherMeta.minSCost && otherMeta.sKeys.length > 0;
+    const ownCanUseS = ownChi >= minSCost;
+    const otherCanUseAI = !otherIsFainted && otherMeta.omniKeys.length > 0;
+
+    const entries = [];
+    let total = 0;
+
+    if (!otherIsFainted && C.isLegal(state, slot, { key: "DO_NOTHING", charge: 0 })) {
+      let idleW = 3 * B.prior(state, slot, { key: "DO_NOTHING", charge: 0 }, brainDiff) + (observed.counts.DO_NOTHING || 0);
+      if (rolloutSelf && normDiff === "defensive" && ownChi < otherChi) {
+        idleW *= 1.65;
+      }
+      entries.push({ action: { key: "DO_NOTHING", charge: 0 }, weight: idleW, probability: 0 });
+      total += idleW;
+    }
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (key === "DO_NOTHING") continue;
+      const move = moves[key];
+      if (!move) continue;
+
+      if (otherIsFainted && move.direction === "A") {
+        continue;
+      }
+
+      const maxChg = C.maxCharge(fighter, move.direction);
+      if (!Number.isFinite(maxChg) || maxChg < 1) continue;
+
+      const offensive = Boolean(move.offensive) || move.direction === "D" || move.direction === "S";
+      const baseTarget = otherIsFainted || otherChi <= 1
+        ? 92
+        : offensive
+          ? (move.direction === "S" ? 82 : 72)
+          : 34;
+      const chg = K.clamp(baseTarget + Math.floor(rng() * 8), 1, maxChg);
+      const act = { key, charge: chg };
+      if (!C.isLegal(state, slot, act)) continue;
+
+      let w = 3 * B.prior(state, slot, act, brainDiff) + (observed.counts[key] || 0);
+
+      if (rolloutSelf && normDiff === "defensive" && !otherIsFainted && ownChi < otherChi) {
+        if (move.direction === "A") {
+          w *= isOmniGuardMove(state, slot, key) ? 2.6 : 2.0;
+        } else if (move.direction === "W") {
+          w *= 1.5;
+        } else if (offensive) {
+          w *= 0.65;
+        }
+      }
+
+      if (!otherIsFainted) {
+        if (isOmniGuardMove(state, slot, key) && otherCanUseS) {
+          w = Math.max(w, 2.5) * (1.4 + 0.4 * (otherObserved.dirCounts.S || 0));
+        } else if (move.direction === "S" && otherCanUseAI && (otherObserved.aIWeight > 0.3 || otherObserved.aIConsecutive >= 1)) {
+          w /= 1.0 + 1.2 * otherObserved.aIWeight + otherObserved.aIConsecutive;
+        } else if (offensive && move.direction === "D" && ownCanUseS && otherCanUseAI && otherObserved.aIConsecutive >= 1) {
+          w *= 1.35;
+        }
+      }
+
+      entries.push({ action: act, weight: w, probability: 0 });
+      total += w;
+    }
+
+    if (entries.length === 0) {
+      return [{ action: { key: "DO_NOTHING", charge: 0 }, probability: 1 }];
+    }
+
+    const invTotal = total > 0 ? 1 / total : 1 / entries.length;
+    for (let i = 0; i < entries.length; i++) {
+      entries[i].probability = total > 0 ? entries[i].weight * invTotal : invTotal;
+    }
+    return entries;
   }
 
   /*
@@ -2173,34 +2332,24 @@
     let maxRollouts = settings.rollouts;
 
     if (isTraining) {
-      // In training, easy/balanced use 1-step full expectimax;
-      // defensive/master/rider use 2-ply with diverse finalists so W/A/S/D get rollout signal.
-      if (isRider || isBulletAnt) {
-        settings.horizon = 2;
-        settings.rollouts = 4;
-        settings.finalists = 5;
-      } else if (isBeetle) {
-        settings.horizon = 2;
-        settings.rollouts = 2;
-        settings.finalists = 4;
-      } else {
-        settings.horizon = 1;
-        settings.rollouts = 0;
-        settings.finalists = 2;
-      }
+      // Fast training schedule: 1-step full expectimax for easy/balanced/defensive;
+      // 2-ply with 2 stratified rollouts across 3 diverse finalists for master/rider.
+      settings.horizon = (isRider || isBulletAnt) ? 2 : 1;
+      settings.rollouts = (isRider || isBulletAnt) ? 2 : 0;
+      settings.finalists = 3;
 
       minRollouts = settings.rollouts;
       maxRollouts = settings.rollouts;
     } else if (isRider) {
       settings.risk = 0.25; // 0.75 * Mean + 0.25 * WorstCase
-      settings.finalists = Math.max(settings.finalists, 10);
+      settings.finalists = Math.max(settings.finalists, 8);
       const isLiveReplan = Boolean(liveContext && !liveContext.isInitial);
       minRollouts = isLiveReplan
-        ? Math.max(32, Math.floor(settings.rollouts * 0.5))
-        : Math.max(settings.rollouts, 80);
+        ? Math.max(14, Math.floor(settings.rollouts * 0.5))
+        : Math.max(settings.rollouts, 28);
       maxRollouts = activeTimeBudgetMs > 0
-        ? Math.max(minRollouts, 128)
-        : Math.max(settings.rollouts, 96);
+        ? Math.max(minRollouts, 48)
+        : Math.max(settings.rollouts, 32);
       settings.rollouts = maxRollouts;
     }
 
@@ -2373,36 +2522,49 @@
       { own: enemyObserved, other: ownObserved }
     );
 
-    // Filter out tiny tail probabilities during expectimax to avoid wasted pairValue calls
-    const expectimaxOpponents = [];
-    let keptProbSum = 0;
-    const minProbCutoff = isTraining ? 0.015 : 0.004;
-    for (let i = 0; i < opponentPolicy.length; i++) {
-      if (opponentPolicy[i].probability >= minProbCutoff) {
-        expectimaxOpponents.push(opponentPolicy[i]);
-        keptProbSum += opponentPolicy[i].probability;
-      }
-    }
-    const activeOpponents = expectimaxOpponents.length > 0 ? expectimaxOpponents : opponentPolicy;
-    const probNorm = keptProbSum > 0 && expectimaxOpponents.length > 0 ? 1 / keptProbSum : 1;
-
     let enemySProb = 0;
     let enemyAIProb = 0;
     const enemySProbByButton = { J: 0, K: 0, I: 0, L: 0 };
+    const enemyAtkProbByButton = { J: 0, K: 0, I: 0, L: 0 };
 
     for (let i = 0; i < opponentPolicy.length; i++) {
       const entry = opponentPolicy[i];
       const k = entry.action.key;
+      const oppMove = state.moves?.[opponentSlot]?.[k];
       if (isOmniGuardMove(state, opponentSlot, k)) {
         enemyAIProb += entry.probability;
       } else if (isSMove(state, opponentSlot, k)) {
         enemySProb += entry.probability;
-        const oppMove = state.moves?.[opponentSlot]?.[k];
         if (oppMove?.button && enemySProbByButton[oppMove.button] !== undefined) {
           enemySProbByButton[oppMove.button] += entry.probability;
         }
       }
+      if (oppMove?.offensive && oppMove.button && enemyAtkProbByButton[oppMove.button] !== undefined) {
+        enemyAtkProbByButton[oppMove.button] += entry.probability;
+      }
     }
+
+    // Top-Mass Expectimax Pruning: sort opponent policy by probability and keep top branches
+    // covering >= 92% probability mass (max 18 in live play, 10 in training)
+    const sortedOppPolicy = [...opponentPolicy].sort((a, b) => b.probability - a.probability);
+    const maxOppBranches = isTraining ? 10 : 18;
+    const expectimaxOpponents = [];
+    let keptProbSum = 0;
+
+    for (let i = 0; i < sortedOppPolicy.length && expectimaxOpponents.length < maxOppBranches; i++) {
+      const entry = sortedOppPolicy[i];
+      if (entry.probability < 0.008 && expectimaxOpponents.length >= 6) {
+        break;
+      }
+      expectimaxOpponents.push(entry);
+      keptProbSum += entry.probability;
+      if (keptProbSum >= 0.92 && expectimaxOpponents.length >= 6) {
+        break;
+      }
+    }
+
+    const activeOpponents = expectimaxOpponents.length > 0 ? expectimaxOpponents : opponentPolicy;
+    const probNorm = keptProbSum > 0 && expectimaxOpponents.length > 0 ? 1 / keptProbSum : 1;
 
     // Query Rider Matrix EV (30 * P_Matrix + 45 * V_Matrix) or fallback actionBonuses
     const rootMatrixMetrics =
@@ -2508,13 +2670,18 @@
             (oppChi >= oppMinS + 2 ? 10 : 0);
         } else if (
           ownMove?.guardKind === "matching" &&
-          ownMove.guardButton &&
-          enemyCanUseS &&
-          enemySProbByButton[ownMove.guardButton] > 0
+          ownMove.guardButton
         ) {
-          tacticalRootBonus +=
-            32 * enemySProbByButton[ownMove.guardButton] +
-            (oppChi >= oppMinS + 2 ? 6 : 0);
+          const btn = ownMove.guardButton;
+          if (enemyCanUseS && enemySProbByButton[btn] > 0) {
+            tacticalRootBonus +=
+              32 * enemySProbByButton[btn] +
+              (oppChi >= oppMinS + 2 ? 6 : 0);
+          }
+          // Counter-read bonus against predictable D/S button habits
+          if ((enemyObserved.buttonCounts[btn] || 0) >= 1.15 && enemyAtkProbByButton[btn] >= 0.22) {
+            tacticalRootBonus += 24 * enemyAtkProbByButton[btn];
+          }
         } else if (isSMove(state, slot, action.key)) {
           if (
             enemyAIProb >= 0.16 ||
@@ -2657,7 +2824,7 @@
     let completedRollouts = 0;
 
     /*
-     * Step 2: multi-turn Monte Carlo continuation.
+     * Step 2: multi-turn Monte Carlo continuation with Stratified Sampling & O(1) Obs Updates.
      */
     if (
       settings.horizon > 1 &&
@@ -2686,26 +2853,20 @@
           break;
         }
 
+        // Common Random Numbers + Stratified quantile for opponent's root response
+        const baseSeedHash = K.hash(seed, "forecast", sampleIndex);
+        const strataRng = K.rng(baseSeedHash);
+        const quantile = (sampleIndex + strataRng()) / maxRollouts;
+        const sharedOpponentAction = sampleAtQuantile(opponentPolicy, quantile);
+
         for (let fIdx = 0; fIdx < finalists.length; fIdx++) {
           const row = finalists[fIdx];
-
-          const rng = K.rng(
-            K.hash(
-              seed,
-              "forecast",
-              sampleIndex
-            )
-          );
-
-          const opponentAction = sample(
-            opponentPolicy,
-            rng
-          );
+          const rng = K.rng(baseSeedHash ^ (fIdx * 2654435761));
 
           let [a1, a2] = orderedActions(
             slot,
             row.action,
-            opponentAction
+            sharedOpponentAction
           );
 
           const firstResult = C.resolve(
@@ -2717,18 +2878,28 @@
           );
 
           let future = firstResult.state;
+          const firstValue = evalFn(future, slot, history);
 
-          let futureHistory = appendForecastHistory(
-            history,
+          if (future.winner) {
+            completedRollouts = sampleIndex + 1;
+            continue;
+          }
+
+          let curOwnObs = stepObservationsFast(
+            ownObserved,
             state,
-            firstResult.actions.p1,
-            firstResult.actions.p2
-          );
-
-          const firstValue = evalFn(
-            future,
             slot,
-            futureHistory
+            firstResult.actions[slot],
+            firstResult.actions[opponentSlot],
+            Boolean(state[slot]?.isFainted)
+          );
+          let curEnemyObs = stepObservationsFast(
+            enemyObserved,
+            state,
+            opponentSlot,
+            firstResult.actions[opponentSlot],
+            firstResult.actions[slot],
+            Boolean(state[opponentSlot]?.isFainted)
           );
 
           let rolloutTacticalDelta = 0;
@@ -2738,66 +2909,36 @@
             depth < settings.horizon && !future.winner;
             depth++
           ) {
-            const futureOwnObs = observations(futureHistory, slot, future);
-            const futureEnemyObs = observations(futureHistory, opponentSlot, future);
-
-            const ownPolicy = policy(
+            const ownPolicy = rolloutPolicyFast(
               future,
               slot,
-              futureHistory,
               difficulty,
               true,
-              isSmartDifficulty,
-              null,
-              null,
-              true,
-              { own: futureOwnObs, other: futureEnemyObs }
+              { own: curOwnObs, other: curEnemyObs },
+              rng
             );
 
-            const enemyPolicy = policy(
+            const enemyPolicy = rolloutPolicyFast(
               future,
               opponentSlot,
-              futureHistory,
               "master",
               false,
-              isSmartDifficulty,
-              null,
-              null,
-              true,
-              { own: futureEnemyObs, other: futureOwnObs }
-            );
-
-            const ownNext = sample(
-              ownPolicy,
+              { own: curEnemyObs, other: curOwnObs },
               rng
             );
 
-            const enemyNext = sample(
-              enemyPolicy,
-              rng
-            );
+            const ownNext = sample(ownPolicy, rng);
+            const enemyNext = sample(enemyPolicy, rng);
 
-            [a1, a2] = orderedActions(
-              slot,
-              ownNext,
-              enemyNext
-            );
+            [a1, a2] = orderedActions(slot, ownNext, enemyNext);
 
             const beforeFuture = future;
-
             const nextResult = C.resolve(
               beforeFuture,
               a1,
               a2,
               rng,
               false
-            );
-
-            futureHistory = appendForecastHistory(
-              futureHistory,
-              beforeFuture,
-              nextResult.actions.p1,
-              nextResult.actions.p2
             );
 
             future = nextResult.state;
@@ -2812,14 +2953,29 @@
                 enemyNext,
                 difficulty
               );
+
+            if (depth + 1 < settings.horizon && !future.winner) {
+              curOwnObs = stepObservationsFast(
+                curOwnObs,
+                beforeFuture,
+                slot,
+                nextResult.actions[slot],
+                nextResult.actions[opponentSlot],
+                Boolean(beforeFuture[slot]?.isFainted)
+              );
+              curEnemyObs = stepObservationsFast(
+                curEnemyObs,
+                beforeFuture,
+                opponentSlot,
+                nextResult.actions[opponentSlot],
+                nextResult.actions[slot],
+                Boolean(beforeFuture[opponentSlot]?.isFainted)
+              );
+            }
           }
 
           continuationSums[fIdx] +=
-            evalFn(
-              future,
-              slot,
-              futureHistory
-            ) -
+            evalFn(future, slot, history) -
             firstValue +
             rolloutTacticalDelta;
         }

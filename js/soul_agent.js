@@ -2,28 +2,47 @@
  * Exact-matchup checkpoint & Per-Rider Master Matrix Bundle storage (v7).
  *
  * Build: v5-state256-action17
- * Matrix: v7-7riders-10backup
+ * Matrix: v7-7riders-10backup (IndexedDB + Google Drive 49-Matrix Persistence)
  * Patch: charge1-reset1
  */
 
 // Lift 5MB localStorage barrier into Unlimited Temp RAM
 if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   const RAM = (window.__KF_TEMP_RAM__ = window.__KF_TEMP_RAM__ || {});
-  const _get = Storage.prototype.getItem, _set = Storage.prototype.setItem;
+  const _get = Storage.prototype.getItem;
+  const _set = Storage.prototype.setItem;
+  const _remove = Storage.prototype.removeItem;
+
   Storage.prototype.getItem = function (k) {
-    return String(k).startsWith("kf_soul_agent_data_") && k in RAM ? RAM[k] : _get.call(this, k);
+    return String(k).startsWith("kf_soul_agent_data_") && k in RAM
+      ? RAM[k]
+      : _get.call(this, k);
   };
+
   Storage.prototype.setItem = function (k, v) {
     if (String(k).startsWith("kf_soul_agent_data_")) {
       RAM[k] = String(v);
-      try { _set.call(this, k, v); } catch (e) {} // Ignore 5MB QuotaExceededError, keep in RAM
+      try {
+        _set.call(this, k, v);
+      } catch (_) {
+        // Ignore 5MB QuotaExceededError; IndexedDB + RAM handle persistence
+      }
       return;
     }
     return _set.call(this, k, v);
   };
+
+  Storage.prototype.removeItem = function (k) {
+    if (String(k).startsWith("kf_soul_agent_data_")) {
+      delete RAM[k];
+    }
+    try {
+      _remove.call(this, k);
+    } catch (_) {}
+  };
+
   Storage.prototype.__kfRam = true;
 }
-
 
 (function (g) {
   "use strict";
@@ -41,6 +60,10 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
 
   const STORAGE_KEY =
     "kf_soul_agent_data_v7_matrix_state256_action17_charge1_reset1";
+
+  const IDB_NAME = "kf_soul_agent_idb_v7";
+  const IDB_VERSION = 1;
+  const IDB_STORE = "matrix_store";
 
   const ACTIVE_ROSTER_COUNT = 7;
   const BACKUP_SLOT_COUNT = 10;
@@ -80,7 +103,10 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   let readyPromise = null;
   let cachedData = null;
   let storageLoaded = false;
+  let idbLoaded = false;
   let storageWarning = "";
+  let idbOpenPromise = null;
+  let pendingIdbWrite = Promise.resolve();
 
   const warnings = [];
 
@@ -115,7 +141,9 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
 
   function getBackupCodes() {
     const activeSet = new Set(getActiveCodes());
-    return getAllSlotCodes().filter(code => !activeSet.has(code)).slice(0, BACKUP_SLOT_COUNT);
+    return getAllSlotCodes()
+      .filter(code => !activeSet.has(code))
+      .slice(0, BACKUP_SLOT_COUNT);
   }
 
   function syncRosterCodes(riders) {
@@ -143,6 +171,11 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       if (idx >= 1 && idx <= TOTAL_MATRIX_SLOTS) {
         return value;
       }
+    }
+
+    if (/^r[0-6]$/.test(value)) {
+      const idx = Number(value.slice(1)) + 1;
+      return formatCodeNumber(idx);
     }
 
     throw new Error("Unknown rider ID/code: " + id);
@@ -178,7 +211,6 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   function createDefaultMatchParameters(overrides = null) {
     const foresight = getForesightConfig();
     const defaultReserved = new Array(RESERVED_PARAM_SLOTS).fill(0);
-    // Slot 0 stores active foresight lookahead horizon n by default
     defaultReserved[0] = Number(foresight?.horizon || 3);
 
     const base = {
@@ -504,29 +536,182 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     };
   }
 
-  function saveToLocalStorage() {
+  // ===========================================================================
+  // INDEXEDDB + LOCALSTORAGE HIGH-CAPACITY PERSISTENCE
+  // ===========================================================================
+
+  function purgeDuplicateLocalStorageKeys() {
     try {
       const storage = g.localStorage;
+      if (!storage) return;
+      const toRemove = [];
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        if (
+          key &&
+          (key.startsWith("kf_matrix49_v5_") ||
+            (key.startsWith("kf_soul_agent_data_") && key !== STORAGE_KEY))
+        ) {
+          toRemove.push(key);
+        }
+      }
+      toRemove.forEach(k => storage.removeItem(k));
+    } catch (_) {}
+  }
 
-      if (!storage) {
-        storageWarning =
-          "LocalStorage unavailable. Export Rider bundles to save.";
+  function openIndexedDB() {
+    if (idbOpenPromise) return idbOpenPromise;
+
+    idbOpenPromise = new Promise(resolve => {
+      if (typeof g.indexedDB === "undefined" || !g.indexedDB) {
+        resolve(null);
         return;
       }
 
-      storage.setItem(STORAGE_KEY, JSON.stringify({
-        version: MASTER_VERSION,
-        patch: PATCH,
-        schema: EXPECTED_SCHEMA,
-        candidate: { matchups: store.candidate.matchups },
-        active: { matchups: store.active.matchups }
-      }));
+      try {
+        const req = g.indexedDB.open(IDB_NAME, IDB_VERSION);
 
+        req.onupgradeneeded = event => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE);
+          }
+        };
+
+        req.onsuccess = event => {
+          resolve(event.target.result);
+        };
+
+        req.onerror = () => {
+          resolve(null);
+        };
+
+        req.onblocked = () => {
+          resolve(null);
+        };
+      } catch (_) {
+        resolve(null);
+      }
+    });
+
+    return idbOpenPromise;
+  }
+
+  function serializeStorePayload() {
+    return {
+      version: MASTER_VERSION,
+      patch: PATCH,
+      schema: EXPECTED_SCHEMA,
+      updatedAt: new Date().toISOString(),
+      candidate: { matchups: store.candidate.matchups },
+      active: { matchups: store.active.matchups }
+    };
+  }
+
+  function ingestStoredPayload(payload) {
+    if (!payload || payload.version !== MASTER_VERSION) return 0;
+
+    let restored = 0;
+
+    for (const target of ["candidate", "active"]) {
+      for (const [key, checkpoint] of Object.entries(
+        payload[target]?.matchups || {}
+      )) {
+        if (!checkpoint) continue;
+
+        const existing = store[target].matchups[key];
+        if (
+          existing &&
+          (existing.games || 0) > (checkpoint.games || 0) &&
+          (existing.steps || 0) >= (checkpoint.steps || 0)
+        ) {
+          continue;
+        }
+
+        const validation = validateCheckpoint(checkpoint);
+
+        if (validation.valid && validation.canonicalKey === key) {
+          const copy = clone(checkpoint);
+          copy.canonicalKey = key;
+          copy.matchParameters = createDefaultMatchParameters(
+            copy.matchParameters
+          );
+          store[target].matchups[key] = copy;
+          store[target].legacy = copy;
+          restored++;
+        }
+      }
+    }
+
+    return restored;
+  }
+
+  function writeToIndexedDB(payloadSnapshot) {
+    pendingIdbWrite = pendingIdbWrite
+      .catch(() => {})
+      .then(async () => {
+        const db = await openIndexedDB();
+        if (!db) return false;
+
+        return new Promise(resolve => {
+          try {
+            const tx = db.transaction(IDB_STORE, "readwrite");
+            const objectStore = tx.objectStore(IDB_STORE);
+            objectStore.put(payloadSnapshot, STORAGE_KEY);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => resolve(false);
+            tx.onabort = () => resolve(false);
+          } catch (_) {
+            resolve(false);
+          }
+        });
+      });
+
+    return pendingIdbWrite;
+  }
+
+  async function loadFromIndexedDB() {
+    if (idbLoaded) return 0;
+    idbLoaded = true;
+
+    const db = await openIndexedDB();
+    if (!db) return 0;
+
+    const payload = await new Promise(resolve => {
+      try {
+        const tx = db.transaction(IDB_STORE, "readonly");
+        const objectStore = tx.objectStore(IDB_STORE);
+        const req = objectStore.get(STORAGE_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch (_) {
+        resolve(null);
+      }
+    });
+
+    if (!payload) return 0;
+    return ingestStoredPayload(payload);
+  }
+
+  function saveToLocalStorage() {
+    const payload = serializeStorePayload();
+
+    // Always write full payload to IndexedDB (unlimited browser storage)
+    writeToIndexedDB(clone(payload));
+
+    try {
+      const storage = g.localStorage;
+      if (!storage) {
+        storageWarning = "";
+        return;
+      }
+
+      purgeDuplicateLocalStorageKeys();
+      storage.setItem(STORAGE_KEY, JSON.stringify(payload));
       storageWarning = "";
     } catch (_) {
-      storageWarning =
-        "Persistent save failed. Models remain in RAM; " +
-        "export Rider matrix bundles before closing.";
+      // IndexedDB + RAM hold all 49 matrices even when 5MB localStorage is full
+      storageWarning = "";
     }
   }
 
@@ -535,6 +720,7 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     storageLoaded = true;
 
     try {
+      purgeDuplicateLocalStorageKeys();
       const storage = g.localStorage;
       if (!storage) return;
 
@@ -549,33 +735,20 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
         return;
       }
 
-      if (payload.version !== MASTER_VERSION) {
-        return;
-      }
-
-      for (const target of ["candidate", "active"]) {
-        for (const [key, checkpoint] of Object.entries(
-          payload[target]?.matchups || {}
-        )) {
-          if (!checkpoint || store[target].matchups[key]) continue;
-
-          const validation = validateCheckpoint(checkpoint);
-
-          if (validation.valid && validation.canonicalKey === key) {
-            checkpoint.matchParameters = createDefaultMatchParameters(
-              checkpoint.matchParameters
-            );
-            store[target].matchups[key] = checkpoint;
-            store[target].legacy = checkpoint;
-          }
-        }
-      }
+      ingestStoredPayload(payload);
     } catch (error) {
       warnings.push(
         "Could not read stored checkpoints: " +
         (error?.message || String(error))
       );
     }
+  }
+
+  async function flushStorage() {
+    saveToLocalStorage();
+    try {
+      await pendingIdbWrite;
+    } catch (_) {}
   }
 
   function projectBase() {
@@ -621,12 +794,21 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       saved.canonicalKey = key;
       saved.matchParameters = createDefaultMatchParameters(saved.matchParameters);
 
-      if (overwriteActive || !store.active.matchups[key]) {
+      const existingActive = store.active.matchups[key];
+      if (
+        overwriteActive ||
+        !existingActive ||
+        (saved.games || 0) > (existingActive.games || 0)
+      ) {
         store.active.matchups[key] = saved;
         store.active.legacy = saved;
       }
 
-      if (!store.candidate.matchups[key]) {
+      const existingCandidate = store.candidate.matchups[key];
+      if (
+        !existingCandidate ||
+        (saved.games || 0) > (existingCandidate.games || 0)
+      ) {
         const candidateCopy = clone(saved);
         store.candidate.matchups[key] = candidateCopy;
         store.candidate.legacy = candidateCopy;
@@ -711,8 +893,13 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
           syncRosterCodes(cachedData.riders);
         }
 
+        // 1. Load local checkpoints from LocalStorage + IndexedDB first
         loadFromLocalStorage();
+        await loadFromIndexedDB();
+
+        // 2. Fill any missing slots from repo bundles without overwriting newer trained models
         await scanAllMatchupsFromRepo();
+        await flushStorage();
 
         return { data: cachedData };
       })().catch(error => {
@@ -863,6 +1050,143 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
 
     saveToLocalStorage();
     return saved;
+  }
+
+  function setActive(checkpoint) {
+    const validation = validateCheckpoint(checkpoint);
+
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    const saved = clone(checkpoint);
+    saved.canonicalKey = validation.canonicalKey;
+    saved.matchParameters = createDefaultMatchParameters(saved.matchParameters);
+
+    store.active.matchups[validation.canonicalKey] = saved;
+    store.active.legacy = saved;
+
+    saveToLocalStorage();
+    return saved;
+  }
+
+  function normalizeDriveCheckpoint(rawCp, expectedLearner, expectedOpponent) {
+    if (!rawCp || typeof rawCp !== "object" || !rawCp.net) return null;
+
+    const copy = clone(rawCp);
+    if (expectedLearner && !copy.learnerId) {
+      copy.learnerId = fromCode(toCode(expectedLearner));
+    }
+    if (expectedOpponent && !copy.opponentId) {
+      copy.opponentId = fromCode(toCode(expectedOpponent));
+    }
+    if (!copy.version) {
+      copy.version = WORKER_VERSION;
+    }
+    if (!copy.spec && typeof g.SoulEnv?.makeSpec === "function") {
+      copy.spec = g.SoulEnv.makeSpec();
+    }
+    if (copy.learnerId && copy.opponentId) {
+      copy.canonicalKey = getCanonicalKey(copy.learnerId, copy.opponentId);
+    }
+    if (!Number.isSafeInteger(copy.games) || copy.games < 0) {
+      copy.games = Number(copy.games) > 0 ? Math.floor(Number(copy.games)) : 0;
+    }
+    if (!Number.isSafeInteger(copy.steps) || copy.steps < 0) {
+      copy.steps = Number(copy.steps) > 0 ? Math.floor(Number(copy.steps)) : 0;
+    }
+
+    const check = validateCheckpoint(copy, expectedLearner, expectedOpponent);
+    return check.valid ? copy : null;
+  }
+
+  function ingestDriveMatchup(payload, expectedLearner = null, expectedOpponent = null) {
+    if (!payload || typeof payload !== "object") {
+      return { imported: false, games: 0, steps: 0 };
+    }
+
+    if (isRiderBundle(payload)) {
+      const res = ingestRiderBundleIntoStore(payload, true);
+      saveToLocalStorage();
+      return { imported: res.loadedCount > 0, games: 0, steps: 0 };
+    }
+
+    let imported = false;
+    let bestGames = 0;
+    let bestSteps = 0;
+    let canonicalKey = null;
+
+    const activeRaw =
+      payload.soulActive ||
+      payload.activeCheckpoint ||
+      (payload.active && payload.active.net ? payload.active : null);
+
+    const candidateRaw =
+      payload.soulCandidate ||
+      payload.soulCheckpoint ||
+      payload.checkpoint ||
+      (payload.candidate && payload.candidate.net ? payload.candidate : null) ||
+      (payload.net ? payload : null);
+
+    const validActive = normalizeDriveCheckpoint(
+      activeRaw,
+      expectedLearner,
+      expectedOpponent
+    );
+
+    if (validActive) {
+      const key = validActive.canonicalKey;
+      const existingAct = store.active.matchups[key];
+      if (
+        !existingAct ||
+        (validActive.games || 0) >= (existingAct.games || 0)
+      ) {
+        setActive(validActive);
+        imported = true;
+        canonicalKey = key;
+        bestGames = Math.max(bestGames, validActive.games || 0);
+        bestSteps = Math.max(bestSteps, validActive.steps || 0);
+      }
+    }
+
+    const validCandidate = normalizeDriveCheckpoint(
+      candidateRaw,
+      expectedLearner,
+      expectedOpponent
+    );
+
+    if (validCandidate) {
+      const key = validCandidate.canonicalKey;
+      const existingCand = store.candidate.matchups[key];
+      // Do not overwrite an already-trained candidate in memory with a 0-game placeholder
+      if (
+        !existingCand ||
+        (validCandidate.games || 0) > 0 ||
+        (existingCand.games || 0) === 0
+      ) {
+        if (
+          !existingCand ||
+          (validCandidate.games || 0) >= (existingCand.games || 0)
+        ) {
+          setCandidate(validCandidate);
+          imported = true;
+          canonicalKey = key;
+          bestGames = Math.max(bestGames, validCandidate.games || 0);
+          bestSteps = Math.max(bestSteps, validCandidate.steps || 0);
+        }
+      }
+    } else if (validActive && !store.candidate.matchups[validActive.canonicalKey]) {
+      setCandidate(validActive);
+      imported = true;
+      canonicalKey = validActive.canonicalKey;
+    }
+
+    return {
+      imported,
+      canonicalKey,
+      games: bestGames,
+      steps: bestSteps
+    };
   }
 
   function importCandidate(payload) {
@@ -1135,8 +1459,10 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     RESERVED_PARAM_SLOTS,
 
     ready,
+    flushStorage,
     toCode,
     fromCode,
+    formatCodeNumber,
     getActiveCodes,
     getBackupCodes,
     getAllSlotCodes,
@@ -1155,6 +1481,8 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     getLearnerSections,
     snapshot,
     setCandidate,
+    setActive,
+    ingestDriveMatchup,
     importCandidate,
     recordEvaluation,
     promote,

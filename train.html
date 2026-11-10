@@ -223,76 +223,76 @@
       "use strict";
 
       const GDRIVE_FOLDER_ID = "15P5HeKqLxMYw3ykirJj2HMT726SZnkId";
-      const STORAGE_PREFIX = "kf_matrix49_v5_";
       const GAS_URL_STORAGE_KEY = "kf_gdrive_gas_webapp_url";
+      const RAM_MATRIX49 = (g.__KF_MATRIX49_RAM__ = g.__KF_MATRIX49_RAM__ || {});
 
       const ACTIVE_RIDERS_7 = Object.freeze([
-        { index: 0, id: "ichigo",   code: "r0", name: "Kamen Rider Ichigo" },
-        { index: 1, id: "nigo",     code: "r1", name: "Kamen Rider Nigo" },
-        { index: 2, id: "v3",       code: "r2", name: "Kamen Rider V3" },
-        { index: 3, id: "riderman", code: "r3", name: "Riderman" },
-        { index: 4, id: "x",        code: "r4", name: "Kamen Rider X" },
-        { index: 5, id: "amazon",   code: "r5", name: "Kamen Rider Amazon" },
-        { index: 6, id: "stronger", code: "r6", name: "Kamen Rider Stronger" }
+        { index: 0, id: "ichigo",   code: "r0", soulCode: "001", name: "Kamen Rider Ichigo" },
+        { index: 1, id: "nigo",     code: "r1", soulCode: "002", name: "Kamen Rider Nigo" },
+        { index: 2, id: "v3",       code: "r2", soulCode: "003", name: "Kamen Rider V3" },
+        { index: 3, id: "riderman", code: "r3", soulCode: "004", name: "Riderman" },
+        { index: 4, id: "x",        code: "r4", soulCode: "005", name: "Kamen Rider X" },
+        { index: 5, id: "amazon",   code: "r5", soulCode: "006", name: "Kamen Rider Amazon" },
+        { index: 6, id: "stronger", code: "r6", soulCode: "007", name: "Kamen Rider Stronger" }
       ]);
 
       // Hardcoded 49 Matchup Matrices (7 Riders x 7 Riders)
       const HARDCODED_49_MATRICES = Object.freeze({
-        "r0_vs_r0": { key: "r0_vs_r0", p1: 0, p2: 0, p1Id: "ichigo",   p2Id: "ichigo",   file: "matrix_r0_vs_r0.json" },
-        "r0_vs_r1": { key: "r0_vs_r1", p1: 0, p2: 1, p1Id: "ichigo",   p2Id: "nigo",     file: "matrix_r0_vs_r1.json" },
-        "r0_vs_r2": { key: "r0_vs_r2", p1: 0, p2: 2, p1Id: "ichigo",   p2Id: "v3",       file: "matrix_r0_vs_r2.json" },
-        "r0_vs_r3": { key: "r0_vs_r3", p1: 0, p2: 3, p1Id: "ichigo",   p2Id: "riderman", file: "matrix_r0_vs_r3.json" },
-        "r0_vs_r4": { key: "r0_vs_r4", p1: 0, p2: 4, p1Id: "ichigo",   p2Id: "x",        file: "matrix_r0_vs_r4.json" },
-        "r0_vs_r5": { key: "r0_vs_r5", p1: 0, p2: 5, p1Id: "ichigo",   p2Id: "amazon",   file: "matrix_r0_vs_r5.json" },
-        "r0_vs_r6": { key: "r0_vs_r6", p1: 0, p2: 6, p1Id: "ichigo",   p2Id: "stronger", file: "matrix_r0_vs_r6.json" },
+        "r0_vs_r0": { key: "r0_vs_r0", p1: 0, p2: 0, p1Id: "ichigo",   p2Id: "ichigo",   soulKey: "001_001", file: "matrix_r0_vs_r0.json" },
+        "r0_vs_r1": { key: "r0_vs_r1", p1: 0, p2: 1, p1Id: "ichigo",   p2Id: "nigo",     soulKey: "001_002", file: "matrix_r0_vs_r1.json" },
+        "r0_vs_r2": { key: "r0_vs_r2", p1: 0, p2: 2, p1Id: "ichigo",   p2Id: "v3",       soulKey: "001_003", file: "matrix_r0_vs_r2.json" },
+        "r0_vs_r3": { key: "r0_vs_r3", p1: 0, p2: 3, p1Id: "ichigo",   p2Id: "riderman", soulKey: "001_004", file: "matrix_r0_vs_r3.json" },
+        "r0_vs_r4": { key: "r0_vs_r4", p1: 0, p2: 4, p1Id: "ichigo",   p2Id: "x",        soulKey: "001_005", file: "matrix_r0_vs_r4.json" },
+        "r0_vs_r5": { key: "r0_vs_r5", p1: 0, p2: 5, p1Id: "ichigo",   p2Id: "amazon",   soulKey: "001_006", file: "matrix_r0_vs_r5.json" },
+        "r0_vs_r6": { key: "r0_vs_r6", p1: 0, p2: 6, p1Id: "ichigo",   p2Id: "stronger", soulKey: "001_007", file: "matrix_r0_vs_r6.json" },
 
-        "r1_vs_r0": { key: "r1_vs_r0", p1: 1, p2: 0, p1Id: "nigo",     p2Id: "ichigo",   file: "matrix_r1_vs_r0.json" },
-        "r1_vs_r1": { key: "r1_vs_r1", p1: 1, p2: 1, p1Id: "nigo",     p2Id: "nigo",     file: "matrix_r1_vs_r1.json" },
-        "r1_vs_r2": { key: "r1_vs_r2", p1: 1, p2: 2, p1Id: "nigo",     p2Id: "v3",       file: "matrix_r1_vs_r2.json" },
-        "r1_vs_r3": { key: "r1_vs_r3", p1: 1, p2: 3, p1Id: "nigo",     p2Id: "riderman", file: "matrix_r1_vs_r3.json" },
-        "r1_vs_r4": { key: "r1_vs_r4", p1: 1, p2: 4, p1Id: "nigo",     p2Id: "x",        file: "matrix_r1_vs_r4.json" },
-        "r1_vs_r5": { key: "r1_vs_r5", p1: 1, p2: 5, p1Id: "nigo",     p2Id: "amazon",   file: "matrix_r1_vs_r5.json" },
-        "r1_vs_r6": { key: "r1_vs_r6", p1: 1, p2: 6, p1Id: "nigo",     p2Id: "stronger", file: "matrix_r1_vs_r6.json" },
+        "r1_vs_r0": { key: "r1_vs_r0", p1: 1, p2: 0, p1Id: "nigo",     p2Id: "ichigo",   soulKey: "002_001", file: "matrix_r1_vs_r0.json" },
+        "r1_vs_r1": { key: "r1_vs_r1", p1: 1, p2: 1, p1Id: "nigo",     p2Id: "nigo",     soulKey: "002_002", file: "matrix_r1_vs_r1.json" },
+        "r1_vs_r2": { key: "r1_vs_r2", p1: 1, p2: 2, p1Id: "nigo",     p2Id: "v3",       soulKey: "002_003", file: "matrix_r1_vs_r2.json" },
+        "r1_vs_r3": { key: "r1_vs_r3", p1: 1, p2: 3, p1Id: "nigo",     p2Id: "riderman", soulKey: "002_004", file: "matrix_r1_vs_r3.json" },
+        "r1_vs_r4": { key: "r1_vs_r4", p1: 1, p2: 4, p1Id: "nigo",     p2Id: "x",        soulKey: "002_005", file: "matrix_r1_vs_r4.json" },
+        "r1_vs_r5": { key: "r1_vs_r5", p1: 1, p2: 5, p1Id: "nigo",     p2Id: "amazon",   soulKey: "002_006", file: "matrix_r1_vs_r5.json" },
+        "r1_vs_r6": { key: "r1_vs_r6", p1: 1, p2: 6, p1Id: "nigo",     p2Id: "stronger", soulKey: "002_007", file: "matrix_r1_vs_r6.json" },
 
-        "r2_vs_r0": { key: "r2_vs_r0", p1: 2, p2: 0, p1Id: "v3",       p2Id: "ichigo",   file: "matrix_r2_vs_r0.json" },
-        "r2_vs_r1": { key: "r2_vs_r1", p1: 2, p2: 1, p1Id: "v3",       p2Id: "nigo",     file: "matrix_r2_vs_r1.json" },
-        "r2_vs_r2": { key: "r2_vs_r2", p1: 2, p2: 2, p1Id: "v3",       p2Id: "v3",       file: "matrix_r2_vs_r2.json" },
-        "r2_vs_r3": { key: "r2_vs_r3", p1: 2, p2: 3, p1Id: "v3",       p2Id: "riderman", file: "matrix_r2_vs_r3.json" },
-        "r2_vs_r4": { key: "r2_vs_r4", p1: 2, p2: 4, p1Id: "v3",       p2Id: "x",        file: "matrix_r2_vs_r4.json" },
-        "r2_vs_r5": { key: "r2_vs_r5", p1: 2, p2: 5, p1Id: "v3",       p2Id: "amazon",   file: "matrix_r2_vs_r5.json" },
-        "r2_vs_r6": { key: "r2_vs_r6", p1: 2, p2: 6, p1Id: "v3",       p2Id: "stronger", file: "matrix_r2_vs_r6.json" },
+        "r2_vs_r0": { key: "r2_vs_r0", p1: 2, p2: 0, p1Id: "v3",       p2Id: "ichigo",   soulKey: "003_001", file: "matrix_r2_vs_r0.json" },
+        "r2_vs_r1": { key: "r2_vs_r1", p1: 2, p2: 1, p1Id: "v3",       p2Id: "nigo",     soulKey: "003_002", file: "matrix_r2_vs_r1.json" },
+        "r2_vs_r2": { key: "r2_vs_r2", p1: 2, p2: 2, p1Id: "v3",       p2Id: "v3",       soulKey: "003_003", file: "matrix_r2_vs_r2.json" },
+        "r2_vs_r3": { key: "r2_vs_r3", p1: 2, p2: 3, p1Id: "v3",       p2Id: "riderman", soulKey: "003_004", file: "matrix_r2_vs_r3.json" },
+        "r2_vs_r4": { key: "r2_vs_r4", p1: 2, p2: 4, p1Id: "v3",       p2Id: "x",        soulKey: "003_005", file: "matrix_r2_vs_r4.json" },
+        "r2_vs_r5": { key: "r2_vs_r5", p1: 2, p2: 5, p1Id: "v3",       p2Id: "amazon",   soulKey: "003_006", file: "matrix_r2_vs_r5.json" },
+        "r2_vs_r6": { key: "r2_vs_r6", p1: 2, p2: 6, p1Id: "v3",       p2Id: "stronger", soulKey: "003_007", file: "matrix_r2_vs_r6.json" },
 
-        "r3_vs_r0": { key: "r3_vs_r0", p1: 3, p2: 0, p1Id: "riderman", p2Id: "ichigo",   file: "matrix_r3_vs_r0.json" },
-        "r3_vs_r1": { key: "r3_vs_r1", p1: 3, p2: 1, p1Id: "riderman", p2Id: "nigo",     file: "matrix_r3_vs_r1.json" },
-        "r3_vs_r2": { key: "r3_vs_r2", p1: 3, p2: 2, p1Id: "riderman", p2Id: "v3",       file: "matrix_r3_vs_r2.json" },
-        "r3_vs_r3": { key: "r3_vs_r3", p1: 3, p2: 3, p1Id: "riderman", p2Id: "riderman", file: "matrix_r3_vs_r3.json" },
-        "r3_vs_r4": { key: "r3_vs_r4", p1: 3, p2: 4, p1Id: "riderman", p2Id: "x",        file: "matrix_r3_vs_r4.json" },
-        "r3_vs_r5": { key: "r3_vs_r5", p1: 3, p2: 5, p1Id: "riderman", p2Id: "amazon",   file: "matrix_r3_vs_r5.json" },
-        "r3_vs_r6": { key: "r3_vs_r6", p1: 3, p2: 6, p1Id: "riderman", p2Id: "stronger", file: "matrix_r3_vs_r6.json" },
+        "r3_vs_r0": { key: "r3_vs_r0", p1: 3, p2: 0, p1Id: "riderman", p2Id: "ichigo",   soulKey: "004_001", file: "matrix_r3_vs_r0.json" },
+        "r3_vs_r1": { key: "r3_vs_r1", p1: 3, p2: 1, p1Id: "riderman", p2Id: "nigo",     soulKey: "004_002", file: "matrix_r3_vs_r1.json" },
+        "r3_vs_r2": { key: "r3_vs_r2", p1: 3, p2: 2, p1Id: "riderman", p2Id: "v3",       soulKey: "004_003", file: "matrix_r3_vs_r2.json" },
+        "r3_vs_r3": { key: "r3_vs_r3", p1: 3, p2: 3, p1Id: "riderman", p2Id: "riderman", soulKey: "004_004", file: "matrix_r3_vs_r3.json" },
+        "r3_vs_r4": { key: "r3_vs_r4", p1: 3, p2: 4, p1Id: "riderman", p2Id: "x",        soulKey: "004_005", file: "matrix_r3_vs_r4.json" },
+        "r3_vs_r5": { key: "r3_vs_r5", p1: 3, p2: 5, p1Id: "riderman", p2Id: "amazon",   soulKey: "004_006", file: "matrix_r3_vs_r5.json" },
+        "r3_vs_r6": { key: "r3_vs_r6", p1: 3, p2: 6, p1Id: "riderman", p2Id: "stronger", soulKey: "004_007", file: "matrix_r3_vs_r6.json" },
 
-        "r4_vs_r0": { key: "r4_vs_r0", p1: 4, p2: 0, p1Id: "x",        p2Id: "ichigo",   file: "matrix_r4_vs_r0.json" },
-        "r4_vs_r1": { key: "r4_vs_r1", p1: 4, p2: 1, p1Id: "x",        p2Id: "nigo",     file: "matrix_r4_vs_r1.json" },
-        "r4_vs_r2": { key: "r4_vs_r2", p1: 4, p2: 2, p1Id: "x",        p2Id: "v3",       file: "matrix_r4_vs_r2.json" },
-        "r4_vs_r3": { key: "r4_vs_r3", p1: 4, p2: 3, p1Id: "x",        p2Id: "riderman", file: "matrix_r4_vs_r3.json" },
-        "r4_vs_r4": { key: "r4_vs_r4", p1: 4, p2: 4, p1Id: "x",        p2Id: "x",        file: "matrix_r4_vs_r4.json" },
-        "r4_vs_r5": { key: "r4_vs_r5", p1: 4, p2: 5, p1Id: "x",        p2Id: "amazon",   file: "matrix_r4_vs_r5.json" },
-        "r4_vs_r6": { key: "r4_vs_r6", p1: 4, p2: 6, p1Id: "x",        p2Id: "stronger", file: "matrix_r4_vs_r6.json" },
+        "r4_vs_r0": { key: "r4_vs_r0", p1: 4, p2: 0, p1Id: "x",        p2Id: "ichigo",   soulKey: "005_001", file: "matrix_r4_vs_r0.json" },
+        "r4_vs_r1": { key: "r4_vs_r1", p1: 4, p2: 1, p1Id: "x",        p2Id: "nigo",     soulKey: "005_002", file: "matrix_r4_vs_r1.json" },
+        "r4_vs_r2": { key: "r4_vs_r2", p1: 4, p2: 2, p1Id: "x",        p2Id: "v3",       soulKey: "005_003", file: "matrix_r4_vs_r2.json" },
+        "r4_vs_r3": { key: "r4_vs_r3", p1: 4, p2: 3, p1Id: "x",        p2Id: "riderman", soulKey: "005_004", file: "matrix_r4_vs_r3.json" },
+        "r4_vs_r4": { key: "r4_vs_r4", p1: 4, p2: 4, p1Id: "x",        p2Id: "x",        soulKey: "005_005", file: "matrix_r4_vs_r4.json" },
+        "r4_vs_r5": { key: "r4_vs_r5", p1: 4, p2: 5, p1Id: "x",        p2Id: "amazon",   soulKey: "005_006", file: "matrix_r4_vs_r5.json" },
+        "r4_vs_r6": { key: "r4_vs_r6", p1: 4, p2: 6, p1Id: "x",        p2Id: "stronger", soulKey: "005_007", file: "matrix_r4_vs_r6.json" },
 
-        "r5_vs_r0": { key: "r5_vs_r0", p1: 5, p2: 0, p1Id: "amazon",   p2Id: "ichigo",   file: "matrix_r5_vs_r0.json" },
-        "r5_vs_r1": { key: "r5_vs_r1", p1: 5, p2: 1, p1Id: "amazon",   p2Id: "nigo",     file: "matrix_r5_vs_r1.json" },
-        "r5_vs_r2": { key: "r5_vs_r2", p1: 5, p2: 2, p1Id: "amazon",   p2Id: "v3",       file: "matrix_r5_vs_r2.json" },
-        "r5_vs_r3": { key: "r5_vs_r3", p1: 5, p2: 3, p1Id: "amazon",   p2Id: "riderman", file: "matrix_r5_vs_r3.json" },
-        "r5_vs_r4": { key: "r5_vs_r4", p1: 5, p2: 4, p1Id: "amazon",   p2Id: "x",        file: "matrix_r5_vs_r4.json" },
-        "r5_vs_r5": { key: "r5_vs_r5", p1: 5, p2: 5, p1Id: "amazon",   p2Id: "amazon",   file: "matrix_r5_vs_r5.json" },
-        "r5_vs_r6": { key: "r5_vs_r6", p1: 5, p2: 6, p1Id: "amazon",   p2Id: "stronger", file: "matrix_r5_vs_r6.json" },
+        "r5_vs_r0": { key: "r5_vs_r0", p1: 5, p2: 0, p1Id: "amazon",   p2Id: "ichigo",   soulKey: "006_001", file: "matrix_r5_vs_r0.json" },
+        "r5_vs_r1": { key: "r5_vs_r1", p1: 5, p2: 1, p1Id: "amazon",   p2Id: "nigo",     soulKey: "006_002", file: "matrix_r5_vs_r1.json" },
+        "r5_vs_r2": { key: "r5_vs_r2", p1: 5, p2: 2, p1Id: "amazon",   p2Id: "v3",       soulKey: "006_003", file: "matrix_r5_vs_r2.json" },
+        "r5_vs_r3": { key: "r5_vs_r3", p1: 5, p2: 3, p1Id: "amazon",   p2Id: "riderman", soulKey: "006_004", file: "matrix_r5_vs_r3.json" },
+        "r5_vs_r4": { key: "r5_vs_r4", p1: 5, p2: 4, p1Id: "amazon",   p2Id: "x",        soulKey: "006_005", file: "matrix_r5_vs_r4.json" },
+        "r5_vs_r5": { key: "r5_vs_r5", p1: 5, p2: 5, p1Id: "amazon",   p2Id: "amazon",   soulKey: "006_006", file: "matrix_r5_vs_r5.json" },
+        "r5_vs_r6": { key: "r5_vs_r6", p1: 5, p2: 6, p1Id: "amazon",   p2Id: "stronger", soulKey: "006_007", file: "matrix_r5_vs_r6.json" },
 
-        "r6_vs_r0": { key: "r6_vs_r0", p1: 6, p2: 0, p1Id: "stronger", p2Id: "ichigo",   file: "matrix_r6_vs_r0.json" },
-        "r6_vs_r1": { key: "r6_vs_r1", p1: 6, p2: 1, p1Id: "stronger", p2Id: "nigo",     file: "matrix_r6_vs_r1.json" },
-        "r6_vs_r2": { key: "r6_vs_r2", p1: 6, p2: 2, p1Id: "stronger", p2Id: "v3",       file: "matrix_r6_vs_r2.json" },
-        "r6_vs_r3": { key: "r6_vs_r3", p1: 6, p2: 3, p1Id: "stronger", p2Id: "riderman", file: "matrix_r6_vs_r3.json" },
-        "r6_vs_r4": { key: "r6_vs_r4", p1: 6, p2: 4, p1Id: "stronger", p2Id: "x",        file: "matrix_r6_vs_r4.json" },
-        "r6_vs_r5": { key: "r6_vs_r5", p1: 6, p2: 5, p1Id: "stronger", p2Id: "amazon",   file: "matrix_r6_vs_r5.json" },
-        "r6_vs_r6": { key: "r6_vs_r6", p1: 6, p2: 6, p1Id: "stronger", p2Id: "stronger", file: "matrix_r6_vs_r6.json" }
+        "r6_vs_r0": { key: "r6_vs_r0", p1: 6, p2: 0, p1Id: "stronger", p2Id: "ichigo",   soulKey: "007_001", file: "matrix_r6_vs_r0.json" },
+        "r6_vs_r1": { key: "r6_vs_r1", p1: 6, p2: 1, p1Id: "stronger", p2Id: "nigo",     soulKey: "007_002", file: "matrix_r6_vs_r1.json" },
+        "r6_vs_r2": { key: "r6_vs_r2", p1: 6, p2: 2, p1Id: "stronger", p2Id: "v3",       soulKey: "007_003", file: "matrix_r6_vs_r2.json" },
+        "r6_vs_r3": { key: "r6_vs_r3", p1: 6, p2: 3, p1Id: "stronger", p2Id: "riderman", soulKey: "007_004", file: "matrix_r6_vs_r3.json" },
+        "r6_vs_r4": { key: "r6_vs_r4", p1: 6, p2: 4, p1Id: "stronger", p2Id: "x",        soulKey: "007_005", file: "matrix_r6_vs_r4.json" },
+        "r6_vs_r5": { key: "r6_vs_r5", p1: 6, p2: 5, p1Id: "stronger", p2Id: "amazon",   soulKey: "007_006", file: "matrix_r6_vs_r5.json" },
+        "r6_vs_r6": { key: "r6_vs_r6", p1: 6, p2: 6, p1Id: "stronger", p2Id: "stronger", soulKey: "007_007", file: "matrix_r6_vs_r6.json" }
       });
 
       const GOOGLE_APPS_SCRIPT_TEMPLATE = [
@@ -353,7 +353,7 @@
         }
         const s = String(rider || "").trim().toLowerCase();
         const byId = ACTIVE_RIDERS_7.find(
-          r => r.id === s || r.code === s || s.includes(r.id)
+          r => r.id === s || r.code === s || r.soulCode === s || s.includes(r.id)
         );
         if (byId) return byId.index;
         const m = s.match(/(\d+)/);
@@ -391,15 +391,31 @@
         if (gasUrl) {
           try {
             const sep = gasUrl.includes("?") ? "&" : "?";
-            const url = `${gasUrl}${sep}action=load&folderId=${encodeURIComponent(GDRIVE_FOLDER_ID)}&key=${encodeURIComponent(entry.key)}&file=${encodeURIComponent(entry.file)}`;
+            const url =
+              `${gasUrl}${sep}action=load&folderId=${encodeURIComponent(GDRIVE_FOLDER_ID)}` +
+              `&key=${encodeURIComponent(entry.key)}&file=${encodeURIComponent(entry.file)}&t=${Date.now()}`;
             const res = await fetch(url, { method: "GET", cache: "no-store" });
             if (res.ok) {
               const json = await res.json();
               const matrixPayload = json?.matrix || json?.data || json;
-              if (matrixPayload && (matrixPayload.net || matrixPayload.layers)) {
-                try {
-                  localStorage.setItem(STORAGE_PREFIX + entry.key, JSON.stringify(matrixPayload));
-                } catch (_) {}
+              if (
+                matrixPayload &&
+                typeof matrixPayload === "object" &&
+                (matrixPayload.net ||
+                  matrixPayload.layers ||
+                  matrixPayload.soulCandidate ||
+                  matrixPayload.soulActive ||
+                  matrixPayload.soulCheckpoint ||
+                  matrixPayload.checkpoint)
+              ) {
+                RAM_MATRIX49[entry.key] = matrixPayload;
+                if (typeof g.SoulAgent?.ingestDriveMatchup === "function") {
+                  try {
+                    g.SoulAgent.ingestDriveMatchup(matrixPayload, entry.p1Id, entry.p2Id);
+                  } catch (err) {
+                    console.warn(`[MatrixStorage] SoulAgent ingest warning (${entry.key}):`, err);
+                  }
+                }
                 return matrixPayload;
               }
             }
@@ -415,19 +431,29 @@
                 .loadMatrixFromDriveFolder(GDRIVE_FOLDER_ID, entry.file);
             });
             if (gasData) {
-              return typeof gasData === "string" ? JSON.parse(gasData) : gasData;
+              const parsed = typeof gasData === "string" ? JSON.parse(gasData) : gasData;
+              RAM_MATRIX49[entry.key] = parsed;
+              if (typeof g.SoulAgent?.ingestDriveMatchup === "function") {
+                try {
+                  g.SoulAgent.ingestDriveMatchup(parsed, entry.p1Id, entry.p2Id);
+                } catch (_) {}
+              }
+              return parsed;
             }
           } catch (_) {}
         }
 
-        try {
-          const cached = localStorage.getItem(STORAGE_PREFIX + entry.key);
-          if (cached) return JSON.parse(cached);
-        } catch (_) {}
+        if (RAM_MATRIX49[entry.key]) {
+          return RAM_MATRIX49[entry.key];
+        }
 
         try {
           const localRes = await fetch(`models/matrices_49/${entry.file}`, { cache: "no-store" });
-          if (localRes.ok) return await localRes.json();
+          if (localRes.ok) {
+            const localJson = await localRes.json();
+            RAM_MATRIX49[entry.key] = localJson;
+            return localJson;
+          }
         } catch (_) {}
 
         return null;
@@ -435,19 +461,36 @@
 
       async function saveMatchupMatrix(riderA, riderB, payload) {
         const entry = getEntry(riderA, riderB);
+
+        // Attach the live SoulAgent Candidate & Active checkpoints for this exact matchup
+        let soulCandidate = null;
+        let soulActive = null;
+        if (g.SoulAgent?.getSection) {
+          try {
+            soulCandidate = g.SoulAgent.getSection(entry.p1Id, entry.p2Id, "candidate") || null;
+            soulActive = g.SoulAgent.getSection(entry.p1Id, entry.p2Id, "active") || null;
+          } catch (_) {}
+        }
+        const bestSoul = soulCandidate || soulActive || null;
+
         const enriched = {
-          ...payload,
+          ...(payload || {}),
           matchupKey: entry.key,
+          canonicalKey: entry.soulKey,
           fileName: entry.file,
           folderId: GDRIVE_FOLDER_ID,
           p1Rider: entry.p1Id,
           p2Rider: entry.p2Id,
+          learnerId: entry.p1Id,
+          opponentId: entry.p2Id,
+          games: bestSoul ? bestSoul.games : (payload?.games || 0),
+          steps: bestSoul ? bestSoul.steps : (payload?.steps || 0),
+          soulCandidate,
+          soulActive,
           updatedAt: new Date().toISOString()
         };
 
-        try {
-          localStorage.setItem(STORAGE_PREFIX + entry.key, JSON.stringify(enriched));
-        } catch (_) {}
+        RAM_MATRIX49[entry.key] = enriched;
 
         const gasUrl = getGasWebAppUrl();
         if (gasUrl) {
@@ -532,31 +575,49 @@
 
         const entries = Object.values(g.MATCHUP_49_MANIFEST);
         let readyCount = 0;
+        let trainedCount = 0;
 
         gridEl.innerHTML = entries.map(entry => {
-          const inPool = g.MatchupPool?.learners?.has(entry.key);
-          let inLocal = false;
+          let soulCand = null;
+          let soulAct = null;
           try {
-            inLocal = Boolean(localStorage.getItem("kf_matrix49_v5_" + entry.key));
+            soulCand = g.SoulAgent?.getSection?.(entry.p1Id, entry.p2Id, "candidate") || null;
+            soulAct = g.SoulAgent?.getSection?.(entry.p1Id, entry.p2Id, "active") || null;
           } catch (_) {}
-          const isReady = inPool || inLocal;
+
+          const soulCp = soulCand || soulAct;
+          const inPool = g.MatchupPool?.learners?.has(entry.key);
+          const isReady = Boolean(soulCp) || inPool;
+
           if (isReady) readyCount++;
-          const steps = inPool ? g.MatchupPool.learners.get(entry.key).steps : 0;
+          if (soulCp && (soulCp.games || 0) > 0) trainedCount++;
+
+          const games = soulCp?.games || 0;
+          const steps = soulCp?.steps || (inPool ? g.MatchupPool.learners.get(entry.key).steps : 0);
+          const label = soulCp
+            ? `READY (${games}G)`
+            : isReady
+              ? `READY (${steps}S)`
+              : "INIT";
 
           return `
             <div class="matrix49-cell ${isReady ? "ready" : ""}"
-                 title="${entry.file} (${entry.p1Id} vs ${entry.p2Id})">
-              <div>${entry.key}</div>
-              <div>${isReady ? `READY (${steps})` : "INIT"}</div>
+                 title="${entry.file} (${entry.p1Id} vs ${entry.p2Id} | Games: ${games}, Steps: ${steps})">
+              <div>${entry.key} (${entry.soulKey})</div>
+              <div>${label}</div>
             </div>
           `;
         }).join("");
 
         const countBadge = document.getElementById("matrix49-count-badge");
         if (countBadge) {
-          countBadge.textContent = `MATRICES: ${readyCount} / 49 ACTIVE`;
+          countBadge.textContent = trainedCount > 0
+            ? `MATRICES: ${trainedCount} TRAINED / ${readyCount} ACTIVE`
+            : `MATRICES: ${readyCount} / 49 ACTIVE`;
         }
       }
+
+      g.render49MatrixHeaderGrid = render49Grid;
 
       g.setTrainingExecutionMode = function (mode) {
         const target = mode === "eval" ? "eval" : "train";
@@ -586,67 +647,110 @@
           }
         }
         render49Grid();
+        g.SoulTrainer?.refreshUI?.();
         const status = document.getElementById("matrix49-sync-status");
         if (status) {
-          status.textContent = "Initialized all 49 compact [256, 64, 32, 17] matchup matrices in memory.";
+          status.textContent = "Initialized all 49 matchup matrices in memory (preserving trained SoulAgent models).";
         }
       };
 
       g.syncAll49MatricesToDrive = async function () {
         const status = document.getElementById("matrix49-sync-status");
+        if (g.SoulAgent?.ready) {
+          await g.SoulAgent.ready();
+          await g.SoulAgent.flushStorage?.();
+        }
         g.initAll49MatchupMatrices();
 
         const results = [];
         let count = 0;
         let savedCount = 0;
+        let trainedSyncedCount = 0;
 
         for (let rA = 0; rA < 7; rA++) {
           for (let rB = 0; rB < 7; rB++) {
             count++;
-            const key = `r${rA}_vs_r${rB}`;
+            const entry = g.MatrixStorage.getEntry(rA, rB);
+            const soulCp =
+              g.SoulAgent?.getSection?.(entry.p1Id, entry.p2Id, "candidate") ||
+              g.SoulAgent?.getSection?.(entry.p1Id, entry.p2Id, "active") ||
+              null;
+            const gamesTag = soulCp ? `${soulCp.games} games` : "0 games";
+
             if (status) {
-              status.textContent = `Syncing ${count} / 49 (${key}) to Google Drive…`;
+              status.textContent = `Syncing ${count} / 49 (${entry.key} [${entry.soulKey}] — ${gamesTag}) to Google Drive…`;
             }
+
             try {
               const res = await g.MatchupPool.saveMatchup(rA, rB);
               const ok = Boolean(res);
-              if (ok) savedCount++;
-              results.push({ key, saved: ok, result: res });
+              if (ok) {
+                savedCount++;
+                if (soulCp && (soulCp.games || 0) > 0) trainedSyncedCount++;
+              }
+              results.push({ key: entry.key, saved: ok, games: soulCp?.games || 0, result: res });
             } catch (err) {
-              console.error(`Failed syncing ${key}:`, err);
-              results.push({ key, saved: false, error: err });
+              console.error(`Failed syncing ${entry.key}:`, err);
+              results.push({ key: entry.key, saved: false, error: err });
             }
           }
         }
 
         render49Grid();
+        g.SoulTrainer?.refreshUI?.();
+
         if (status) {
-          status.textContent = `Synced ${savedCount} / 49 matrices (Folder: 15P5HeKqLxMYw3ykirJj2HMT726SZnkId).`;
+          status.textContent =
+            `Synced ${savedCount} / 49 matrices (${trainedSyncedCount} trained SoulAgent checkpoints) to Google Drive (Folder: 15P5HeKqLxMYw3ykirJj2HMT726SZnkId).`;
         }
         return results;
       };
 
       g.loadAll49MatricesFromDrive = async function () {
         const status = document.getElementById("matrix49-sync-status");
+        if (g.SoulAgent?.ready) {
+          await g.SoulAgent.ready();
+        }
+
         const mode = g.SoulEnv?.getExecutionMode?.() || "train";
         let count = 0;
         let loaded = 0;
+        let importedSoulCount = 0;
 
         for (let rA = 0; rA < 7; rA++) {
           for (let rB = 0; rB < 7; rB++) {
             count++;
-            const key = `r${rA}_vs_r${rB}`;
+            const entry = g.MatrixStorage.getEntry(rA, rB);
             if (status) {
-              status.textContent = `Loading ${count} / 49 (${key}) from Google Drive / cache…`;
+              status.textContent = `Loading ${count} / 49 (${entry.key} [${entry.soulKey}]) from Google Drive…`;
             }
-            const learner = await g.MatchupPool.getMatchupLearner(rA, rB, mode, 1 + rA * 7 + rB);
-            if (learner) loaded++;
+
+            const rawPayload = await g.MatrixStorage.loadMatchupMatrix(rA, rB);
+            if (rawPayload) {
+              loaded++;
+              if (typeof g.SoulAgent?.ingestDriveMatchup === "function") {
+                const ingestRes = g.SoulAgent.ingestDriveMatchup(rawPayload, entry.p1Id, entry.p2Id);
+                if (ingestRes.imported && ingestRes.games > 0) {
+                  importedSoulCount++;
+                }
+              }
+            }
+
+            // Ensure compact pool learner is also ready
+            g.MatchupPool.getOrCreateSync(rA, rB, mode, 1 + rA * 7 + rB);
           }
         }
 
+        if (g.SoulAgent?.flushStorage) {
+          await g.SoulAgent.flushStorage();
+        }
+
         render49Grid();
+        g.SoulTrainer?.refreshUI?.();
+
         if (status) {
-          status.textContent = `Loaded ${loaded} / 49 matrices ready for ${mode.toUpperCase()}.`;
+          status.textContent =
+            `Loaded ${loaded} / 49 Drive files (${importedSoulCount} trained SoulAgent matchups restored into table).`;
         }
         return loaded;
       };

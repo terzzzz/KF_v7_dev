@@ -13,7 +13,7 @@
   const EXPECTED_SCHEMA =
     "kf-state256-action17-v2-charge1-reset1";
 
-  // Minimum interval (ms) between heavy localStorage writes during live training.
+  // Minimum interval (ms) between heavy IndexedDB/localStorage writes during live training.
   // Checkpoints are always buffered in RAM and 100% flushed on stop/done.
   const CHECKPOINT_SAVE_THROTTLE_MS = 5000;
 
@@ -40,7 +40,7 @@
 
       <p>
         Build: <strong>${BUILD}</strong> |
-        Matrix: <strong>49-Matchup Matrix (7×7 Riders, Header Drive Sync)</strong> |
+        Matrix: <strong>49-Matchup Matrix (7×7 Riders, Header Drive Sync + IndexedDB)</strong> |
         Patch: <strong>${PATCH}</strong><br>
         256 inputs / 17 actions (42,257 params/matchup | 295,799 params/Rider | 10 backup slots reserved).
       </p>
@@ -287,447 +287,78 @@
     // 49-MATRIX HEADER PANEL <-> SOULAGENT BIDIRECTIONAL BRIDGE
     // =========================================================================
 
-    function makeSeededRng(seed) {
-      let s = (seed >>> 0) || 0x12345678;
-      return function () {
-        s ^= s << 13;
-        s ^= s >>> 17;
-        s ^= s << 5;
-        return ((s >>> 0) / 4294967296);
-      };
-    }
-
-    function createInitializedWeights(seedNumber) {
-      const rng = makeSeededRng(seedNumber);
-      const randLayer = (fanIn, len) => {
-        const scale = Math.sqrt(2 / fanIn);
-        const arr = new Array(len);
-        for (let i = 0; i < len; i++) {
-          const u = (rng() + rng() + rng() - 1.5) * 1.1547;
-          arr[i] = Number((u * scale).toFixed(6));
-        }
-        return arr;
-      };
-      const zeros = len => new Array(len).fill(0);
-
-      return {
-        w1: randLayer(256, 256 * 128),
-        b1: zeros(128),
-        w2: randLayer(128, 128 * 64),
-        b2: zeros(64),
-        w3: randLayer(64, 64 * 17),
-        b3: zeros(17)
-      };
-    }
-
-    function findAnyExistingCheckpoint() {
-      if (!data || !g.SoulAgent) return null;
-      for (const l of data.riders) {
-        for (const o of data.riders) {
-          const cp =
-            g.SoulAgent.getSection(l.id, o.id, "candidate") ||
-            g.SoulAgent.getSection(l.id, o.id, "active");
-          if (cp && cp.weights) return cp;
-        }
-      }
-      return null;
-    }
-
-    function reinitWeightsFromTemplate(templateWeights, seedNumber) {
-      const fresh = createInitializedWeights(seedNumber);
-      if (!templateWeights || typeof templateWeights !== "object") {
-        return fresh;
-      }
-      const out = {};
-      for (const [k, v] of Object.entries(templateWeights)) {
-        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-          if (fresh[k] && fresh[k].length === v.length) {
-            out[k] = fresh[k].slice();
-          } else {
-            const rng = makeSeededRng(seedNumber + k.length * 97);
-            const isBias = /^b\d/i.test(k) || v.length <= 256;
-            out[k] = Array.from({ length: v.length }, () =>
-              isBias ? 0 : Number(((rng() - 0.5) * 0.12).toFixed(6))
-            );
-          }
-        } else if (v && typeof v === "object") {
-          out[k] = JSON.parse(JSON.stringify(v));
-        } else {
-          out[k] = v;
-        }
-      }
-      return out;
-    }
-
-    function createBlankSoulCheckpoint(learnerId, opponentId, p1Idx, p2Idx) {
-      if (!g.SoulAgent) return null;
-
-      const lCode = g.SoulAgent.toCode(learnerId);
-      const oCode = g.SoulAgent.toCode(opponentId);
-      const mKey = g.SoulAgent.getCanonicalKey(learnerId, opponentId);
-      const seedNum = 10000 + (p1Idx + 1) * 100 + (p2Idx + 1);
-
-      // Prefer SoulAgent / SoulNet native factory if present
-      if (typeof g.SoulAgent.createBlankCheckpoint === "function") {
-        try {
-          const cp = g.SoulAgent.createBlankCheckpoint(learnerId, opponentId);
-          if (cp && g.SoulAgent.validateCheckpoint(cp, learnerId, opponentId).valid) {
-            return cp;
-          }
-        } catch (_) {}
-      }
-
-      const template = findAnyExistingCheckpoint();
-      const freshWeights = reinitWeightsFromTemplate(template?.weights, seedNum);
-
-      const base = template ? JSON.parse(JSON.stringify(template)) : {};
-
-      const candidateCp = Object.assign(base, {
-        build: BUILD,
-        version: BUILD,
-        patch: PATCH,
-        schema: EXPECTED_SCHEMA,
-        learnerId,
-        opponentId,
-        learnerCode: lCode,
-        opponentCode: oCode,
-        matchupKey: mKey,
-        games: 0,
-        steps: 0,
-        updates: 0,
-        wins: 0,
-        losses: 0,
-        draws: 0,
-        weights: freshWeights,
-        weightsID: `init-${mKey}-${seedNum}`,
-        updatedAt: new Date().toISOString()
-      });
-
-      if (candidateCp.targetWeights) {
-        candidateCp.targetWeights = JSON.parse(JSON.stringify(freshWeights));
-      }
-      delete candidateCp.evaluation;
-
-      const val = g.SoulAgent.validateCheckpoint(candidateCp, learnerId, opponentId);
-      return val.valid ? candidateCp : null;
-    }
-
-    function extractCheckpointFromPoolEntry(rawEntry, learnerId, opponentId) {
-      if (!rawEntry || typeof rawEntry !== "object" || !g.SoulAgent) return null;
-
-      const mKey = g.SoulAgent.getCanonicalKey(learnerId, opponentId);
-      const lCode = g.SoulAgent.toCode(learnerId);
-      const oCode = g.SoulAgent.toCode(opponentId);
-
-      // Unwrap possible container formats from MatchupPool or Drive JSON
-      let cp =
-        rawEntry.checkpoint ||
-        rawEntry.candidate?.[mKey] ||
-        rawEntry.candidate ||
-        rawEntry.active?.[mKey] ||
-        rawEntry.active ||
-        (rawEntry.weights ? rawEntry : null);
-
-      if (!cp || typeof cp !== "object" || !cp.weights) return null;
-
-      const normalized = Object.assign({}, cp, {
-        build: BUILD,
-        version: BUILD,
-        patch: PATCH,
-        schema: EXPECTED_SCHEMA,
-        learnerId,
-        opponentId,
-        learnerCode: lCode,
-        opponentCode: oCode,
-        matchupKey: mKey
-      });
-
-      const val = g.SoulAgent.validateCheckpoint(normalized, learnerId, opponentId);
-      return val.valid ? normalized : null;
-    }
-
-    // Push a single checkpoint from SoulAgent -> Header Panel MatchupPool
     function syncToHeaderPool(cp, selectedLearner) {
-      if (!cp || !g.MatchupPool || !g.SoulAgent) return;
+      if (!cp || !g.SoulAgent) return;
       try {
         const lCode = g.SoulAgent.toCode(cp.learnerId || selectedLearner);
         const oCode = g.SoulAgent.toCode(cp.opponentId);
         const p1Idx = parseInt(lCode, 10) - 1;
         const p2Idx = parseInt(oCode, 10) - 1;
+
         if (
           Number.isInteger(p1Idx) && p1Idx >= 0 && p1Idx < 7 &&
           Number.isInteger(p2Idx) && p2Idx >= 0 && p2Idx < 7
         ) {
           const mId = `r${p1Idx}_vs_r${p2Idx}`;
-          if (!g.MatchupPool.pool[mId]) {
-            g.MatchupPool.pool[mId] = {
-              id: mId,
-              p1: p1Idx,
-              p2: p2Idx,
-              status: "active"
-            };
-          }
-          const entry = g.MatchupPool.pool[mId];
-          entry.status = "active";
-          entry.steps = cp.steps || 0;
-          entry.games = cp.games || 0;
-          entry.checkpoint = cp;
-          entry.updatedAt = new Date().toISOString();
-          if (typeof g.MatchupPool.saveMatchup === "function") {
-            g.MatchupPool.saveMatchup(mId);
-          }
+          const ramPool = (g.__KF_MATRIX49_RAM__ = g.__KF_MATRIX49_RAM__ || {});
+          ramPool[mId] = {
+            ...(ramPool[mId] || {}),
+            matchupKey: mId,
+            canonicalKey: `${lCode}_${oCode}`,
+            p1Rider: cp.learnerId || selectedLearner,
+            p2Rider: cp.opponentId,
+            games: cp.games || 0,
+            steps: cp.steps || 0,
+            soulCandidate: cp,
+            updatedAt: new Date().toISOString()
+          };
+        }
+
+        if (typeof g.render49MatrixHeaderGrid === "function") {
+          g.render49MatrixHeaderGrid();
         }
       } catch (err) {
         console.warn("[Training UI] Header pool sync warning:", err);
       }
     }
 
-    // Full 49-matrix bidirectional sync between Header Panel (MatchupPool) and SoulAgent
-    function syncWithHeaderPool(options = {}) {
-      if (!data || !g.SoulAgent || !g.MatchupPool || !g.MatchupPool.pool) {
+    function syncWithHeaderPool() {
+      if (!data || !g.SoulAgent) {
         return { imported: 0, exported: 0, initialized: 0 };
       }
 
-      const preferPool = Boolean(options.preferPool);
-      const createMissing = options.createMissing !== false;
-
       let imported = 0;
       let exported = 0;
-      let initializedCount = 0;
+      const ramPool = (g.__KF_MATRIX49_RAM__ = g.__KF_MATRIX49_RAM__ || {});
 
       for (let i = 0; i < data.riders.length && i < 7; i++) {
         for (let j = 0; j < data.riders.length && j < 7; j++) {
           const learnerId = data.riders[i].id;
           const opponentId = data.riders[j].id;
           const mId = `r${i}_vs_r${j}`;
-          const mKey = g.SoulAgent.getCanonicalKey(learnerId, opponentId);
 
-          const poolEntry =
-            g.MatchupPool.pool[mId] ||
-            g.MatchupPool.pool[mKey] ||
-            null;
-
-          const poolCp = extractCheckpointFromPoolEntry(
-            poolEntry,
-            learnerId,
-            opponentId
-          );
+          const ramEntry = ramPool[mId];
+          if (ramEntry && typeof g.SoulAgent.ingestDriveMatchup === "function") {
+            const res = g.SoulAgent.ingestDriveMatchup(ramEntry, learnerId, opponentId);
+            if (res.imported) imported++;
+          }
 
           const soulCand = g.SoulAgent.getSection(learnerId, opponentId, "candidate");
           const soulAct = g.SoulAgent.getSection(learnerId, opponentId, "active");
           const soulBest = soulCand || soulAct;
 
-          if (poolCp && (!soulBest || (preferPool && (poolCp.games > 0 || !soulBest.games)) || (poolCp.games || 0) > (soulBest.games || 0) || (poolCp.steps || 0) > (soulBest.steps || 0))) {
-            // Header Pool has a newer/imported checkpoint -> load into SoulAgent
-            g.SoulAgent.setCandidate(poolCp);
-            syncToHeaderPool(poolCp, learnerId);
-            imported++;
-          } else if (soulBest) {
-            // SoulAgent already has a trained/valid checkpoint -> ensure Header Pool has it
+          if (soulBest) {
             syncToHeaderPool(soulBest, learnerId);
             exported++;
-          } else if (createMissing && poolEntry && poolEntry.status === "active") {
-            // Slot was marked active in Header Panel (e.g. Init All 49) but had no weights yet
-            const blankCp = createBlankSoulCheckpoint(learnerId, opponentId, i, j);
-            if (blankCp) {
-              g.SoulAgent.setCandidate(blankCp);
-              syncToHeaderPool(blankCp, learnerId);
-              initializedCount++;
-            }
           }
         }
       }
 
-      if (typeof g.MatchupPool.updateUI === "function") {
-        g.MatchupPool.updateUI();
+      if (typeof g.render49MatrixHeaderGrid === "function") {
+        g.render49MatrixHeaderGrid();
       }
 
-      return { imported, exported, initialized: initializedCount };
-    }
-
-    // Hook Header Panel (window.MatchupPool) methods so Header buttons immediately
-    // update SoulAgent and refresh the train.html UI.
-    function hookHeaderPanel() {
-      const mp = g.MatchupPool;
-      if (!mp || mp._soulTrainerHooked) return;
-      mp._soulTrainerHooked = true;
-
-      // 1. Hook Init All 49 Matrices
-      if (typeof mp.initAll49 === "function") {
-        const origInit = mp.initAll49.bind(mp);
-        mp.initAll49 = function (...args) {
-          const res = origInit(...args);
-          const stats = syncWithHeaderPool({ preferPool: false, createMissing: true });
-          refresh();
-          output(
-            `Header Panel: Initialized all 49 matrices in SoulAgent.\n` +
-            `Preserved existing trained models: ${stats.exported} | Freshly initialized: ${stats.initialized}`
-          );
-          return res;
-        };
-      }
-
-      // 2. Hook Pull 49 Matrices <- Google Drive
-      mp.pullFromDrive = async function () {
-        const scriptUrl = mp.getScriptUrl?.();
-        if (!scriptUrl) {
-          alert("Please enter your deployed Google Apps Script Web App URL first.");
-          return;
-        }
-        mp.setDriveStatus?.("Pulling 49 matrices from Google Drive...", "#ffa502");
-        try {
-          const url =
-            `${scriptUrl}?action=pullAll&folderId=${encodeURIComponent(mp.driveFolderId)}` +
-            `&t=${Date.now()}`;
-
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const remoteMatrices = await res.json();
-
-          let loaded = 0;
-          if (remoteMatrices && typeof remoteMatrices === "object") {
-            for (let i = 0; i < 7 && i < (data?.riders?.length || 7); i++) {
-              for (let j = 0; j < 7 && j < (data?.riders?.length || 7); j++) {
-                const mId = `r${i}_vs_r${j}`;
-                const lCode = String(i + 1).padStart(3, "0");
-                const oCode = String(j + 1).padStart(3, "0");
-                const mKey = `${lCode}_${oCode}`;
-
-                // Support r0_vs_r0.json, 001_001.json, or nested 001.json rider bundles
-                const remoteEntry =
-                  remoteMatrices[mId] ||
-                  remoteMatrices[mKey] ||
-                  remoteMatrices[lCode]?.candidate?.[mKey] ||
-                  remoteMatrices[lCode]?.active?.[mKey] ||
-                  null;
-
-                if (remoteEntry) {
-                  const learnerId = data.riders[i].id;
-                  const opponentId = data.riders[j].id;
-                  const extractedCp = extractCheckpointFromPoolEntry(
-                    remoteEntry,
-                    learnerId,
-                    opponentId
-                  );
-
-                  mp.pool[mId] = Object.assign({}, mp.pool[mId] || {}, {
-                    id: mId,
-                    p1: i,
-                    p2: j,
-                    status: "active",
-                    steps: extractedCp?.steps ?? remoteEntry.steps ?? 0,
-                    games: extractedCp?.games ?? remoteEntry.games ?? 0,
-                    checkpoint: extractedCp || mp.pool[mId]?.checkpoint || null,
-                    updatedAt: remoteEntry.updatedAt || new Date().toISOString()
-                  });
-
-                  mp.saveMatchup?.(mId);
-                  loaded++;
-                }
-              }
-            }
-          }
-
-          const syncStats = syncWithHeaderPool({
-            preferPool: true,
-            createMissing: true
-          });
-
-          mp.updateUI?.();
-          refresh();
-
-          if (loaded === 0) {
-            mp.setDriveStatus?.(
-              "Drive folder returned 0 saved files ({}) — synced local 49 matrices instead. Click 'Sync 49 Matrices → Google Drive' to upload.",
-              "#ffa502"
-            );
-            output(
-              "GOOGLE DRIVE PULL INFO\n" +
-              "The Google Drive folder returned an empty set ({}).\n" +
-              "All 49 local matrices have been prepared in SoulAgent.\n" +
-              "Click 'Sync 49 Matrices → Google Drive' in the top header panel to upload them to your Drive folder."
-            );
-          } else {
-            mp.setDriveStatus?.(
-              `Pulled ${loaded} / 49 matrices from Google Drive (${syncStats.imported} loaded into Trainer).`,
-              "#00ff88"
-            );
-            output(
-              `GOOGLE DRIVE PULL COMPLETE\n` +
-              `Pulled ${loaded} matrices from Google Drive.\n` +
-              `Imported ${syncStats.imported} checkpoints into SoulAgent (preserved ${syncStats.exported}, initialized ${syncStats.initialized}).`
-            );
-          }
-        } catch (err) {
-          console.error("[GDrive Pull Error]", err);
-          mp.setDriveStatus?.(`Pull failed: ${err.message}`, "#ff4757");
-        }
-      };
-
-      // 3. Hook Sync 49 Matrices -> Google Drive (CORS-safe text/plain + batched by Rider row)
-      mp.syncToDrive = async function () {
-        const scriptUrl = mp.getScriptUrl?.();
-        if (!scriptUrl) {
-          alert("Please enter your deployed Google Apps Script Web App URL first.");
-          return;
-        }
-
-        // Ensure all latest SoulAgent checkpoints are flushed into MatchupPool before upload
-        syncWithHeaderPool({ preferPool: false, createMissing: true });
-        refresh();
-
-        mp.setDriveStatus?.("Syncing 49 matrices to Google Drive (7 batches)...", "#ffa502");
-
-        try {
-          let totalSaved = 0;
-
-          // Upload 7 matchups at a time (1 Rider row per request) so payload stays well under
-          // Google Apps Script POST body size limits and uses CORS-safe text/plain
-          for (let i = 0; i < 7; i++) {
-            const batchMatrices = {};
-            for (let j = 0; j < 7; j++) {
-              const mId = `r${i}_vs_r${j}`;
-              if (mp.pool[mId]) {
-                batchMatrices[mId] = mp.pool[mId];
-              }
-            }
-
-            mp.setDriveStatus?.(
-              `Syncing Rider 00${i + 1} matrices (${i + 1}/7) to Google Drive...`,
-              "#ffa502"
-            );
-
-            const payload = {
-              action: "syncAll",
-              folderId: mp.driveFolderId,
-              timestamp: new Date().toISOString(),
-              matrices: batchMatrices
-            };
-
-            const res = await fetch(scriptUrl, {
-              method: "POST",
-              headers: { "Content-Type": "text/plain;charset=utf-8" },
-              body: JSON.stringify(payload)
-            });
-
-            if (!res.ok) throw new Error(`HTTP ${res.status} on batch ${i + 1}`);
-            const json = await res.json();
-            totalSaved += Number(json.savedCount ?? 7);
-          }
-
-          mp.setDriveStatus?.(
-            `Synced ${totalSaved} / 49 matrices to Google Drive (${new Date().toLocaleTimeString()})`,
-            "#00ff88"
-          );
-          output(
-            `GOOGLE DRIVE SYNC COMPLETE\n` +
-            `Uploaded ${totalSaved} / 49 matchup matrices (with full neural network checkpoints) to Google Drive folder ${mp.driveFolderId}.`
-          );
-        } catch (err) {
-          console.error("[GDrive Sync Error]", err);
-          mp.setDriveStatus?.(`Sync failed: ${err.message}`, "#ff4757");
-        }
-      };
+      return { imported, exported, initialized: 0 };
     }
 
     function flushPendingCheckpoints(selectedLearner) {
@@ -849,6 +480,10 @@
       }
 
       statusEl.textContent = lines.join("\n");
+
+      if (typeof g.render49MatrixHeaderGrid === "function") {
+        g.render49MatrixHeaderGrid();
+      }
 
       return {
         isMulti,
@@ -1187,6 +822,7 @@
 
       try {
         flushPendingCheckpoints(selectedLearner || field("learner").value);
+        g.SoulAgent?.flushStorage?.();
       } catch (err) {
         console.error("[Training UI] Checkpoint flush error:", err);
       }
@@ -1430,14 +1066,14 @@
                 report.games === report.requested
               ) {
                 g.SoulAgent.recordEvaluation(target, report);
-                syncWithHeaderPool({ preferPool: false, createMissing: false });
+                syncWithHeaderPool();
               }
 
               output(
                 formatReport(report) +
                 (
                   training
-                    ? "\n\nCandidate matchup(s) retained in RAM/LocalStorage and synced to the 49-Matrix Header Panel."
+                    ? "\n\nCandidate matchup(s) saved to IndexedDB and synced to the 49-Matrix Header Panel."
                     : report.cancelled
                       ? "\n\nIncomplete evaluation was not recorded for activation."
                       : "\n\nEvaluation finished and recorded."
@@ -1527,7 +1163,7 @@
               selected.opponent
             );
 
-            syncWithHeaderPool({ preferPool: false, createMissing: false });
+            syncWithHeaderPool();
             refresh();
 
             output(
@@ -1581,6 +1217,10 @@
         return busy;
       },
 
+      refreshUI() {
+        refresh();
+      },
+
       syncHeaderPool(options) {
         const res = syncWithHeaderPool(options);
         refresh();
@@ -1623,16 +1263,11 @@
       field("learner").value = data.riders[0].id;
       field("opponent").value = "*";
 
-      // Hook the Top Header Panel and perform initial bidirectional sync across all 49 slots
-      hookHeaderPanel();
-      const syncStats = syncWithHeaderPool({
-        preferPool: false,
-        createMissing: true
-      });
+      const syncStats = syncWithHeaderPool();
 
       output(
-        "Ready (v7 49-Matrix Mode).\n" +
-        `Header Pool <-> SoulAgent Synced (Imported: ${syncStats.imported}, Preserved: ${syncStats.exported}, Initialized: ${syncStats.initialized}).\n` +
+        "Ready (v7 49-Matrix Mode — IndexedDB + Google Drive Sync).\n" +
+        `Header Pool <-> SoulAgent Synced (Imported: ${syncStats.imported}, Preserved: ${syncStats.exported}).\n` +
         "Select ALL OPPONENTS to auto-cycle training across all Riders with isolated matchup networks.\n" +
         "Use the Top Header Panel to Import/Export all 49 matrices to and from Google Drive."
       );

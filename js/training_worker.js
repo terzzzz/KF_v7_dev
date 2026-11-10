@@ -48,6 +48,31 @@ importScripts(...[
   "ai.js"
 ].map(file => file + "?v=" + CACHE_TAG));
 
+// Quantize JSON floats to 4 decimals (strips 17-digit float bloat: 851KB -> ~200KB per matrix)
+function compactNetValue(val) {
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? Math.round(val * 10000) / 10000 : 0;
+  }
+  if (Array.isArray(val) || ArrayBuffer.isView(val)) {
+    const out = new Array(val.length);
+    for (let i = 0; i < val.length; i++) out[i] = compactNetValue(val[i]);
+    return out;
+  }
+  if (val && typeof val === "object") {
+    const out = {};
+    for (const k of Object.keys(val)) out[k] = compactNetValue(val[k]);
+    return out;
+  }
+  return val;
+}
+
+if (typeof SoulNN !== "undefined" && SoulNN.Network?.prototype?.toJSON) {
+  const _origToJSON = SoulNN.Network.prototype.toJSON;
+  SoulNN.Network.prototype.toJSON = function () {
+    return compactNetValue(_origToJSON.call(this));
+  };
+}
+
 // Precompute stance/button lookup for all actions to avoid .split("+") in hot loop
 const ACTION_PARTS_CACHE = Object.create(null);
 if (typeof SoulEnv !== "undefined" && Array.isArray(SoulEnv.ACTION_MAP)) {
@@ -1091,6 +1116,9 @@ async function run(job) {
         send("checkpoint", {
           checkpoint: buildCheckpointForContext(ctx)
         });
+      }
+      if (ctx.learner?.replay?.items) {
+        ctx.learner.replay.items.length = 0; // Free worker RAM immediately
       }
     }
   }

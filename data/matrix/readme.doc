@@ -1,5 +1,106 @@
 The followings are trained well:
 
-001_002
+001:
 
-49 matrices.
+### Matchup Win Rate Matrix (Ichigo vs. All Riders)
+
+| Opponent Rider | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Overall Matchup Record |
+| --- | --- | --- | --- | --- | --- |
+| **Ichigo (Mirror)** | 29W – 3L (90.6%) | 22W – 8L (73.3%) | 25W – 5L (83.3%) | 23W – 7L (76.7%) | **99W – 23L (81.1%)** |
+| **Nigo** | 26W – 6L (81.3%) | 27W – 3L (90.0%) | 26W – 4L (86.7%) | 26W – 4L (86.7%) | **105W – 17L (86.1%)** |
+| **V3** | 28W – 4L (87.5%) | 25W – 5L (83.3%) | 19W – 11L (63.3%) | 24W – 6L (80.0%) | **96W – 26L (78.7%)** |
+| **Riderman** | 32W – 0L (100.0%) | 28W – 2L (93.3%) | 23W – 7L (76.7%) | 20W – 10L (66.7%) | **103W – 19L (84.4%)** |
+| **X** | 24W – 8L (75.0%) | 22W – 7L – 1D (73.3%) | **13W – 17L (43.3%)** | 19W – 11L (63.3%) | **78W – 43L – 1D (63.9%)** |
+| **Amazon** | 27W – 5L (84.4%) | 20W – 8L – 2D (66.7%) | 17W – 13L (56.7%) | 20W – 10L (66.7%) | **84W – 36L – 2D (68.9%)** |
+| **Stronger** | 32W – 0L (100.0%) | 28W – 2L (93.3%) | 30W – 0L (100.0%) | 29W – 1L (96.7%) | **119W – 3L (97.5%)** |
+| **Overall Summary** | **198W – 26L (88.4%)** | **172W – 35L – 3D (81.9%)** | **153W – 57L (72.9%)** | **161W – 49L (76.7%)** | **684W – 167L – 3D (80.1%)** |
+
+---
+
+### Evaluation Summary & 50% Win Rate Target Check
+
+* **Does Ichigo fulfill the 50% win rate across all matchups?**
+**No, not all individual sub-matchups meet the 50% target.**
+While Ichigo achieves an overall benchmark of **80.1% (684W / 167L / 3D)** across the entire 854-match evaluation run, **Kamen Rider X on Beetle (Defensive) difficulty** acts as the single failing cell:
+* **vs. Kamen Rider X (Beetle): 13 Wins / 17 Losses (43.3% Win Rate)**
+
+
+* **Performance Overview:**
+* **Best Matchup:** **Stronger** (97.5% overall win rate), featuring perfect 100% records in Tree-hopper and Beetle difficulties.
+* **Weakest Matchup:** **X** (63.9% overall win rate), driven down by defense-heavy counterplay in Beetle difficulty.
+* **Difficulty Trend:** Ichigo dominates lower difficulties (Tree-hopper: 88.4%), drops slightly against defensive turtle strategies (Beetle: 72.9%), but rebounds strong at master tier (Bullet Ant: 76.7%) due to aggressive priority execution.
+
+
+
+---
+
+### Matchup Tactical Breakdown (How Ichigo Deals with Each Rider)
+
+1. **vs. Kamen Rider Stronger (97.5% Win Rate)**
+* **Tactics:** Stronger relies on high-damage charged setups that require turn preparation. Ichigo aggressively interrupts Stronger’s charge phases by opening with immediate Chi accumulation (`W+I` / `W+K`) followed by high-priority bursts (`S+L` / `S+I`). Because Stronger's wind-up leaves him exposed, Ichigo routinely inflicts faint stuns and wins in short 4 to 8 round bursts.
+
+
+2. **vs. Kamen Rider Nigo (86.1% Win Rate)**
+* **Tactics:** Nigo possesses high LP and durable trading power. Ichigo counters Nigo by maintaining distance with `W+I` buffs, using `D+J` and `D+L` to chip LP safely, and dropping `S+L` finishers once Nigo's Faint meter accumulates. Ichigo consistently wins the resource war by spending Chi more efficiently (Avg Chi advantage net +2.41).
+
+
+3. **vs. Kamen Rider Riderman (84.4% Win Rate)**
+* **Tactics:** Riderman’s reach and utility moves can delay rounds on higher difficulties, but his low base defense leaves him vulnerable to high execution speeds. Ichigo presses early advantage with `S+I` and `S+L` (often completing early-difficulty wins in 4 rounds). Against Bullet Ant, Ichigo shifts to `S+L` heavy priority attacks to hit through Riderman’s stance changes.
+
+
+4. **vs. Kamen Rider Ichigo (Mirror Match - 81.1% Win Rate)**
+* **Tactics:** In mirror matches, the candidate policy relies on priority execution efficiency (54.7% priority win rate). Ichigo uses early `W+I` to stack armor/buffs, out-pacing the AI Ichigo's move choices. When the opponent commits to high-cost moves, candidate Ichigo capitalizes with `S+L` punish sequences while taking minimal damage (Avg Damage taken 44.5%).
+
+
+5. **vs. Kamen Rider V3 (78.7% Win Rate)**
+* **Tactics:** V3 tends to drag matches into high round counts (often 20+ rounds) due to active evasions and defensive stance switches. Ichigo handles V3 by using `D+J` to lock down V3's action phase, resetting faint buildup with `W+K`, and holding Chi until V3 enters a forced recovery state (`DO_NOTHING`).
+
+
+6. **vs. Kamen Rider Amazon (68.9% Win Rate)**
+* **Tactics:** Amazon’s aggressive mobility and stance options force draws and closer losses on Cricket and Beetle difficulties. Ichigo mitigates Amazon's erratic burst window by adopting an A-Guard counter policy (`A+I` / `A+K`) and capitalizing with armor-breaking `S+I` inputs when Amazon overcommits to offense.
+
+
+7. **vs. Kamen Rider X (63.9% Win Rate - Toughest Opponent)**
+* **Tactics:** Kamen Rider X's defensive parameters on Beetle difficulty directly counter Ichigo’s standard `S+L` initiation, leading to blocked attacks and accumulated self-faint points. To deal with X, Ichigo must reduce heavy special move spam (`S`) and rely on safe normal combo sequences (`D+J` / `D+I`) to chip down X's health pool without triggering high-damage counterpunishes.
+
+
+
+
+002:
+
+
+
+
+
+003:
+
+
+
+
+
+004:
+
+
+
+
+
+005:
+
+
+
+
+
+
+006:
+
+
+
+
+
+
+007:
+
+
+
+
+

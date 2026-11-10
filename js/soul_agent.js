@@ -5,6 +5,26 @@
  * Matrix: v7-7riders-10backup
  * Patch: charge1-reset1
  */
+
+// Lift 5MB localStorage barrier into Unlimited Temp RAM
+if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
+  const RAM = (window.__KF_TEMP_RAM__ = window.__KF_TEMP_RAM__ || {});
+  const _get = Storage.prototype.getItem, _set = Storage.prototype.setItem;
+  Storage.prototype.getItem = function (k) {
+    return String(k).startsWith("kf_soul_agent_data_") && k in RAM ? RAM[k] : _get.call(this, k);
+  };
+  Storage.prototype.setItem = function (k, v) {
+    if (String(k).startsWith("kf_soul_agent_data_")) {
+      RAM[k] = String(v);
+      try { _set.call(this, k, v); } catch (e) {} // Ignore 5MB QuotaExceededError, keep in RAM
+      return;
+    }
+    return _set.call(this, k, v);
+  };
+  Storage.prototype.__kfRam = true;
+}
+
+
 (function (g) {
   "use strict";
 

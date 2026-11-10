@@ -22,8 +22,12 @@ const MIXED_CPU_SEQUENCE = [
 const MIXED_ROUND_SPAN = 30;
 const MAX_WINS_PER_DIFF_OPP = 4;
 
-// Throttled checkpoint interval during active training (100% flushed at job end/stop)
-const CHECKPOINT_MIN_INTERVAL_MS = 5000;
+// Turbo scheduling constants: keep worker on-CPU ~99.8% of the time
+// and avoid spamming main-thread DOM/localStorage serialization
+const YIELD_INTERVAL_MS = 500;
+const PROGRESS_INTERVAL_MS = 2000;
+const CHECKPOINT_GAME_INTERVAL = 250;
+const CHECKPOINT_MIN_INTERVAL_MS = 30000;
 
 const MIXED_MODE_LABELS = {
   easy: "mixed:tree-hopper",
@@ -488,6 +492,8 @@ async function run(job) {
   }
 
   const started = performance.now();
+  let lastProgress = started;
+  let lastYield = started;
   let lastCheckpointSent = started;
 
   let games = 0;
@@ -788,7 +794,7 @@ async function run(job) {
     imitation = 0;
 
     let matchGuideProbability = 0;
-    let effectiveTeacher = job.teacher;
+    let effectiveTeacher = "easy";
 
     if (training) {
       if (job.warmStart) {
@@ -860,8 +866,13 @@ async function run(job) {
 
         matchGuideProbability = guidedMatch ? 1 : 0;
 
-        if (guidedMatch && job.teacher === "master") {
-          effectiveTeacher = fastTeachers[i % fastTeachers.length];
+        if (guidedMatch) {
+          effectiveTeacher =
+            job.teacher === "master"
+              ? fastTeachers[i % fastTeachers.length]
+              : job.teacher;
+        } else {
+          effectiveTeacher = "easy";
         }
 
         const masterImitation = guidedMatch
@@ -1052,9 +1063,9 @@ async function run(job) {
 
     const now = performance.now();
 
-    // Throttle heavy checkpoint serialization during live training
     if (
       training &&
+      ctx.games % CHECKPOINT_GAME_INTERVAL === 0 &&
       now - lastCheckpointSent >= CHECKPOINT_MIN_INTERVAL_MS
     ) {
       send("checkpoint", {
@@ -1063,9 +1074,15 @@ async function run(job) {
       lastCheckpointSent = performance.now();
     }
 
-    // Update UI progress text once per match and yield briefly so messages flush
-    send("progress", { report: report(ctx, false) });
-    await pause();
+    if (now - lastProgress >= PROGRESS_INTERVAL_MS) {
+      send("progress", { report: report(ctx, false) });
+      lastProgress = performance.now();
+    }
+
+    if (now - lastYield >= YIELD_INTERVAL_MS) {
+      await pause();
+      lastYield = performance.now();
+    }
   }
 
   if (training) {

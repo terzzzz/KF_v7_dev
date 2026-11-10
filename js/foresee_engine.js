@@ -538,7 +538,7 @@
 
   /*
    * Direct O(moves) legal action builder with +1% to +12% randomizer applied per move.
-   * Avoids calling C.actions() with 20+ probe charges on every node.
+   * Deduplicates all generated charges per move key.
    */
   function buildRandomizedActions(
     state,
@@ -566,8 +566,8 @@
     }
 
     const { keys } = getMovesetMeta(moves);
-    const offensiveAnchors = compactMode ? [62, 82] : [60, 68, 78, 88];
-    const utilityAnchors = compactMode ? [30] : [24, 34, 48];
+    const offensiveAnchors = compactMode ? [62, 76, 88] : [60, 68, 78, 88];
+    const utilityAnchors = compactMode ? [28, 40] : [24, 34, 48];
 
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -608,8 +608,11 @@
       const offensive = isOffensiveMove(state, slot, key);
       const baseAnchors = offensive ? offensiveAnchors : utilityAnchors;
 
-      let prevChg1 = -1;
-      let prevChg2 = -1;
+      let c0 = -1;
+      let c1 = -1;
+      let c2 = -1;
+      let c3 = -1;
+      let c4 = -1;
       let addedForMove = 0;
 
       for (let aIdx = 0; aIdx < baseAnchors.length; aIdx++) {
@@ -620,12 +623,22 @@
           offensive,
           rng
         );
-        if (chg >= 1 && chg !== prevChg1 && chg !== prevChg2) {
+        if (
+          chg >= 1 &&
+          chg !== c0 &&
+          chg !== c1 &&
+          chg !== c2 &&
+          chg !== c3 &&
+          chg !== c4
+        ) {
           const candidate = { key, charge: chg };
           if (C.isLegal(state, slot, candidate)) {
             result.push(candidate);
-            if (addedForMove === 0) prevChg1 = chg;
-            else if (addedForMove === 1) prevChg2 = chg;
+            if (addedForMove === 0) c0 = chg;
+            else if (addedForMove === 1) c1 = chg;
+            else if (addedForMove === 2) c2 = chg;
+            else if (addedForMove === 3) c3 = chg;
+            else c4 = chg;
             addedForMove++;
           }
         }
@@ -642,11 +655,19 @@
             offensive,
             rng
           );
-          if (chg >= 1 && chg !== prevChg1 && chg !== prevChg2) {
+          if (
+            chg >= 1 &&
+            chg !== c0 &&
+            chg !== c1 &&
+            chg !== c2 &&
+            chg !== c3 &&
+            chg !== c4
+          ) {
             const candidate = { key, charge: chg };
             if (C.isLegal(state, slot, candidate)) {
               result.push(candidate);
-              prevChg2 = chg;
+              if (c3 === -1) c3 = chg;
+              else c4 = chg;
               addedForMove++;
             }
           }
@@ -662,23 +683,41 @@
   }
 
   /*
-   * Evaluates the 4 Tactical Charge Rules:
+   * Evaluates the Tactical Charge Rules:
    *   1. Fast Priority with Hit-Chance Balance (60%–76% for D/S, never 35%–55%).
    *   2. Faint > 75% AND Opponent Chi Check (high risk only when oppChi >= oppMinS).
    *   3. Contested Neutral Poke (D: 69%–82%, S: 79%–92%).
-   *   4. Safe Heavy Punish (89%–100% when opponent is fainted or starved of Chi).
+   *   4. Safe Heavy Punish (89%–100% when opponent is fainted or starved of Chi, 0% Guard).
    */
   function evaluateTacticalChargeBonus(state, slot, action) {
-    if (!state || !action || action.key === "DO_NOTHING") {
+    if (!state || !action) {
       return 0;
     }
 
     const enemySlot = C.other(slot);
     const own = state[slot];
     const enemy = state[enemySlot];
-    const move = state.moves?.[slot]?.[action.key];
 
-    if (!own || !enemy || !move) {
+    if (!own || !enemy || own.isFainted) {
+      return 0;
+    }
+
+    // Rule 4a: When opponent is fainted, never waste the free turn on DO_NOTHING or A-Guard
+    if (enemy.isFainted) {
+      if (action.key === "DO_NOTHING") {
+        return -35;
+      }
+      if (isAGuardMove(state, slot, action.key) || hasGuardTrait(state, slot, action.key)) {
+        return -45;
+      }
+    }
+
+    if (action.key === "DO_NOTHING") {
+      return 0;
+    }
+
+    const move = state.moves?.[slot]?.[action.key];
+    if (!move) {
       return 0;
     }
 
@@ -742,8 +781,13 @@
       return -22;
     }
 
-    // Rule 4 — Safe Heavy Punish (opponent is fainted or has very low Chi)
+    // Rule 4b — Safe Heavy Punish (opponent is fainted or has very low Chi)
     if (lowOpponentThreat && !highFaintRisk) {
+      if (enemy.isFainted) {
+        if (charge >= 88) return 18;
+        if (charge >= 78) return 8;
+        return -10;
+      }
       if (charge >= 88) {
         return 12;
       }
@@ -1142,52 +1186,81 @@
   }
 
   /*
-   * RIDER finalist selector: preserves top 8 highest-scoring (move, charge) finalists
-   * intact first, then uses extra slots to test Matrix-advised and diverse moves.
+   * RIDER & Smart-Tier finalist selector:
+   * Seeds the top raw (move, charge) rows first, then injects Matrix-advised moves,
+   * then ensures directional representation (D, S, W, A, IDLE) and distinct move keys,
+   * and finally fills any remaining slots by score.
    */
-  function selectDiverseFinalists(sortedRows, limit, advisedKeys = null) {
+  function selectDiverseFinalists(sortedRows, limit, advisedKeys = null, state = null, slot = null) {
     if (sortedRows.length <= limit) {
       return sortedRows.map(row => ({ ...row }));
     }
 
-    const baseCount = Math.min(8, limit);
-    const chosen = sortedRows.slice(0, baseCount).map(row => ({ ...row }));
-    const chosenIds = new Set(chosen.map(row => actionId(row.action)));
-    const seenKeys = new Set(chosen.map(row => row.action.key));
+    const chosen = [];
+    const chosenIds = new Set();
+    const seenKeys = new Set();
 
+    function addRow(row) {
+      if (!row || chosen.length >= limit) return false;
+      const id = actionId(row.action);
+      if (chosenIds.has(id)) return false;
+      chosen.push({ ...row });
+      chosenIds.add(id);
+      seenKeys.add(row.action.key);
+      return true;
+    }
+
+    // 1. Seed top raw rows (at most 3 or ~40% of limit so diverse moves still get rollout slots)
+    const seedCount = Math.max(1, Math.min(3, Math.ceil(limit * 0.35)));
+    for (let i = 0; i < Math.min(seedCount, sortedRows.length); i++) {
+      addRow(sortedRows[i]);
+    }
+
+    // 2. Include Matrix-advised keys (if not already represented)
     if (Array.isArray(advisedKeys)) {
-      for (const advisedKey of advisedKeys) {
-        if (chosen.length >= limit) break;
+      for (let i = 0; i < advisedKeys.length && chosen.length < limit; i++) {
+        const advisedKey = advisedKeys[i];
         if (seenKeys.has(advisedKey)) continue;
-
         const match = sortedRows.find(
           row => row.action.key === advisedKey && !chosenIds.has(actionId(row.action))
         );
         if (match) {
-          chosen.push({ ...match });
-          chosenIds.add(actionId(match.action));
-          seenKeys.add(advisedKey);
+          addRow(match);
         }
       }
     }
 
-    for (let i = baseCount; i < sortedRows.length && chosen.length < limit; i++) {
-      const row = sortedRows[i];
-      const id = actionId(row.action);
-      if (!seenKeys.has(row.action.key) && !chosenIds.has(id)) {
-        chosen.push({ ...row });
-        chosenIds.add(id);
-        seenKeys.add(row.action.key);
+    // 3. Ensure each tactical direction (D, S, W, A, IDLE) has its best competitive candidate
+    if (state && slot) {
+      const bestScore = sortedRows[0]?.score ?? 0;
+      const targetDirs = ["D", "S", "W", "A", "IDLE"];
+      for (let d = 0; d < targetDirs.length && chosen.length < limit; d++) {
+        const dir = targetDirs[d];
+        const hasDir = chosen.some(r => getMoveDirection(state, slot, r.action.key) === dir);
+        if (hasDir) continue;
+        const match = sortedRows.find(
+          row =>
+            getMoveDirection(state, slot, row.action.key) === dir &&
+            !chosenIds.has(actionId(row.action)) &&
+            bestScore - row.score <= 48
+        );
+        if (match) {
+          addRow(match);
+        }
       }
     }
 
-    for (let i = baseCount; i < sortedRows.length && chosen.length < limit; i++) {
+    // 4. Fill with highest-scoring distinct move keys
+    for (let i = 0; i < sortedRows.length && chosen.length < limit; i++) {
       const row = sortedRows[i];
-      const id = actionId(row.action);
-      if (!chosenIds.has(id)) {
-        chosen.push({ ...row });
-        chosenIds.add(id);
+      if (!seenKeys.has(row.action.key)) {
+        addRow(row);
       }
+    }
+
+    // 5. Fill remaining slots with highest-scoring charge variants
+    for (let i = 0; i < sortedRows.length && chosen.length < limit; i++) {
+      addRow(sortedRows[i]);
     }
 
     return chosen;
@@ -1689,10 +1762,17 @@
     );
 
     const groups = {};
+    const groupKeys = [];
 
     for (let i = 0; i < available.length; i++) {
       const action = available[i];
-      (groups[action.key] ||= []).push(action);
+      let grp = groups[action.key];
+      if (!grp) {
+        grp = [];
+        groups[action.key] = grp;
+        groupKeys.push(action.key);
+      }
+      grp.push(action);
     }
 
     const tree = B.intent(
@@ -1745,11 +1825,15 @@
     const otherChi = Number(state[otherSlot]?.chi || 0);
     const otherMinS = minSChiCost(state, otherSlot);
     const slotUnderHighFaintRisk = slotFaintRatio > 0.75 && otherChi >= otherMinS;
+    const otherIsFainted = Boolean(state[otherSlot]?.isFainted);
 
     const entries = [];
 
-    for (const [key, group] of Object.entries(groups)) {
+    for (let kIdx = 0; kIdx < groupKeys.length; kIdx++) {
+      const key = groupKeys[kIdx];
+      const group = groups[key];
       const move = state.moves?.[slot]?.[key];
+
       let keyWeight =
         3 * B.prior(
           state,
@@ -1758,6 +1842,11 @@
           brainDiff
         ) +
         (observed.counts[key] || 0);
+
+      // Do not waste turns guarding or idling when opponent is fainted
+      if (otherIsFainted && (isAGuardMove(state, slot, key) || key === "DO_NOTHING")) {
+        keyWeight *= 0.05;
+      }
 
       if (
         rolloutSelf &&
@@ -1770,6 +1859,7 @@
       if (
         rolloutSelf &&
         normDiff === "defensive" &&
+        !otherIsFainted &&
         Number(state[slot]?.chi || 0) < Number(state[otherSlot]?.chi || 0)
       ) {
         if (isAGuardMove(state, slot, key)) {
@@ -1813,7 +1903,7 @@
         }
       }
 
-      if (isSmartTier && move) {
+      if (isSmartTier && move && !otherIsFainted) {
         const isKeyAI = isOmniGuardMove(state, slot, key);
         const isKeyS = isSMove(state, slot, key);
 
@@ -1927,7 +2017,7 @@
             );
         }
 
-        if (state[otherSlot].isFainted || otherChi <= 1) {
+        if (otherIsFainted || otherChi <= 1) {
           weight *= actCharge >= 88
             ? 3.5
             : 0.35;
@@ -2083,11 +2173,21 @@
     let maxRollouts = settings.rollouts;
 
     if (isTraining) {
-      // In training, 1-step full expectimax handles easy/balanced/defensive;
-      // master/rider use 2-ply with 2 focused rollouts.
-      settings.horizon = (isRider || isBulletAnt) ? 2 : 1;
-      settings.rollouts = (isRider || isBulletAnt) ? 2 : 0;
-      settings.finalists = 2;
+      // In training, easy/balanced use 1-step full expectimax;
+      // defensive/master/rider use 2-ply with diverse finalists so W/A/S/D get rollout signal.
+      if (isRider || isBulletAnt) {
+        settings.horizon = 2;
+        settings.rollouts = 4;
+        settings.finalists = 5;
+      } else if (isBeetle) {
+        settings.horizon = 2;
+        settings.rollouts = 2;
+        settings.finalists = 4;
+      } else {
+        settings.horizon = 1;
+        settings.rollouts = 0;
+        settings.finalists = 2;
+      }
 
       minRollouts = settings.rollouts;
       maxRollouts = settings.rollouts;
@@ -2347,6 +2447,7 @@
     const myLp = Number(state[slot]?.lp || 0);
     const oppLp = Number(state[opponentSlot]?.lp || 0);
     const oppMinS = minSChiCost(state, opponentSlot);
+    const oppIsFainted = Boolean(state[opponentSlot]?.isFainted);
     const consecutiveSD = countConsecutiveSD(history, slot);
 
     const rows = [];
@@ -2390,7 +2491,7 @@
         brainDiff
       );
 
-      // Apply the 4 Tactical Charge Rules (Hit-chance balance + Faint > 75% & oppChi check)
+      // Apply the Tactical Charge Rules (Hit-chance balance + Faint > 75% & oppChi check + Fainted Punish)
       let tacticalRootBonus = evaluateTacticalChargeBonus(
         state,
         slot,
@@ -2399,7 +2500,7 @@
       const ownMove = state.moves?.[slot]?.[action.key];
       const ownIsOmni = isOmniGuardMove(state, slot, action.key);
 
-      if (isSmartDifficulty) {
+      if (isSmartDifficulty && !oppIsFainted) {
         if (ownIsOmni && enemyCanUseS) {
           tacticalRootBonus +=
             36 * enemySProb +
@@ -2450,11 +2551,11 @@
 
       /*
        * BEETLE (defensive) Two-Regime Evaluation:
-       * - Regime 1 (myChi < oppChi): Guard/OmniGuard priority bonus (1.35x for Guard trait),
+       * - Regime 1 (myChi < oppChi && !oppIsFainted): Guard/OmniGuard priority bonus (1.35x for Guard trait),
        *   50% A-skill CHI cost discount, IDLE/W recovery boost, 0.65x S/D attack restraint.
-       * - Regime 2 (myChi >= oppChi): Normal balanced-offensive evaluation.
+       * - Regime 2 (myChi >= oppChi || oppIsFainted): Normal balanced-offensive evaluation.
        */
-      if (isBeetle && myChi < oppChi) {
+      if (isBeetle && myChi < oppChi && !oppIsFainted) {
         const chiDeficit = Math.min(6, oppChi - myChi);
         if (isAGuardMove(state, slot, action.key)) {
           const rawGuardBonus =
@@ -2470,7 +2571,6 @@
           tacticalRootBonus += 20;
         } else if (
           (isSMove(state, slot, action.key) || isDMove(state, slot, action.key)) &&
-          !state[opponentSlot]?.isFainted &&
           oppLp > 220
         ) {
           if (baseMoveBonus > 0) {
@@ -2484,7 +2584,7 @@
        * BULLET ANT (master) State-Aware Tactical Shift (myLp > oppLp) & Anti-Spam:
        * Promotes W buffs, A guards, and low-CHI IDLE into the Top 4 when holding an LP lead.
        */
-      if (isBulletAnt) {
+      if (isBulletAnt && !oppIsFainted) {
         if (myLp > oppLp) {
           if (isWMove(state, slot, action.key)) {
             const buffId = ownMove?.buff?.id || action.key;
@@ -2503,7 +2603,6 @@
 
         if (
           (isSMove(state, slot, action.key) || isDMove(state, slot, action.key)) &&
-          !state[opponentSlot]?.isFainted &&
           (consecutiveSD >= 2 || myChi <= 3)
         ) {
           tacticalRootBonus -= 16 + 6 * Math.max(0, consecutiveSD - 1);
@@ -2566,23 +2665,10 @@
       rows.length > 1 &&
       !state.winner
     ) {
-      if (isRider) {
-        finalists = selectDiverseFinalists(rows, settings.finalists, advisedKeys);
-      } else if (isBeetle) {
+      if (isBeetle) {
         finalists = selectBeetleFinalists(rows, settings.finalists, state, slot);
       } else {
-        finalists = rows.slice(0, settings.finalists).map(row => ({ ...row }));
-        if (
-          isSmartDifficulty &&
-          enemyCanUseS &&
-          ownCanUseOmni &&
-          !finalists.some(r => isOmniGuardMove(state, slot, r.action.key))
-        ) {
-          const bestAIRow = rows.find(r => isOmniGuardMove(state, slot, r.action.key));
-          if (bestAIRow && finalists.length > 0) {
-            finalists[finalists.length - 1] = { ...bestAIRow };
-          }
-        }
+        finalists = selectDiverseFinalists(rows, settings.finalists, advisedKeys, state, slot);
       }
 
       const continuationSums = new Float64Array(finalists.length);
@@ -2652,6 +2738,9 @@
             depth < settings.horizon && !future.winner;
             depth++
           ) {
+            const futureOwnObs = observations(futureHistory, slot, future);
+            const futureEnemyObs = observations(futureHistory, opponentSlot, future);
+
             const ownPolicy = policy(
               future,
               slot,
@@ -2661,7 +2750,8 @@
               isSmartDifficulty,
               null,
               null,
-              true
+              true,
+              { own: futureOwnObs, other: futureEnemyObs }
             );
 
             const enemyPolicy = policy(
@@ -2673,7 +2763,8 @@
               isSmartDifficulty,
               null,
               null,
-              true
+              true,
+              { own: futureEnemyObs, other: futureOwnObs }
             );
 
             const ownNext = sample(

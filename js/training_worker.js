@@ -22,12 +22,15 @@ const MIXED_CPU_SEQUENCE = [
 const MIXED_ROUND_SPAN = 30;
 const MAX_WINS_PER_DIFF_OPP = 4;
 
-// Turbo scheduling constants: keep worker on-CPU ~99.8% of the time
-// and avoid spamming main-thread DOM/localStorage serialization
-const YIELD_INTERVAL_MS = 500;
-const PROGRESS_INTERVAL_MS = 2000;
-const CHECKPOINT_GAME_INTERVAL = 250;
-const CHECKPOINT_MIN_INTERVAL_MS = 30000;
+// Throttled checkpoint interval during active training (100% flushed at job end/stop)
+const CHECKPOINT_MIN_INTERVAL_MS = 5000;
+
+const MIXED_MODE_LABELS = {
+  easy: "mixed:tree-hopper",
+  balanced: "mixed:cricket",
+  defensive: "mixed:beetle",
+  master: "mixed:bullet-ant"
+};
 
 importScripts(...[
   "common.js",
@@ -291,7 +294,7 @@ function blendParameter(oldAvg, oldGames, newVal) {
 }
 
 function updateMatchParameters(params, prevTotalGames, metrics, wasdCounts, jkilCounts) {
-  const updated = SoulAgent.createDefaultMatchParameters(params);
+  const updated = params || SoulAgent.createDefaultMatchParameters();
   if (!metrics) return updated;
 
   updated.avgRounds = blendParameter(updated.avgRounds, prevTotalGames, metrics.rounds);
@@ -320,7 +323,8 @@ function updateMatchParameters(params, prevTotalGames, metrics, wasdCounts, jkil
     (wasdCounts.IDLE || 0)
   );
   for (const k of ["W", "A", "S", "D", "IDLE"]) {
-    updated.stanceDistribution[k] = Number(((wasdCounts[k] || 0) / stanceTotal).toFixed(4));
+    updated.stanceDistribution[k] =
+      Math.round(((wasdCounts[k] || 0) / stanceTotal) * 10000) / 10000;
   }
 
   const buttonTotal = Math.max(
@@ -332,7 +336,8 @@ function updateMatchParameters(params, prevTotalGames, metrics, wasdCounts, jkil
     (jkilCounts.NONE || 0)
   );
   for (const k of ["J", "K", "I", "L", "NONE"]) {
-    updated.buttonDistribution[k] = Number(((jkilCounts[k] || 0) / buttonTotal).toFixed(4));
+    updated.buttonDistribution[k] =
+      Math.round(((jkilCounts[k] || 0) / buttonTotal) * 10000) / 10000;
   }
 
   return updated;
@@ -344,6 +349,7 @@ async function run(job) {
   const training = job.kind === "train";
   const data = job.data;
   const spec = SoulEnv.makeSpec();
+  const hiddenSizes = spec.hidden.slice();
   const seed = job.seed >>> 0;
 
   const learnerRider = data.riders.find(
@@ -482,8 +488,6 @@ async function run(job) {
   }
 
   const started = performance.now();
-  let lastProgress = started;
-  let lastYield = started;
   let lastCheckpointSent = started;
 
   let games = 0;
@@ -501,7 +505,7 @@ async function run(job) {
 
   const breakdown = {};
   const firstWinningGames = [];
-  let lastReportedWinsCount = -1;
+  let lastReportedWinsCount = 0;
   const winCountsByDiffOpp = {};
 
   const wasdCounts = {
@@ -549,7 +553,7 @@ async function run(job) {
       evaluation: null,
       evaluated: false,
 
-      matchParameters: ctx.matchParameters,
+      matchParameters: SoulAgent.createDefaultMatchParameters(ctx.matchParameters),
 
       trainingTask: {
         opponentController: job.mode,
@@ -651,7 +655,7 @@ async function run(job) {
       }
     }
 
-    // Only send the heavy firstWinningGames array when a new demo win was added or at job end
+    // Only structured-clone the heavy firstWinningGames array when a new demo win was added or at job end
     const includeWinLogs =
       forceFullLogs || firstWinningGames.length !== lastReportedWinsCount;
     if (includeWinLogs) {
@@ -718,14 +722,15 @@ async function run(job) {
       mode: job.mode,
       effectiveOpponent,
       warmStart: job.warmStart,
-      hiddenSizes: ctx.net.sizes.slice(1, -1),
+      hiddenSizes,
       cancelled,
 
       matchParameters: ctx?.matchParameters || null,
-      matchupReports: buildMatchupEvaluationReports(seconds),
+      matchupReports: forceFullLogs ? buildMatchupEvaluationReports(seconds) : null,
 
       breakdown,
-      firstWinningGames,
+      firstWinningGames: includeWinLogs ? firstWinningGames : null,
+      firstWinningGamesCount: firstWinningGames.length,
 
       wasdRatio: {
         counts: { ...wasdCounts }
@@ -1025,40 +1030,31 @@ async function run(job) {
     if (ctx.recent.length > 30) ctx.recent.shift();
 
     const matchOpponentLabel = job.mode === "mixed"
-      ? `mixed:${
-          matchOpponentMode === "easy"
-            ? "tree-hopper"
-            : matchOpponentMode === "balanced"
-              ? "cricket"
-              : matchOpponentMode === "defensive"
-                ? "beetle"
-                : matchOpponentMode === "master"
-                  ? "bullet-ant"
-                  : matchOpponentMode
-        }`
+      ? (MIXED_MODE_LABELS[matchOpponentMode] || `mixed:${matchOpponentMode}`)
       : matchOpponentMode;
 
     const label =
       `${ctx.key} (${oppRider.id}) / ${matchOpponentLabel} / ${learnerSlot}`;
 
-    if (!breakdown[label]) {
-      breakdown[label] = {
+    let row = breakdown[label];
+    if (!row) {
+      row = {
         games: 0,
         wins: 0,
         losses: 0,
         draws: 0
       };
+      breakdown[label] = row;
     }
-    const row = breakdown[label];
 
     row.games++;
     row[outcome]++;
 
     const now = performance.now();
 
+    // Throttle heavy checkpoint serialization during live training
     if (
       training &&
-      ctx.games % CHECKPOINT_GAME_INTERVAL === 0 &&
       now - lastCheckpointSent >= CHECKPOINT_MIN_INTERVAL_MS
     ) {
       send("checkpoint", {
@@ -1067,15 +1063,9 @@ async function run(job) {
       lastCheckpointSent = performance.now();
     }
 
-    if (now - lastProgress >= PROGRESS_INTERVAL_MS) {
-      send("progress", { report: report(ctx, false) });
-      lastProgress = performance.now();
-    }
-
-    if (now - lastYield >= YIELD_INTERVAL_MS) {
-      await pause();
-      lastYield = performance.now();
-    }
+    // Update UI progress text once per match and yield briefly so messages flush
+    send("progress", { report: report(ctx, false) });
+    await pause();
   }
 
   if (training) {

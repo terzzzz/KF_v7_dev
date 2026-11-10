@@ -14,8 +14,8 @@
     "kf-state256-action17-v2-charge1-reset1";
 
   // Minimum interval (ms) between heavy localStorage writes during live training.
-  // Checkpoints are always buffered in RAM per match and 100% flushed on stop/done.
-  const CHECKPOINT_SAVE_THROTTLE_MS = 3000;
+  // Checkpoints are always buffered in RAM and 100% flushed on stop/done.
+  const CHECKPOINT_SAVE_THROTTLE_MS = 5000;
 
   let initialized = false;
 
@@ -498,8 +498,13 @@
       return value;
     }
 
-    function formatWinningGamesBlock(firstWinningGames) {
-      if (!Array.isArray(firstWinningGames) || firstWinningGames.length === 0) {
+    function formatWinningGamesBlock(firstWinningGames, firstWinningGamesCount = 0) {
+      // If the worker omitted unchanged win logs on an intermediate tick, reuse cached block
+      if (!Array.isArray(firstWinningGames)) {
+        return firstWinningGamesCount > 0 ? cachedWinsBlock : "";
+      }
+
+      if (firstWinningGames.length === 0) {
         return "";
       }
 
@@ -723,7 +728,10 @@
         );
       }
 
-      const winsBlock = formatWinningGamesBlock(report.firstWinningGames);
+      const winsBlock = formatWinningGamesBlock(
+        report.firstWinningGames,
+        report.firstWinningGamesCount
+      );
       if (winsBlock) {
         lines.push(winsBlock);
       }
@@ -1290,4 +1298,4 @@
   } else {
     launch();
   }
-})(window);
+})(window);  

@@ -13,7 +13,7 @@
  *   - Deterministic seeded action selection.
  *   - Evaluation without guidance or training exploration.
  *   - Reverse-matchup opponent networks only.
- *   - Cooperative yield points for training_worker.js.
+ *   - Fast-path round resolution & observation reuse for training_worker.js.
  *
  * Build: v5-state256-action17
  */
@@ -26,6 +26,36 @@
   const N = g.SoulNN;
   const C = g.CombatCore;
   const K = g.KF;
+
+  // Cache static S-move metadata per rider moveset object to avoid Object.entries() in hot loops
+  const MOVESET_S_CACHE = new WeakMap();
+
+  function getSMoveMeta(movesForSlot) {
+    if (!movesForSlot || typeof movesForSlot !== "object") {
+      return { minCost: 4, sMoves: [] };
+    }
+    let meta = MOVESET_S_CACHE.get(movesForSlot);
+    if (!meta) {
+      let minCost = Infinity;
+      const sMoves = [];
+      for (const [key, move] of Object.entries(movesForSlot)) {
+        if (!move) continue;
+        if (move.direction === "S" || key.startsWith("S+")) {
+          sMoves.push({ key, move, direction: move.direction });
+          const cost = Number(move.chiCost);
+          if (Number.isFinite(cost) && cost > 0 && cost < minCost) {
+            minCost = cost;
+          }
+        }
+      }
+      meta = {
+        minCost: Number.isFinite(minCost) ? minCost : 4,
+        sMoves
+      };
+      MOVESET_S_CACHE.set(movesForSlot, meta);
+    }
+    return meta;
+  }
 
   function getAI() {
     const ai = g.KF_AI;
@@ -170,24 +200,33 @@
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 83 && key.charCodeAt(1) === 43) {
+      return true; // Fast path for "S+..."
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "S" || key.startsWith("S+");
+    return move?.direction === "S";
   }
 
   function isAGuardKey(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 65 && key.charCodeAt(1) === 43) {
+      return true; // Fast path for "A+..."
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "A" || key.startsWith("A+");
+    return move?.direction === "A";
   }
 
   function isWKey(state, slot, key) {
     if (!key || typeof key !== "string") {
       return false;
     }
+    if (key.charCodeAt(0) === 87 && key.charCodeAt(1) === 43) {
+      return true; // Fast path for "W+..."
+    }
     const move = state?.moves?.[slot]?.[key];
-    return move?.direction === "W" || key.startsWith("W+");
+    return move?.direction === "W";
   }
 
   function minSChiCost(state, slot) {
@@ -195,17 +234,7 @@
     if (!moves) {
       return 4;
     }
-    let minCost = Infinity;
-    for (const [key, move] of Object.entries(moves)) {
-      if (!move) continue;
-      if (move.direction === "S" || key.startsWith("S+")) {
-        const cost = Number(move.chiCost);
-        if (Number.isFinite(cost) && cost > 0 && cost < minCost) {
-          minCost = cost;
-        }
-      }
-    }
-    return Number.isFinite(minCost) ? minCost : 4;
+    return getSMoveMeta(moves).minCost;
   }
 
   function randChargePlus1To12(rng = Math.random) {
@@ -231,11 +260,14 @@
     if (!player || !buffId || !Array.isArray(player.activeBuffs)) {
       return null;
     }
-    return (
-      player.activeBuffs.find(
-        b => b && b.id === buffId && Number(b.roundsLeft) > 0
-      ) || null
-    );
+    const buffs = player.activeBuffs;
+    for (let i = 0; i < buffs.length; i++) {
+      const b = buffs[i];
+      if (b && b.id === buffId && Number(b.roundsLeft) > 0) {
+        return b;
+      }
+    }
+    return null;
   }
 
   /**
@@ -290,20 +322,27 @@
   }
 
   function canSlotUseSMove(state, slot) {
-    if (!state || !state[slot] || state[slot].isFainted) {
+    const fighter = state?.[slot];
+    if (!fighter || fighter.isFainted) {
       return false;
     }
     const moves = state.moves?.[slot];
     if (!moves) {
       return false;
     }
-    for (const [key, move] of Object.entries(moves)) {
-      if (!move) continue;
-      if (move.direction === "S" || key.startsWith("S+")) {
-        const chg = C.maxCharge(state[slot], move.direction);
-        if (Number.isFinite(chg) && chg >= 1 && C.isLegal(state, slot, { key, charge: chg })) {
-          return true;
-        }
+    const { minCost, sMoves } = getSMoveMeta(moves);
+    if (Number(fighter.chi || 0) < minCost) {
+      return false;
+    }
+    for (let i = 0; i < sMoves.length; i++) {
+      const item = sMoves[i];
+      const chg = C.maxCharge(fighter, item.direction);
+      if (
+        Number.isFinite(chg) &&
+        chg >= 1 &&
+        C.isLegal(state, slot, { key: item.key, charge: chg })
+      ) {
+        return true;
       }
     }
     return false;
@@ -314,64 +353,73 @@
       return 0;
     }
 
+    const buffs = player.activeBuffs;
+    const airTicks = Number(player.airborneTicks || 0);
+    if ((!buffs || buffs.length === 0) && airTicks <= 0) {
+      return 0;
+    }
+
     const maxLp = Math.max(1, Number(player.maxLp || 1600));
     const missingLp = Math.max(0, maxLp - Number(player.lp || 0));
     const missingRatio = K.clamp(missingLp / maxLp, 0, 1);
 
     let score = 0;
 
-    for (const buff of player.activeBuffs || []) {
-      const rounds = Math.max(0, Math.min(4, Number(buff.roundsLeft || 0)));
-      if (rounds <= 0) continue;
+    if (buffs) {
+      for (let i = 0; i < buffs.length; i++) {
+        const buff = buffs[i];
+        const rounds = Math.max(0, Math.min(4, Number(buff.roundsLeft || 0)));
+        if (rounds <= 0) continue;
 
-      const eff = buff.effects || {};
-      const durationWeight = 0.55 + 0.25 * rounds;
+        const eff = buff.effects || {};
+        const durationWeight = 0.55 + 0.25 * rounds;
 
-      if (Number(eff.evasion) > 0) {
-        score += Number(eff.evasion) * 1.15 * durationWeight;
-      }
+        if (Number(eff.evasion) > 0) {
+          score += Number(eff.evasion) * 1.15 * durationWeight;
+        }
 
-      const lpRegen = Number(buff.lpRegen ?? eff.lpRegen ?? 0);
-      if (lpRegen > 0) {
-        const expectedHeal = Math.min(
-          missingLp + 120,
-          lpRegen * rounds
-        );
-        const healScale = 0.35 + 0.65 * missingRatio;
-        score += (expectedHeal / maxLp) * 1.35 * healScale;
-      }
+        const lpRegen = Number(buff.lpRegen ?? eff.lpRegen ?? 0);
+        if (lpRegen > 0) {
+          const expectedHeal = Math.min(
+            missingLp + 120,
+            lpRegen * rounds
+          );
+          const healScale = 0.35 + 0.65 * missingRatio;
+          score += (expectedHeal / maxLp) * 1.35 * healScale;
+        }
 
-      const lpBleed = Number(buff.lpBleed ?? eff.lpBleed ?? 0);
-      if (lpBleed > 0) {
-        const expectedBleed = lpBleed * rounds;
-        score -= (expectedBleed / maxLp) * 1.35;
-      }
+        const lpBleed = Number(buff.lpBleed ?? eff.lpBleed ?? 0);
+        if (lpBleed > 0) {
+          const expectedBleed = lpBleed * rounds;
+          score -= (expectedBleed / maxLp) * 1.35;
+        }
 
-      if (Number(eff.attack) > 1) {
-        score += (Number(eff.attack) - 1) * 0.75 * durationWeight;
-      }
-      if (Number(eff.dAttack) > 1) {
-        score += (Number(eff.dAttack) - 1) * 0.65 * durationWeight;
-      }
-      if (Number(eff.sAttack) > 1) {
-        score += (Number(eff.sAttack) - 1) * 0.65 * durationWeight;
-      }
+        if (Number(eff.attack) > 1) {
+          score += (Number(eff.attack) - 1) * 0.75 * durationWeight;
+        }
+        if (Number(eff.dAttack) > 1) {
+          score += (Number(eff.dAttack) - 1) * 0.65 * durationWeight;
+        }
+        if (Number(eff.sAttack) > 1) {
+          score += (Number(eff.sAttack) - 1) * 0.65 * durationWeight;
+        }
 
-      if (eff.armor !== undefined && Number(eff.armor) < 1) {
-        score += (1 - Number(eff.armor)) * 0.85 * durationWeight;
-      }
+        if (eff.armor !== undefined && Number(eff.armor) < 1) {
+          score += (1 - Number(eff.armor)) * 0.85 * durationWeight;
+        }
 
-      if (eff.speed !== undefined && Number(eff.speed) !== 1) {
-        score += (Number(eff.speed) - 1) * 0.60 * durationWeight;
-      }
+        if (eff.speed !== undefined && Number(eff.speed) !== 1) {
+          score += (Number(eff.speed) - 1) * 0.60 * durationWeight;
+        }
 
-      if (Number(eff.accuracy) > 0) {
-        score += (Number(eff.accuracy) / 100) * 0.55 * durationWeight;
+        if (Number(eff.accuracy) > 0) {
+          score += (Number(eff.accuracy) / 100) * 0.55 * durationWeight;
+        }
       }
     }
 
-    if (Number(player.airborneTicks) > 0) {
-      score += 0.14 * Math.min(2, Number(player.airborneTicks));
+    if (airTicks > 0) {
+      score += 0.14 * Math.min(2, airTicks);
     }
 
     return K.clamp(score, -1, 1);
@@ -451,32 +499,47 @@
       return 0;
     }
 
+    const beforeBuffs = beforePlayer.activeBuffs;
+    const afterBuffs = afterPlayer.activeBuffs;
+    if (
+      (!beforeBuffs || beforeBuffs.length === 0) &&
+      (!afterBuffs || afterBuffs.length === 0)
+    ) {
+      return 0;
+    }
+
     let periodicDelta = 0;
 
-    for (const afterBuff of afterPlayer.activeBuffs || []) {
-      const regen = Number(afterBuff.lpRegen ?? afterBuff.effects?.lpRegen ?? 0);
-      const bleed = Number(afterBuff.lpBleed ?? afterBuff.effects?.lpBleed ?? 0);
-      if (regen <= 0 && bleed <= 0) continue;
+    if (afterBuffs) {
+      for (let i = 0; i < afterBuffs.length; i++) {
+        const afterBuff = afterBuffs[i];
+        const regen = Number(afterBuff.lpRegen ?? afterBuff.effects?.lpRegen ?? 0);
+        const bleed = Number(afterBuff.lpBleed ?? afterBuff.effects?.lpBleed ?? 0);
+        if (regen <= 0 && bleed <= 0) continue;
 
-      const matchedBefore = (beforePlayer.activeBuffs || []).find(
-        b => b.id === afterBuff.id && Number(b.roundsLeft) > Number(afterBuff.roundsLeft)
-      );
-      if (matchedBefore) {
-        periodicDelta += regen - bleed;
+        const matchedBefore = beforeBuffs?.find(
+          b => b.id === afterBuff.id && Number(b.roundsLeft) > Number(afterBuff.roundsLeft)
+        );
+        if (matchedBefore) {
+          periodicDelta += regen - bleed;
+        }
       }
     }
 
-    for (const beforeBuff of beforePlayer.activeBuffs || []) {
-      if (Number(beforeBuff.roundsLeft) !== 1) continue;
-      const regen = Number(beforeBuff.lpRegen ?? beforeBuff.effects?.lpRegen ?? 0);
-      const bleed = Number(beforeBuff.lpBleed ?? beforeBuff.effects?.lpBleed ?? 0);
-      if (regen <= 0 && bleed <= 0) continue;
+    if (beforeBuffs) {
+      for (let i = 0; i < beforeBuffs.length; i++) {
+        const beforeBuff = beforeBuffs[i];
+        if (Number(beforeBuff.roundsLeft) !== 1) continue;
+        const regen = Number(beforeBuff.lpRegen ?? beforeBuff.effects?.lpRegen ?? 0);
+        const bleed = Number(beforeBuff.lpBleed ?? beforeBuff.effects?.lpBleed ?? 0);
+        if (regen <= 0 && bleed <= 0) continue;
 
-      const stillPresent = (afterPlayer.activeBuffs || []).some(
-        b => b.id === beforeBuff.id
-      );
-      if (!stillPresent) {
-        periodicDelta += regen - bleed;
+        const stillPresent = afterBuffs?.some(
+          b => b.id === beforeBuff.id
+        );
+        if (!stillPresent) {
+          periodicDelta += regen - bleed;
+        }
       }
     }
 
@@ -591,12 +654,6 @@
     const ownBefore = before[learnerSlot];
     const enemyBefore = before[enemySlot];
 
-    const ownPeriodic = estimatePeriodicLpDelta(ownBefore, ownAfter);
-    const tookDirectDamage = (ownBefore.lp + ownPeriodic) - ownAfter.lp > 1;
-    if (tookDirectDamage && move.buff?.cancelOnLpDamage) {
-      return null;
-    }
-
     const debuffSpec = move.debuff || move.targetDebuff;
     const eff = move.buff?.effects || {};
     const evasionBoost = Number(eff.evasion || 0);
@@ -626,6 +683,12 @@
       grantsAirborne;
 
     if (!hasBuffEffect) {
+      return null;
+    }
+
+    const ownPeriodic = estimatePeriodicLpDelta(ownBefore, ownAfter);
+    const tookDirectDamage = (ownBefore.lp + ownPeriodic) - ownAfter.lp > 1;
+    if (tookDirectDamage && move.buff?.cancelOnLpDamage) {
       return null;
     }
 
@@ -691,7 +754,8 @@
     before,
     after,
     learnerSlot,
-    actions
+    actions,
+    precomputedEvadedScore = null
   ) {
     if (!pendingWindow || pendingWindow.length === 0) {
       return;
@@ -699,8 +763,36 @@
 
     const enemySlot = C.other(learnerSlot);
     const ownBefore = before[learnerSlot];
-    const ownAfter = after[learnerSlot];
     const enemyBefore = before[enemySlot];
+
+    // Deduplicate by buffId FIRST before doing any LP/evasion math
+    const byBuffKey = new Map();
+    for (let i = 0; i < pendingWindow.length; i++) {
+      const entry = pendingWindow[i];
+      if (!entry.buffMeta || entry.buffMeta.roundsRemaining <= 0) {
+        continue;
+      }
+
+      const meta = entry.buffMeta;
+      const stillHasOwnBuff =
+        (ownBefore.activeBuffs || []).some(b => b.id === meta.buffId && b.roundsLeft > 0) ||
+        (Number(ownBefore.airborneTicks) > 0 && meta.evasionBoost > 0);
+      const stillHasEnemyDebuff =
+        meta.lpBleed > 0 &&
+        (enemyBefore.activeBuffs || []).some(b => b.id === meta.debuffId && b.roundsLeft > 0);
+
+      if (stillHasOwnBuff || stillHasEnemyDebuff) {
+        const dedupKey = `${meta.buffId || ""}|${meta.debuffId || ""}`;
+        byBuffKey.set(dedupKey, entry);
+      }
+    }
+
+    if (byBuffKey.size === 0) {
+      return;
+    }
+
+    const activeEntries = Array.from(byBuffKey.values());
+    const ownAfter = after[learnerSlot];
     const enemyAfter = after[enemySlot];
 
     const ownMaxLp = Math.max(1, Number(ownBefore.maxLp || 1600));
@@ -722,34 +814,10 @@
     const ownMove = before.moves?.[learnerSlot]?.[ownActionKey];
     const ownMoveDir = ownMove?.direction || "";
 
-    const evadedScore = detectEvadedAttack(before, after, learnerSlot, actions);
-
-    // Deduplicate by buffId (keeping only the latest cast entry) so same-ID buffs
-    // can never stack in credit assignment, matching CombatCore.applyBuff().
-    const byBuffKey = new Map();
-    for (const entry of pendingWindow) {
-      if (!entry.buffMeta || entry.buffMeta.roundsRemaining <= 0) {
-        continue;
-      }
-
-      const meta = entry.buffMeta;
-      const stillHasOwnBuff =
-        (ownBefore.activeBuffs || []).some(b => b.id === meta.buffId && b.roundsLeft > 0) ||
-        (Number(ownBefore.airborneTicks) > 0 && meta.evasionBoost > 0);
-      const stillHasEnemyDebuff =
-        meta.lpBleed > 0 &&
-        (enemyBefore.activeBuffs || []).some(b => b.id === meta.debuffId && b.roundsLeft > 0);
-
-      if (stillHasOwnBuff || stillHasEnemyDebuff) {
-        const dedupKey = `${meta.buffId || ""}|${meta.debuffId || ""}`;
-        byBuffKey.set(dedupKey, entry);
-      }
-    }
-
-    const activeEntries = Array.from(byBuffKey.values());
-    if (activeEntries.length === 0) {
-      return;
-    }
+    const evadedScore =
+      precomputedEvadedScore !== null
+        ? precomputedEvadedScore
+        : detectEvadedAttack(before, after, learnerSlot, actions);
 
     if (directDamageDealt > 1 && ownMove?.offensive) {
       let totalAttackBonus = 0;
@@ -1270,7 +1338,7 @@
     }
 
     return {
-      decide(env, slot) {
+      decide(env, slot, precomputedState = null) {
         assertSlot(slot);
 
         if (env.state.winner) {
@@ -1280,7 +1348,7 @@
         const history = options.history ?? env.history ?? [];
         env.history = history;
 
-        const { s, m } = readState(env, slot, spec);
+        const { s, m } = precomputedState || readState(env, slot, spec);
         const q = net ? predictValues(net, s, spec) : null;
 
         let action;
@@ -1435,7 +1503,14 @@
     };
   }
 
-  function calculateReward(before, after, slot, mode = "standard", actions = null) {
+  function calculateReward(
+    before,
+    after,
+    slot,
+    mode = "standard",
+    actions = null,
+    precomputed = null
+  ) {
     assertSlot(slot);
 
     const enemySlot = C.other(slot);
@@ -1490,8 +1565,16 @@
         }
       }
 
-      const rawStatusDelta =
-        statusPotential(after, slot) - statusPotential(before, slot);
+      const beforeStatus =
+        precomputed && Number.isFinite(precomputed.beforeStatus)
+          ? precomputed.beforeStatus
+          : statusPotential(before, slot);
+      const afterStatus =
+        precomputed && Number.isFinite(precomputed.afterStatus)
+          ? precomputed.afterStatus
+          : statusPotential(after, slot);
+
+      const rawStatusDelta = afterStatus - beforeStatus;
 
       const redundantBuff = getRedundantActiveBuff(before, slot, ownKey);
       const activeMods = C.modifiers(before[slot]);
@@ -1522,13 +1605,24 @@
 
       reward += 0.30 * effectiveStatusDelta;
 
-      const ownEvadedScore = detectEvadedAttack(before, after, slot, actions);
+      const ownEvadedScore =
+        precomputed && Number.isFinite(precomputed.ownEvadedScore)
+          ? precomputed.ownEvadedScore
+          : detectEvadedAttack(before, after, slot, actions);
       const enemyEvadedScore = detectEvadedAttack(before, after, enemySlot, actions);
 
       reward += 0.65 * ownEvadedScore - 0.35 * enemyEvadedScore;
 
-      const doomedDelta =
-        doomedPotential(after, slot) - doomedPotential(before, slot);
+      const beforeDoomed =
+        precomputed && Number.isFinite(precomputed.beforeDoomed)
+          ? precomputed.beforeDoomed
+          : doomedPotential(before, slot);
+      const afterDoomed =
+        precomputed && Number.isFinite(precomputed.afterDoomed)
+          ? precomputed.afterDoomed
+          : doomedPotential(after, slot);
+
+      const doomedDelta = afterDoomed - beforeDoomed;
 
       reward += 0.22 * doomedDelta;
 
@@ -1583,7 +1677,8 @@
       initialStateOverride = null,
       learnerMode = "network",
       distillRider = false,
-      isEvaluation = false
+      isEvaluation = false,
+      stepChargeClock = false
     } = options;
 
     assertSlot(learnerSlot);
@@ -1705,14 +1800,19 @@
     const BUFF_CREDIT_WINDOW = 3;
     const pendingWindow = [];
 
+    // Reuse learner observation/mask and potentials across consecutive rounds
+    let cachedLearnerObs = null;
+    let cachedStatusPotential =
+      rewardMode === "standard" ? statusPotential(state, learnerSlot) : 0;
+    let cachedDoomedPotential =
+      rewardMode === "standard" ? doomedPotential(state, learnerSlot) : 0;
+
     while (!state.winner) {
       if (rounds > maxRounds + 1) {
         throw new Error(
           "CombatCore failed to terminate at its round limit."
         );
       }
-
-      yield { type: "clock" };
 
       const env = E.create(state);
       env.history = history;
@@ -1721,6 +1821,7 @@
 
       const guided =
         !isEvaluation &&
+        guideProbability > 0 &&
         choices() < guideProbability;
 
       const controller = reactor(
@@ -1740,15 +1841,13 @@
         }
       );
 
-      const decision = controller.decide(env, learnerSlot);
+      const decision = controller.decide(env, learnerSlot, cachedLearnerObs);
 
       if (!decision) {
         throw new Error(
           "Learner returned no decision for an active match."
         );
       }
-
-      yield { type: "clock" };
 
       let opposingAction;
 
@@ -1821,8 +1920,6 @@
         "Opponent planner"
       );
 
-      yield { type: "clock" };
-
       const before = C.copyState(state);
 
       const selected = {
@@ -1830,46 +1927,50 @@
         [enemySlot]: opposingAction
       };
 
-      const actors = {
-        p1: E.planned(selected.p1),
-        p2: E.planned(selected.p2)
-      };
+      let executed = selected;
 
-      while (!env.done) {
-        const inputs = {
-          p1: actors.p1(env, "p1"),
-          p2: actors.p2(env, "p2")
+      if (stepChargeClock) {
+        const actors = {
+          p1: E.planned(selected.p1),
+          p2: E.planned(selected.p2)
         };
 
-        const previousTime = env.t;
-        const rejected = E.step(env, inputs);
+        while (!env.done) {
+          const inputs = {
+            p1: actors.p1(env, "p1"),
+            p2: actors.p2(env, "p2")
+          };
 
-        if (rejected.length) {
-          throw new Error(
-            "Simulation controller produced a rejected charging input."
-          );
+          const previousTime = env.t;
+          const rejected = E.step(env, inputs);
+
+          if (rejected.length) {
+            throw new Error(
+              "Simulation controller produced a rejected charging input."
+            );
+          }
+
+          if (!env.done && env.t <= previousTime) {
+            throw new Error(
+              "Simulation charging clock failed to advance."
+            );
+          }
+
+          yield { type: "clock" };
         }
 
-        if (!env.done && env.t <= previousTime) {
-          throw new Error(
-            "Simulation charging clock failed to advance."
-          );
-        }
+        executed = E.actions(env);
 
-        yield { type: "clock" };
-      }
-
-      const executed = E.actions(env);
-
-      for (const slot of ["p1", "p2"]) {
-        if (
-          executed[slot].key !== selected[slot].key ||
-          executed[slot].charge !== selected[slot].charge
-        ) {
-          throw new Error(
-            "Planned/executed action mismatch for " + slot +
-            ". Refusing to create a mislabeled replay transition."
-          );
+        for (const slot of ["p1", "p2"]) {
+          if (
+            executed[slot].key !== selected[slot].key ||
+            executed[slot].charge !== selected[slot].charge
+          ) {
+            throw new Error(
+              "Planned/executed action mismatch for " + slot +
+              ". Refusing to create a mislabeled replay transition."
+            );
+          }
         }
       }
 
@@ -1904,6 +2005,7 @@
       nextEnv.history = history;
 
       const next = readState(nextEnv, learnerSlot, spec, done);
+      cachedLearnerObs = done ? null : next;
 
       const resolvedAction = result.actions[learnerSlot];
       const resolvedEnemyAction = result.actions[enemySlot];
@@ -1971,18 +2073,26 @@
         enemyOffensiveCount++;
       }
 
+      // Compute ownEvadedScore once per round and share across buff payoffs, telemetry, and reward
+      const ownEvadedScore = detectEvadedAttack(
+        before,
+        state,
+        learnerSlot,
+        result.actions
+      );
+
       if (rewardMode === "standard") {
         attributeRealizedBuffPayoffs(
           pendingWindow,
           before,
           state,
           learnerSlot,
-          result.actions
+          result.actions,
+          ownEvadedScore
         );
       }
 
-      const evadedEnemyAttack =
-        detectEvadedAttack(before, state, learnerSlot, result.actions) > 0;
+      const evadedEnemyAttack = ownEvadedScore > 0;
 
       if (evadedEnemyAttack) {
         evasionTriggers++;
@@ -2059,19 +2169,45 @@
         healedLpThisTurn ||
         Boolean(buffMeta);
 
+      let roundReward;
+      if (rewardMode === "standard") {
+        const nextStatusPotential = statusPotential(state, learnerSlot);
+        const nextDoomedPotential = doomedPotential(state, learnerSlot);
+
+        roundReward = calculateReward(
+          before,
+          state,
+          learnerSlot,
+          rewardMode,
+          result.actions,
+          {
+            beforeStatus: cachedStatusPotential,
+            afterStatus: nextStatusPotential,
+            beforeDoomed: cachedDoomedPotential,
+            afterDoomed: nextDoomedPotential,
+            ownEvadedScore
+          }
+        );
+
+        cachedStatusPotential = nextStatusPotential;
+        cachedDoomedPotential = nextDoomedPotential;
+      } else {
+        roundReward = calculateReward(
+          before,
+          state,
+          learnerSlot,
+          rewardMode,
+          result.actions
+        );
+      }
+
       const transitionObj = {
         s: decision.s,
         a: decision.a,
         m: decision.m,
         s1: next.s,
         m1: next.m,
-        r: calculateReward(
-          before,
-          state,
-          learnerSlot,
-          rewardMode,
-          result.actions
-        ),
+        r: roundReward,
         discount: done ? 0 : E.GAMMA,
         done,
         demo: decision.demo,

@@ -594,27 +594,56 @@
 
       g.syncAll49MatricesToDrive = async function () {
         const status = document.getElementById("matrix49-sync-status");
-        if (status) status.textContent = "Syncing 49 matrices to Google Drive…";
         g.initAll49MatchupMatrices();
-        const results = await g.MatchupPool.saveAllActiveToGoogleDrive();
+
+        const results = [];
+        let count = 0;
+        let savedCount = 0;
+
+        for (let rA = 0; rA < 7; rA++) {
+          for (let rB = 0; rB < 7; rB++) {
+            count++;
+            const key = `r${rA}_vs_r${rB}`;
+            if (status) {
+              status.textContent = `Syncing ${count} / 49 (${key}) to Google Drive…`;
+            }
+            try {
+              const res = await g.MatchupPool.saveMatchup(rA, rB);
+              const ok = Boolean(res);
+              if (ok) savedCount++;
+              results.push({ key, saved: ok, result: res });
+            } catch (err) {
+              console.error(`Failed syncing ${key}:`, err);
+              results.push({ key, saved: false, error: err });
+            }
+          }
+        }
+
         render49Grid();
         if (status) {
-          status.textContent = `Synced ${results.length} / 49 matrices (Folder: 15P5HeKqLxMYw3ykirJj2HMT726SZnkId).`;
+          status.textContent = `Synced ${savedCount} / 49 matrices (Folder: 15P5HeKqLxMYw3ykirJj2HMT726SZnkId).`;
         }
         return results;
       };
 
       g.loadAll49MatricesFromDrive = async function () {
         const status = document.getElementById("matrix49-sync-status");
-        if (status) status.textContent = "Loading 49 matrices from Google Drive / cache…";
         const mode = g.SoulEnv?.getExecutionMode?.() || "train";
+        let count = 0;
         let loaded = 0;
+
         for (let rA = 0; rA < 7; rA++) {
           for (let rB = 0; rB < 7; rB++) {
+            count++;
+            const key = `r${rA}_vs_r${rB}`;
+            if (status) {
+              status.textContent = `Loading ${count} / 49 (${key}) from Google Drive / cache…`;
+            }
             const learner = await g.MatchupPool.getMatchupLearner(rA, rB, mode, 1 + rA * 7 + rB);
             if (learner) loaded++;
           }
         }
+
         render49Grid();
         if (status) {
           status.textContent = `Loaded ${loaded} / 49 matrices ready for ${mode.toUpperCase()}.`;

@@ -13,6 +13,10 @@
   const EXPECTED_SCHEMA =
     "kf-state256-action17-v2-charge1-reset1";
 
+  // Minimum interval (ms) between heavy localStorage writes during live training.
+  // Checkpoints are always buffered in RAM per match and 100% flushed on stop/done.
+  const CHECKPOINT_SAVE_THROTTLE_MS = 3000;
+
   let initialized = false;
 
   async function initialize() {
@@ -258,13 +262,29 @@
     const button = name =>
       host.querySelector(`[data-action="${name}"]`);
 
+    const outputEl = field("output");
+    const statusEl = field("status");
+    const allButtons = Array.from(host.querySelectorAll("button"));
+    const allInputs = Array.from(
+      host.querySelectorAll("select, input:not([type=file])")
+    );
+
     let data = null;
     let busy = false;
     let worker = null;
     let stopping = false;
 
+    // Cache for static "First 4 Winning Games" move logs so we don't rebuild
+    // 400+ lines of string formatting on every single match update.
+    let cachedWinsKey = "";
+    let cachedWinsBlock = "";
+
+    // In-memory checkpoint buffer for throttled persistence
+    const pendingCheckpoints = new Map();
+    let lastCheckpointSaveTime = 0;
+
     function output(text) {
-      field("output").textContent = text;
+      outputEl.textContent = text;
     }
 
     function pair() {
@@ -274,7 +294,29 @@
       };
     }
 
-    function refresh() {
+    function flushPendingCheckpoints(selectedLearner) {
+      if (pendingCheckpoints.size === 0) return false;
+
+      for (const cp of pendingCheckpoints.values()) {
+        const validation = g.SoulAgent.validateCheckpoint(
+          cp,
+          cp?.learnerId || selectedLearner,
+          cp?.opponentId
+        );
+
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+
+        g.SoulAgent.setCandidate(cp);
+      }
+
+      pendingCheckpoints.clear();
+      lastCheckpointSaveTime = performance.now();
+      return true;
+    }
+
+    function refreshStatusOnly() {
       const selected = pair();
       const agent = g.SoulAgent;
       const isMulti = selected.opponent === "*";
@@ -369,15 +411,33 @@
         }
       }
 
-      field("status").textContent = lines.join("\n");
+      statusEl.textContent = lines.join("\n");
 
-      host.querySelectorAll("button").forEach(element => {
+      return {
+        isMulti,
+        candidate,
+        active,
+        learnerCandidateMap,
+        candCount,
+        actCount
+      };
+    }
+
+    function refresh() {
+      const {
+        isMulti,
+        candidate,
+        active,
+        learnerCandidateMap,
+        candCount,
+        actCount
+      } = refreshStatusOnly();
+
+      allButtons.forEach(element => {
         element.disabled = busy || !data;
       });
 
-      host.querySelectorAll(
-        "select, input:not([type=file])"
-      ).forEach(element => {
+      allInputs.forEach(element => {
         element.disabled = busy || !data;
       });
 
@@ -436,6 +496,94 @@
       }
 
       return value;
+    }
+
+    function formatWinningGamesBlock(firstWinningGames) {
+      if (!Array.isArray(firstWinningGames) || firstWinningGames.length === 0) {
+        return "";
+      }
+
+      const lastGame = firstWinningGames[firstWinningGames.length - 1];
+      const signature = `${firstWinningGames.length}:${lastGame?.gameNumber ?? 0}:${lastGame?.matchupKey ?? ""}:${lastGame?.difficulty ?? ""}`;
+
+      if (signature === cachedWinsKey && cachedWinsBlock) {
+        return cachedWinsBlock;
+      }
+
+      const winLines = [
+        "",
+        "======================================================================",
+        "FIRST 4 WINNING GAMES PER DIFFICULTY & PER OPPONENT — MOVE SEQUENCES",
+        "======================================================================"
+      ];
+
+      const groupedWins = new Map();
+
+      for (const game of firstWinningGames) {
+        const mKey = game.matchupKey || "UNKNOWN_MATCHUP";
+        const diffKey = game.difficulty || "default";
+        const groupKey = `${mKey}|${diffKey}`;
+
+        if (!groupedWins.has(groupKey)) {
+          groupedWins.set(groupKey, {
+            matchupKey: mKey,
+            opponentId: game.opponentId || "",
+            opponentName: game.opponentName || game.opponentId || "",
+            difficulty: diffKey,
+            difficultyLabel: game.difficultyLabel || diffKey,
+            games: []
+          });
+        }
+
+        groupedWins.get(groupKey).games.push(game);
+      }
+
+      for (const group of groupedWins.values()) {
+        const oppHeader = group.opponentName
+          ? `${group.matchupKey} (vs ${group.opponentName})`
+          : group.matchupKey;
+
+        winLines.push(
+          "",
+          `=== [ ${oppHeader} | Difficulty: ${group.difficultyLabel} ] (${group.games.length} / 4 Wins) ===`
+        );
+
+        group.games.forEach((game, idx) => {
+          const winRank = game.bucketWinIndex || (idx + 1);
+          const maxRank = game.bucketMaxWins || 4;
+          const gameNum = game.gameNumber || (idx + 1);
+          const totalRounds = game.totalRounds || game.moves?.length || 0;
+          const slotTag = game.learnerSlot ? `, Slot: ${game.learnerSlot}` : "";
+
+          winLines.push(
+            "",
+            `--- WIN #${winRank}/${maxRank} [${group.matchupKey} | ${group.difficultyLabel}] (Match #${gameNum}${slotTag}, ${totalRounds} Rounds) ---`
+          );
+
+          if (Array.isArray(game.moves) && game.moves.length > 0) {
+            game.moves.forEach(m => {
+              const rNum = String(m.round || "").padStart(2);
+              const lAction = String(m.learnerMove || "DO_NOTHING").padEnd(10);
+              const lCharge = String(m.learnerCharge ?? 0).padStart(3) + "%";
+              const lLp = m.learnerLp !== undefined
+                ? ` (LP:${String(m.learnerLp).padStart(4)} Chi:${String(m.learnerChi).padStart(2)} Fnt:${String(m.learnerFaint).padStart(2)})`
+                : "";
+
+              const oAction = String(m.oppMove || "DO_NOTHING").padEnd(10);
+              const oCharge = String(m.oppCharge ?? 0).padStart(3) + "%";
+              const oLp = m.oppLp !== undefined
+                ? ` (LP:${String(m.oppLp).padStart(4)} Chi:${String(m.oppChi).padStart(2)} Fnt:${String(m.oppFaint).padStart(2)})`
+                : "";
+
+              winLines.push(`  R${rNum}: Learner [ ${lAction} @ ${lCharge} ]${lLp} vs Opponent [ ${oAction} @ ${oCharge} ]${oLp}`);
+            });
+          }
+        });
+      }
+
+      cachedWinsKey = signature;
+      cachedWinsBlock = winLines.join("\n");
+      return cachedWinsBlock;
     }
 
     function formatReport(report) {
@@ -575,78 +723,9 @@
         );
       }
 
-      if (Array.isArray(report.firstWinningGames) && report.firstWinningGames.length > 0) {
-        lines.push(
-          "",
-          "======================================================================",
-          "FIRST 4 WINNING GAMES PER DIFFICULTY & PER OPPONENT — MOVE SEQUENCES",
-          "======================================================================"
-        );
-
-        // Group wins by (Matchup / Opponent) + Difficulty while preserving discovery order
-        const groupedWins = new Map();
-
-        for (const game of report.firstWinningGames) {
-          const mKey = game.matchupKey || "UNKNOWN_MATCHUP";
-          const diffKey = game.difficulty || "default";
-          const groupKey = `${mKey}|${diffKey}`;
-
-          if (!groupedWins.has(groupKey)) {
-            groupedWins.set(groupKey, {
-              matchupKey: mKey,
-              opponentId: game.opponentId || "",
-              opponentName: game.opponentName || game.opponentId || "",
-              difficulty: diffKey,
-              difficultyLabel: game.difficultyLabel || diffKey,
-              games: []
-            });
-          }
-
-          groupedWins.get(groupKey).games.push(game);
-        }
-
-        for (const group of groupedWins.values()) {
-          const oppHeader = group.opponentName
-            ? `${group.matchupKey} (vs ${group.opponentName})`
-            : group.matchupKey;
-
-          lines.push(
-            "",
-            `=== [ ${oppHeader} | Difficulty: ${group.difficultyLabel} ] (${group.games.length} / 4 Wins) ===`
-          );
-
-          group.games.forEach((game, idx) => {
-            const winRank = game.bucketWinIndex || (idx + 1);
-            const maxRank = game.bucketMaxWins || 4;
-            const gameNum = game.gameNumber || (idx + 1);
-            const totalRounds = game.totalRounds || game.moves?.length || 0;
-            const slotTag = game.learnerSlot ? `, Slot: ${game.learnerSlot}` : "";
-
-            lines.push(
-              "",
-              `--- WIN #${winRank}/${maxRank} [${group.matchupKey} | ${group.difficultyLabel}] (Match #${gameNum}${slotTag}, ${totalRounds} Rounds) ---`
-            );
-
-            if (Array.isArray(game.moves) && game.moves.length > 0) {
-              game.moves.forEach(m => {
-                const rNum = String(m.round || "").padStart(2);
-                const lAction = String(m.learnerMove || "DO_NOTHING").padEnd(10);
-                const lCharge = String(m.learnerCharge ?? 0).padStart(3) + "%";
-                const lLp = m.learnerLp !== undefined
-                  ? ` (LP:${String(m.learnerLp).padStart(4)} Chi:${String(m.learnerChi).padStart(2)} Fnt:${String(m.learnerFaint).padStart(2)})`
-                  : "";
-
-                const oAction = String(m.oppMove || "DO_NOTHING").padEnd(10);
-                const oCharge = String(m.oppCharge ?? 0).padStart(3) + "%";
-                const oLp = m.oppLp !== undefined
-                  ? ` (LP:${String(m.oppLp).padStart(4)} Chi:${String(m.oppChi).padStart(2)} Fnt:${String(m.oppFaint).padStart(2)})`
-                  : "";
-
-                lines.push(`  R${rNum}: Learner [ ${lAction} @ ${lCharge} ]${lLp} vs Opponent [ ${oAction} @ ${oCharge} ]${oLp}`);
-              });
-            }
-          });
-        }
+      const winsBlock = formatWinningGamesBlock(report.firstWinningGames);
+      if (winsBlock) {
+        lines.push(winsBlock);
       }
 
       if (report.cancelled) {
@@ -662,8 +741,14 @@
       return lines.join("\n");
     }
 
-    function finishWorker(expectedWorker = worker) {
+    function finishWorker(expectedWorker = worker, selectedLearner = null) {
       if (expectedWorker !== worker) return;
+
+      try {
+        flushPendingCheckpoints(selectedLearner || field("learner").value);
+      } catch (err) {
+        console.error("[Training UI] Checkpoint flush error:", err);
+      }
 
       worker?.terminate();
       worker = null;
@@ -817,6 +902,11 @@
           : field("evaluation-policy").value
       };
 
+      cachedWinsKey = "";
+      cachedWinsBlock = "";
+      pendingCheckpoints.clear();
+      lastCheckpointSaveTime = 0;
+
       busy = true;
       stopping = false;
       refresh();
@@ -842,7 +932,7 @@
             (event.message || "Unknown worker error.")
           );
 
-          finishWorker(currentWorker);
+          finishWorker(currentWorker, selected.learner);
         };
 
         currentWorker.onmessageerror = () => {
@@ -852,7 +942,7 @@
             "WORKER ERROR\nCould not deserialize a worker message."
           );
 
-          finishWorker(currentWorker);
+          finishWorker(currentWorker, selected.learner);
         };
 
         currentWorker.onmessage = event => {
@@ -874,21 +964,27 @@
 
             if (message.type === "checkpoint") {
               const cp = message.checkpoint;
-              const validation = g.SoulAgent.validateCheckpoint(
-                cp,
+              const cpKey = g.SoulAgent.getCanonicalKey(
                 cp?.learnerId || selected.learner,
-                cp?.opponentId
+                cp?.opponentId || selected.opponent
               );
 
-              if (!validation.valid) {
-                throw new Error(validation.error);
-              }
+              // Buffer latest checkpoint in RAM immediately
+              pendingCheckpoints.set(cpKey, cp);
 
-              g.SoulAgent.setCandidate(cp);
-              refresh();
+              // Throttle heavy validation + localStorage saves + matrix status redraws
+              const now = performance.now();
+              if (now - lastCheckpointSaveTime >= CHECKPOINT_SAVE_THROTTLE_MS) {
+                flushPendingCheckpoints(selected.learner);
+                refreshStatusOnly();
+              }
             } else if (message.type === "progress") {
+              // Update UI telemetry text once per match progress message
               output(formatReport(message.report));
             } else if (message.type === "done") {
+              // Always flush all buffered checkpoints before finalizing
+              flushPendingCheckpoints(selected.learner);
+
               const report = message.report;
 
               if (
@@ -910,7 +1006,7 @@
                 )
               );
 
-              finishWorker(currentWorker);
+              finishWorker(currentWorker, selected.learner);
             } else if (message.type === "error") {
               throw new Error(message.error);
             } else {
@@ -920,13 +1016,13 @@
             }
           } catch (error) {
             output("JOB ERROR\n" + error.message);
-            finishWorker(currentWorker);
+            finishWorker(currentWorker, selected.learner);
           }
         };
 
         currentWorker.postMessage({ type: "start", job });
       } catch (error) {
-        finishWorker();
+        finishWorker(worker, selected.learner);
         throw error;
       }
     }
@@ -969,7 +1065,7 @@
             if (worker && !stopping) {
               stopping = true;
               worker.postMessage({ type: "stop" });
-              refresh();
+              button("stop").disabled = true;
 
               output(
                 "Stop requested.\n" +

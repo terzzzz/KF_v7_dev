@@ -68,6 +68,134 @@ While Ichigo achieves an overall benchmark of **80.1% (684W / 167L / 3D)** acros
 
 002:
 
+### Per-Matchup Win Rate Analysis (Rider $\times$ Difficulty)
+
+| Rider | Difficulty | Record (W-L-D) | Win Rate | Status vs 50% Threshold |
+| --- | --- | --- | --- | --- |
+| **Ichigo (002_001)** | Tree-hopper (easy) | 7W - 3L - 0D | 70.0% | $> 50\%$ |
+|  | Cricket (balanced) | 8W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Beetle (defensive) | 6W - 2L - 0D | 75.0% | $> 50\%$ |
+|  | Bullet Ant (master) | 6W - 4L - 0D | 60.0% | $> 50\%$ |
+| **Nigo (002_002)** | Tree-hopper (easy) | 9W - 1L - 0D | 90.0% | $> 50\%$ |
+|  | Cricket (balanced) | 10W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Beetle (defensive) | 6W - 2L - 0D | 75.0% | $> 50\%$ |
+|  | Bullet Ant (master) | 7W - 1L - 0D | 87.5% | $> 50\%$ |
+| **V3 (002_003)** | Tree-hopper (easy) | 10W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Cricket (balanced) | 7W - 1L - 0D | 87.5% | $> 50\%$ |
+|  | Beetle (defensive) | 7W - 3L - 0D | 70.0% | $> 50\%$ |
+|  | Bullet Ant (master) | 4W - 4L - 0D | **50.0%** | **$= 50\%$ (Fails $> 50\%$)** |
+| **Riderman (002_004)** | Tree-hopper (easy) | 10W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Cricket (balanced) | 8W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Beetle (defensive) | 6W - 2L - 0D | 75.0% | $> 50\%$ |
+|  | Bullet Ant (master) | 9W - 1L - 0D | 90.0% | $> 50\%$ |
+| **X (002_005)** | Tree-hopper (easy) | 12W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Cricket (balanced) | 8W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Beetle (defensive) | 7W - 1L - 0D | 87.5% | $> 50\%$ |
+|  | Bullet Ant (master) | 6W - 2L - 0D | 75.0% | $> 50\%$ |
+| **Amazon (002_006)** | Tree-hopper (easy) | 76W - 14L - 0D | 84.4% | $> 50\%$ |
+|  | Cricket (balanced) | 55W - 18L - 9D | 67.1% | $> 50\%$ |
+|  | Beetle (defensive) | 30W - 27L - 3D | **50.0%** | **$= 50\%$ (Fails $> 50\%$)** |
+|  | Bullet Ant (master) | 24W - 31L - 5D | **40.0%** | **$< 50\%$ (Fails $> 50\%$)** |
+| **Stronger (002_007)** | Tree-hopper (easy) | 10W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Cricket (balanced) | 8W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Beetle (defensive) | 10W - 0L - 0D | 100.0% | $> 50\%$ |
+|  | Bullet Ant (master) | 6W - 2L - 0D | 75.0% | $> 50\%$ |
+
+---
+
+### Overall Performance Totals
+
+#### By Opponent Rider
+
+* **Stronger (002_007):** 34W - 2L - 0D (**94.4%**) — 36 matches
+* **Riderman (002_004):** 33W - 3L - 0D (**91.7%**) — 36 matches
+* **X (002_005):** 33W - 3L - 0D (**91.7%**) — 36 matches
+* **Nigo (002_002):** 32W - 4L - 0D (**88.9%**) — 36 matches
+* **V3 (002_003):** 28W - 8L - 0D (**77.8%**) — 36 matches
+* **Ichigo (002_001):** 27W - 9L - 0D (**75.0%**) — 36 matches
+* **Amazon (002_006):** 185W - 90L - 17D (**63.4%**) — 292 matches evaluated
+
+#### By Difficulty Tier (All Matchups Combined)
+
+* **Tree-hopper (Easy):** 143W - 19L - 0D (**88.3%**) — 162 matches
+* **Cricket (Balanced):** 109W - 22L - 11D (**76.8%**) — 142 matches
+* **Beetle (Defensive):** 75W - 41L - 4D (**62.5%**) — 120 matches
+* **Bullet Ant (Master):** 68W - 47L - 5D (**56.7%**) — 120 matches
+
+---
+
+### Kamen Rider Amazon (002_006) Specific Telemetry
+
+#### Action Usage (6,497 Total Decisions)
+
+* **D (Attack / Heavy):** 2,752 (42.4%)
+* **W (Buff / Charge):** 1,596 (24.6%)
+* **S (Super / Special):** 1,309 (20.1%)
+* **A (Guard / Counter):** 791 (12.2%)
+* **IDLE (Forced Recovery):** 49 (0.8%)
+
+#### Amazon Stance Distribution Matrix
+
+| Action | J Stance | K Stance | I Stance | L Stance | NONE | Primary Stance Bias |
+| --- | --- | --- | --- | --- | --- | --- |
+| **W** | 312 | 339 | **889** | 56 | 0 | Heavily biased toward **I Stance** (55.7%) |
+| **A** | 21 | 187 | **550** | 33 | 0 | Heavily biased toward **I Stance** (69.5%) |
+| **S** | 163 | 87 | 257 | **802** | 0 | Heavily biased toward **L Stance** (61.3%) |
+| **D** | **1,064** | 471 | 645 | 572 | 0 | Primary bias toward **J Stance** (38.7%) |
+| **IDLE** | 0 | 0 | 0 | 0 | **49** | Recovery state |
+
+#### Match Parameter Telemetry (Amazon Dataset)
+
+* **Health & Damage:** Avg Final LP: **48.8%** (Own) vs **21.8%** (Opponent). Damage Ratio: **92.0%** Dealt / **51.2%** Taken.
+* **Resource Management:** Chi/Round: **0.90** Earned / **1.23** Spent, maintaining a **+0.10** Net Advantage.
+* **Execution & Priority:** Execution Charge averaged **64.0%** with a Priority Win Rate of **51.6%**.
+* **Tactical Execution:** **27.4%** S-Move Rate, **25.8%** W-Buff Rate, **23.4%** A-Guard Counter Rate, and **17.5%** Evasion Trigger Rate.
+* **Faint Dynamics:** Inflicted **30.1%** faint rate vs **16.4%** suffered.
+
+---
+
+### Verdict
+
+The hypothesis that the candidate model achieves a win rate strictly greater than 50% across every single sub-matchup remains **incorrect**.
+
+While the overall model win rate across all 544 evaluated matches is **74.8%** (407W - 129L - 8D), three sub-matchups fail to pass the $> 50\%$ benchmark:
+
+1. **Amazon vs Bullet Ant (master):** **40.0%** (24W - 31L - 5D) — strictly below 50%.
+2. **Amazon vs Beetle (defensive):** **50.0%** (30W - 27L - 3D) — equals 50% (fails $> 50\%$).
+3. **V3 vs Bullet Ant (master):** **50.0%** (4W - 4L - 0D) — equals 50% (fails $> 50\%$).
+
+---
+
+### Strategic Commentary & Telemetry Analysis
+
+#### 1. Amazon's Non-Linear Difficulty Scaling
+
+The extended 292-match Amazon evaluation highlights a sharp performance decline as defensive and frame-perfect counter mechanics scale up. While Amazon maintains high conversion rates against lower-tier AI (**84.4%** in Tree-hopper and **67.1%** in Cricket), performance drops to **50.0%** against Beetle and falls to **40.0%** against Bullet Ant.
+
+The breakdown reveals that Bullet Ant opponents exploit Amazon's stance rhythms in high-priority exchanges. In `p1` / `p2` slot splits for Bullet Ant (11W-17L-2D vs 13W-14L-3D), Amazon struggles primarily when forced into defensive neutral states following whiffed or guarded heavy attacks.
+
+#### 2. Stance Predictability & Execution Clustering
+
+Amazon’s action profile displays significant stance concentration:
+
+* **W (Buff) & A (Guard):** Strongly locked into **I Stance** (55.7% and 69.5% respectively).
+* **S (Super):** Heavily favors **L Stance** (61.3%).
+* **D (Heavy Attack):** Heavily favors **J Stance** (38.7%).
+
+This strong correlation between specific actions and stance inputs creates a structural predictability pattern. Defensive AI (Beetle) and Master AI (Bullet Ant) utilize guard options (`A`) and counter-timing to mitigate high-damage `D+J` and `S+L` setups, causing Amazon’s high Chi expenditure to yield diminishing returns.
+
+#### 3. Chi Economy Deficit
+
+Amazon consumes **1.23 Chi/round** while generating only **0.90 Chi/round**, yielding a slim net advantage of **+0.10**.
+
+* In short matches against lower difficulties, high initial Chi burning allows rapid burst knockouts via heavy `S` move loops (27.4% S-move rate).
+* In extended matches (such as the 34-round Beetle and 46-round Bullet Ant games logged in the telemetry), Amazon runs into Chi starvation cycles. Forced reliance on basic `D` attacks without Chi backup leaves the model open to faint infliction and frame priority loss (Priority Win Rate drops near 50%).
+
+#### 4. Recommendations for Model Iteration
+
+* **Stance Decoupling:** Introduce entropy regularization or explicit stance mixing penalties in training to prevent `S` and `W` actions from locking strictly into single-stance variants (`L` and `I`).
+* **Chi-Aware Policy Masking:** Adjust the policy reward function so that high-cost `S` specials are conditional on holding a net Chi reserve ($\ge 3$), reducing over-commitment against turtling opponents (Beetle tier).
+* **Faint-Punish Exploitation:** Leverage Amazon's high faint infliction rate (**30.1%**) by training the agent to substitute low-cost `D` heavy chains for high-cost `S` finishers when an opponent enters high faint accumulation thresholds ($> 70$ faint points).
 
 
 

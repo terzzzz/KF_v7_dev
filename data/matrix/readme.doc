@@ -221,7 +221,77 @@ Amazon consumes **1.23 Chi/round** while generating only **0.90 Chi/round**, yie
 
 006:
 
+### Consolidated Candidate Evaluation Report: Kamen Rider Amazon (006)
 
+Across the 832 completed evaluation matches using the `v5-state256-action17` (`charge1-reset1`) candidate model under pure deterministic policy inference (no epsilon exploration or gradient updates), Learner **Amazon (006)** achieved an overall record of **742W – 83L – 7D (89.2% Win Rate)** across all difficulty tiers.
+
+---
+
+### Complete 4-Tier Matchup Matrix (Record & Win Rate)
+
+| Opponent Rider | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Consolidated Total | Overall Win Rate |
+| --- | --- | --- | --- | --- | --- | --- |
+| **001 (Ichigo)** | 29W - 1L - 0D | 29W - 1L - 0D | 25W - 5L - 0D | 28W - 2L - 0D | **111W - 9L - 0D** | **92.5%** |
+| **002 (Nigo)** | 30W - 0L - 0D | 30W - 0L - 0D | 26W - 4L - 0D | 25W - 5L - 0D | **111W - 9L - 0D** | **92.5%** |
+| **003 (V3)** | 28W - 2L - 0D | 28W - 2L - 0D | 26W - 4L - 0D | 23W - 6L - 1D | **105W - 14L - 1D** | **87.5%** |
+| **004 (Riderman)** | 28W - 2L - 0D | 30W - 0L - 0D | 28W - 2L - 0D | 25W - 3L - 0D | **111W - 7L - 0D** | **94.1%** |
+| **005 (X)** | 29W - 1L - 0D | 29W - 1L - 0D | 24W - 6L - 0D | 24W - 4L - 0D | **106W - 12L - 0D** | **89.8%** |
+| **006 (Amazon Mirror)** | 24W - 6L - 0D | 23W - 6L - 1D | 17W - 10L - 3D | 18W - 9L - 1D | **82W - 31L - 5D** | **69.5%** |
+| **007 (Stronger)** | 30W - 0L - 0D | 28W - 1L - 1D | 30W - 0L - 0D | 28W - 0L - 0D | **116W - 1L - 1D** | **98.3%** |
+| **Tier Totals** | **198W - 12L (94.3%)** | **197W - 11L (93.8%)** | **176W - 31L (83.8%)** | **171W - 29L (84.7%)** | **742W - 83L - 7D** | **89.2%** |
+
+---
+
+### Cross-Tier Parameter Telemetry Comparison
+
+| Parameter Metric | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) |
+| --- | --- | --- | --- | --- |
+| **Win Rate** | 94.3% | 93.8% | 83.8% | 84.7% |
+| **Avg Match Duration** | 11.8 rounds | 16.1 rounds | 16.9 rounds | 15.1 rounds |
+| **Avg Final LP (Own / Opp)** | 60.2% / 7.3% | 63.9% / 7.2% | 46.4% / 9.7% | 61.3% / 8.8% |
+| **Avg Damage (Dealt / Taken)** | 92.7% / 47.4% | 92.8% / 43.6% | 90.3% / 60.7% | 91.2% / 46.0% |
+| **Chi Economy (Net Advantage)** | +3.44 Chi | +4.21 Chi | +3.79 Chi | +4.21 Chi |
+| **Priority Win Rate** | 50.2% | 49.2% | 48.9% | 46.3% |
+| **Evasion Trigger Rate** | 38.1% | 45.9% | 34.0% | 42.0% |
+| **Faint Rate (Inflicted / Suffered)** | 47.2% / 2.5% | 45.3% / 1.2% | 37.7% / 2.5% | 36.8% / 1.2% |
+
+---
+
+### Consolidated Action Usage & Stance Profile (12,464 Round Decisions)
+
+| Action | Easy (2.4k) | Balanced (3.3k) | Defensive (3.5k) | Master (3.0k) | Total Volume | Share (%) | Stance Distribution Bias |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **D (Heavy Attack)** | 1,035 | 1,478 | 1,639 | 1,346 | 5,498 | **44.1%** | **J Stance** (50.8%) / **L Stance** (32.9%) |
+| **S (Special Move)** | 794 | 948 | 1,046 | 841 | 3,629 | **29.1%** | **L Stance** (39.5%) / **K Stance** (28.3%) |
+| **W (Buff / Charge)** | 518 | 752 | 709 | 737 | 2,716 | **21.8%** | **I Stance** (77.8%) |
+| **A (Guard / Block)** | 109 | 183 | 117 | 106 | 515 | **4.1%** | **I Stance** (53.8%) / **K Stance** (17.5%) |
+| **IDLE (Stun / Recovery)** | 14 | 17 | 47 | 28 | 106 | **0.9%** | Forced recovery state |
+
+---
+
+### Opponent Difficulty Hierarchy Analysis
+
+Comparing evaluation data against opponent matchup profiles confirms the empirical hierarchy when facing Learner Amazon:
+
+```
+[Hardest Matchup]
+  1. Kamen Rider Amazon (006 Mirror)  — 69.5% Win Rate (31 Losses, 5 Draws)
+  2. Kamen Rider V3 (003)             — 87.5% Win Rate (14 Losses, 1 Draw)
+  3. Kamen Rider X (005)              — 89.8% Win Rate (12 Losses)
+  4. Kamen Rider Ichigo (001)         — 92.5% Win Rate (9 Losses)
+  5. Kamen Rider Nigo (002)           — 92.5% Win Rate (9 Losses)
+  6. Kamen Rider Riderman (004)       — 94.1% Win Rate (7 Losses)
+  7. Kamen Rider Stronger (007)       — 98.3% Win Rate (1 Loss, 1 Draw)
+[Weakest Opponent]
+
+```
+
+#### Key Findings
+
+1. **Stronger (007) is the Weakest Opponent:** Across 118 evaluation matches, Stronger managed only a single win (in Cricket slot p1). Amazon’s high execution speed ($64.9\% - 65.9\%$) and heavy attack mixup (`D+J` / `S+L`) consistently out-pace Stronger's startup frames before his electrification state can settle.
+2. **Amazon Mirror (006) is the Hardest Matchup:** Accounting for 31 of Amazon's 83 total losses (37.3%), the mirror match is volatile due to identical high-damage `S+L` and `D+J` trajectories. Stance priority splits evenly, making first-strike timing the determining factor.
+3. **V3 (003) and X (005) Hold Mid-High Resistance:** V3’s defensive spacing forced Amazon’s longest average matches and highest faint draw counts, while X’s block-counter frames handed Amazon 12 total losses.
+4. **Riderman (004) Sits in the Middle-Upper Tier:** Riderman matches were fast (average 6–18 rounds), with Amazon winning 94.1% of games. Riderman's lower LP pool leaves him vulnerable to Amazon's early `W+I` into `S+I` faint combos.
 
 
 

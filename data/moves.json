@@ -89,7 +89,7 @@
         "label": "SHUTTER",
         "type": "speed",
         "duration": 3,
-        "effects": { "speed": 1.25, "armor": 0.8 }
+        "effects": { "speed": 1.25, "armor": 0.75 }
       }
     },
     "W+K": {
@@ -220,7 +220,7 @@
         "label": "FOCUS",
         "type": "accuracy",
         "duration": 3,
-        "effects": { "accuracy": 30 }
+        "effects": { "accuracy": 35 }
       }
     },
     "W+K": {
@@ -238,14 +238,14 @@
       "rangeType": "REACH",
       "chiCost": 2,
       "baseDamage": 52,
-      "hitChance": 88,
+      "hitChance": 82,
       "video": "rope_tie.mp4",
       "debuff": {
         "id": "rope_bind",
         "label": "BIND",
         "type": "speed",
         "duration": 2,
-        "effects": { "speed": 0.50 }
+        "effects": { "speed": 0.60 }
       }
     },
     "D+J": { "name": "Standard Punch", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 55, "hitChance": 75, "video": "punch.mp4" },
@@ -275,7 +275,7 @@
         "label": "AIR",
         "type": "speed",
         "duration": 3,
-        "effects": { "dAttack": 1.60, "evasion": 0.20 }
+        "effects": { "dAttack": 1.50, "evasion": 0.20 }
       }
     },
     "W+J": {
@@ -290,7 +290,7 @@
         "label": "MERCURY ATK",
         "type": "attack",
         "duration": 3,
-        "effects": { "dAttack": 2.0, "sAttack": 1.5 }
+        "effects": { "dAttack": 1.80, "sAttack": 1.3 }
       }
     },
     "W+K": {
@@ -345,7 +345,7 @@
         "label": "AIR",
         "type": "speed",
         "duration": 4,
-        "effects": { "attack": 1.33, "evasion": 0.35 }
+        "effects": { "attack": 1.33, "evasion": 0.30 }
       }
     },
     "W+J": {
@@ -359,14 +359,14 @@
         "id": "inca_blessing",
         "label": "INCA BLESSING",
         "type": "heal",
-        "duration": 4,
-        "effects": { "lpRegen": 160 }
+        "duration": 3,
+        "effects": { "lpRegen": 180 }
       }
     },
     "W+K": {
       "name": "Gigi Focus",
       "type": "UTILITY",
-      "chiCost": 0,
+      "chiCost": 1,
       "baseDamage": 0,
       "hitChance": 100,
       "video": "gigi_focus.mp4",
@@ -430,7 +430,7 @@
         "label": "AIR",
         "type": "speed",
         "duration": 3,
-        "effects": { "attack": 1.25, "evasion": 0.20 }
+        "effects": { "attack": 1.33, "evasion": 0.20 }
       }
     },
     "W+J": {
@@ -445,7 +445,7 @@
         "label": "ELECTRO",
         "type": "defense",
         "duration": 4,
-        "effects": { "armor": 0.78 }
+        "effects": { "armor": 0.75 }
       }
     },
     "W+K": {
@@ -473,18 +473,18 @@
       "video": "grounding.mp4",
       "faintRecovery": 40
     },
-    "D+J": { "name": "Electro Punch", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 52, "hitChance": 76, "video": "punch.mp4" },
-    "D+K": { "name": "Electro Kick", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 56, "hitChance": 76, "video": "kick.mp4" },
+    "D+J": { "name": "Electro Punch", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 52, "hitChance": 79, "video": "punch.mp4" },
+    "D+K": { "name": "Electro Kick", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 56, "hitChance": 79, "video": "kick.mp4" },
     "D+L": { "name": "Kabuto Protector Tackle", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 102, "hitChance": 77, "video": "tackle.mp4" },
-    "D+I": { "name": "Electro Shock Chop", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 94, "hitChance": 76, "video": "electro_chop.mp4" },
+    "D+I": { "name": "Electro Shock Chop", "type": "PHYSICAL", "chiCost": 1,"chiRefundOnHit": 4, "baseDamage": 94, "hitChance": 76, "video": "electro_chop.mp4" },
     "S+J": {
       "name": "Electro Fire",
       "type": "SPECIAL",
       "rangeType": "REACH",
       "chiCost": 4,
-      "chiRefundOnHit": 0,
-      "baseDamage": 380,
-      "hitChance": 76,
+      "chiRefundOnHit": 1,
+      "baseDamage": 480,
+      "hitChance": 82,
       "video": "electro_fire.mp4",
       "debuff": {
         "id": "paralyze_shock",
@@ -494,9 +494,9 @@
         "effects": { "speed": 0.70 }
       }
     },
-    "S+K": { "name": "Electro Waterfall", "type": "SPECIAL", "rangeType": "REACH", "chiCost": 5, "chiRefundOnHit": 1, "baseDamage": 440, "baseFaintDamage": 35, "hitChance": 74, "video": "electro_waterfall.mp4" },
-    "S+L": { "name": "Stronger Electro Kick", "type": "SPECIAL", "chiCost": 7, "chiRefundOnHit": 3, "baseDamage": 780, "hitChance": 74, "video": "electro_kick.mp4" },
-    "S+I": { "name": "Super Electronic Drill Kick", "type": "SPECIAL", "chiCost": 10, "chiRefundOnHit": 3, "baseDamage": 1250, "hitChance": 74, "video": "drill_kick.mp4" },
+    "S+K": { "name": "Electro Waterfall", "type": "SPECIAL", "rangeType": "REACH", "chiCost": 5, "chiRefundOnHit": 1, "baseDamage": 440, "baseFaintDamage": 40, "hitChance": 78, "video": "electro_waterfall.mp4" },
+    "S+L": { "name": "Stronger Electro Kick", "type": "SPECIAL", "chiCost": 7, "chiRefundOnHit": 3, "baseDamage": 880, "hitChance": 78, "video": "electro_kick.mp4" },
+    "S+I": { "name": "Super Electronic Drill Kick", "type": "SPECIAL", "chiCost": 10, "chiRefundOnHit": 4, "baseDamage": 1250, "hitChance": 78, "video": "drill_kick.mp4" },
     "A+I": { "name": "Electro Barrier", "type": "DEFENSE", "guardKind": "omni", "chiCost": 4, "baseDamage": 0, "hitChance": 100, "video": "electro_barrier.mp4" },
     "A+J": { "name": "Guard", "type": "DEFENSE", "chiCost": 0, "baseDamage": 0, "hitChance": 100, "video": "guard.mp4" },
     "A+K": { "name": "Guard", "type": "DEFENSE", "chiCost": 0, "baseDamage": 0, "hitChance": 100, "video": "guard.mp4" },

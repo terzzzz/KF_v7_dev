@@ -158,7 +158,76 @@ With every matchup cleared between `73.3%` and `90.8%` and zero sub-50% difficul
 
 
 004:
+With the complete `CANDIDATE` evaluation (`checkpoint 3074661205`) across all four difficulty tiers for **Kamen Rider Amazon (`004_006`)** and **draws counted as undefeated**, Riderman achieves a **79.5% overall undefeated rate (`426W – 110L – 0D` across 536 matches)** and clears the **`>50%` undefeated threshold** against every opponent (`62.9%–95.7%`) and every difficulty tier (`71.7%–86.5%`).
 
+---
+
+### Vs. All Riders Evaluation Matrix (`v5-state256-action17` | `charge1-reset1` | `Draw = Undefeated`)
+
+| Opponent | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Total Record | Undefeated Rate |
+| --- | --- | --- | --- | --- | --- | --- |
+| **004_005 (X)** | 20W 0L | 16W 0L | 14W 2L | 17W 1L | **67W – 3L – 0D** | **95.7%** |
+| **004_007 (Stronger)** | 18W 0L | 18W 0L | 15W 3L | 12W 4L | **63W – 7L – 0D** | **90.0%** |
+| **004_002 (Nigo)** | 15W 3L | 17W 1L | 16W 0L | 13W 5L | **61W – 9L – 0D** | **87.1%** |
+| **004_001 (Ichigo)** | 16W 2L | 11W 5L | 16W 2L | 15W 3L | **58W – 12L – 0D** | **82.9%** |
+| **004_004 (Riderman)** | 15W 3L | 14W 2L | 15W 3L | 14W 4L | **58W – 12L – 0D** | **82.9%** |
+| **004_006 (Amazon) *(Updated)*** | **18W 5L 0D** | **14W 5L 0D** | **23W 17L 0D** | **20W 14L 0D** | **75W – 41L – 0D** | **64.7%** |
+| **004_003 (V3)** | 13W 5L | 14W 4L | 9W 9L | 8W 8L | **44W – 26L – 0D** | **62.9%** |
+| **Difficulty Total** | **115W – 18L – 0D (86.5%)** | **104W – 17L – 0D (86.0%)** | **108W – 36L – 0D (75.0%)** | **99W – 39L – 0D (71.7%)** | **426W – 110L – 0D** | **79.5%** |
+
+---
+
+### Updated Kamen Rider Amazon (`004_006`) Evaluation Summary
+
+| Difficulty Tier | Record (`W-L-D`) | Undefeated Rate | Avg Rounds | Mean Selected Q | Faint (`Inflicted / Suffered`) | `p1` vs. `p2` Split |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Tree-hopper (Easy)** | `18W – 5L – 0D` | **78.3%** | `13.8` | `0.8287` | `70.9%` / `10.4%` | `9W–3L` vs. `9W–2L` |
+| **Cricket (Balanced)** | `14W – 5L – 0D` | **73.7%** | `16.5` | `0.9012` | `69.3%` / `8.1%` | `9W–1L` vs. `5W–4L` |
+| **Beetle (Defensive)** | `23W – 17L – 0D` | **57.5%** | `13.2` | `0.8586` | `58.3%` / `8.0%` | `14W–6L` vs. `9W–11L` |
+| **Bullet Ant (Master)** | `20W – 14L – 0D` | **58.8%** | `14.6` | `0.8743` | `52.6%` / `12.5%` | `10W–7L` vs. `10W–7L` |
+| **Amazon Overall** | **`75W – 41L – 0D`** | **64.7%** | **`14.3`** | **`0.8657`** | **`61.3%` / `9.8%**` | **`42W–17L` vs. `33W–24L**` |
+
+* **Complete Matchup Reversal:** Against Bullet Ant (Master) Amazon, Riderman jumped from `18.8%` (`3W–12L–1D`) to **58.8% (`20W–14L–0D`)** with exact `10W–7L` parity in both `p1` and `p2`.
+* **Tempo Compressed to `13.2–16.5` Rounds:** Eliminating passive `Guard` (`A+K`) stalling and `16 Chi` hoarding prevents Amazon from cycling **Inca Blessing** (`W+J`, `180 LP/turn` regen for 3 turns) and **Wild Leap** / **Gigi Focus** (`W+I` `+30%` evasion / `W+K` `+35%` evasion), turning former 40+ round draws into decisive sub-16-round knockouts.
+
+---
+
+### Tactical Breakdown: How Riderman Defeats Bullet Ant Amazon
+
+1. **Opening `High Leap` (`W+I`) & `Rope Arm Hook` (`D+I`) Tempo vs. Amazon's Special Opener:**
+* Bullet Ant Amazon routinely opens Round 1 with **Jaguar Shock** (`S+K`, `480` base dmg + `155 LP/turn` `BLEEDING` for 3 turns) or **Wild Tackle** (`S+L`, `880` base dmg).
+* In `p2` (Matches #2 and #4), Riderman opens with **High Leap** (`W+I`, `0 Chi`, grants `AIR` +`23%` evasion for 3 turns), evading Amazon's opening special cleanly (`2,709–2,800 LP` intact) while banking `9 Chi`. In `p1` (Match #7), Riderman leads directly with **Rope Arm Hook** (`D+I`, `2 Chi`, `REACH`, `+3 Chi` refund on hit, `28` faint damage), negating Amazon's Round 1 `Wild Tackle` while starting the Faint and Chi snowball immediately.
+
+
+2. **Chi-Positive `D`-Stance Ramp (`Classic Combo` + `Rope Arm Hook`):**
+* Rather than spending `2 Chi` on **Rope Arm Tie-Up** (`W+L`, `BIND` `0.60x` speed debuff) or sitting in `Guard` (`A+K`), Riderman strings `0-Chi` **Standard Punch** (`D+J`, `55` dmg) and **Standard Kick** (`D+K`, `58` dmg) with **Classic Combo** (`D+L`, `1 Chi`, `125` dmg) and **Rope Arm Hook** (`D+I`, net `+1 Chi` on hit).
+* Across the Bullet Ant logs, `D`-stance accounts for **46.2%** of all actions (`230/498`), building `12–16 Chi` by Rounds 4–6 while pushing Amazon's Faint to `60–80%`. Meanwhile, **Battle Cry** (`W+K`, `0 Chi`, `38` faint recovery) is reserved strictly for emergency self-faint spikes (`8` uses total) because Riderman's suffered faint rate stays at `12.5%`.
+
+
+3. **Double `Hook Finisher` (`S+I`) Refund Chains Out-Racing `BLEEDING` & Evasion:**
+* **Hook Finisher** (`S+I`, `980` base dmg, `REACH`) costs `10 Chi` but refunds **`5 Chi` on hit** (net `5 Chi` cost). Once Riderman reaches `12–16 Chi`, he fires `S+I` at `89–97%` charge for **`1,600+` damage** and retains enough Chi to chain a second `S+I` within 1–2 rounds:
+* **Match #2 (`8` Rounds, `p2`):** At `16 Chi` in R6, **Hook Finisher** (`S+I @ 94%`) deals **`1,628` dmg** (`2411 → 783 LP`) and refunds `5 Chi`; after one **Classic Combo** (`D+L`) in R7, a second **Hook Finisher** (`S+I @ 95%`) in R8 closes out the KO.
+* **Match #9 (`5` Rounds, `p1`):** Trailing `1,919 vs. 2,587 LP` after taking **Jaguar Shock** (`S+K`) and bleed ticks, Riderman fires **Hook Finisher** (`S+I @ 97%`) in R4 for **`1,641` dmg** (`2587 → 946 LP`, refunding `5 Chi` to `12 Chi`) and finishes in R5 with a second **Hook Finisher** (`S+I @ 91%`) before Amazon's **Wild Instinct** (`W+L`) can recover her Faint.
+
+
+
+
+4. **Stun-Locking Lethal Windows with `Drill Arm Break` (`S+K`) & `Riderman Kick` (`S+J`):**
+* When an `S+I` spike leaves Amazon alive at `200–1,000 LP`, the policy switches to Faint-to-KO conversions rather than risking evasion misses against **Wild Leap** / **Gigi Focus**:
+* **Match #4 (`10` Rounds, `p2`):** After **Hook Finisher** (`S+I @ 89%`, `1,607` dmg in R8), Riderman lands **Drill Arm Break** (`S+K @ 98%`, `560` base dmg + `35` faint damage) in R9 to push Amazon from `85% → 100%` Faint (`DO_NOTHING`), setting up an uncontested **Drill Arm Break** (`S+K @ 94%`) KO in R10.
+* **Match #7 (`12` Rounds, `p1`):** With Amazon at `80%` Faint in R8, **Riderman Kick** (`S+J @ 94%`, `420` dmg) triggers the `100%` Faint stun, guaranteeing a free **Power Arm Strike** (`S+L @ 83%`, `645` dmg, `+3 Chi` refund) in R9 before a R12 **Hook Finisher** (`S+I @ 91%`) closeout.
+
+
+
+
+
+---
+
+### Roster-Wide Tactical Identity (`v5-state256-action17`)
+
+* **Primary Win Condition (`Hook Finisher` + `Rope Arm Hook` Engine):** Riderman leverages his `REACH` specials (**Hook Finisher** `S+I`, **Power Arm Strike** `S+L`, **Drill Arm Break** `S+K`) and Chi-positive **Rope Arm Hook** (`D+I`) to compensate for his low `2,800 LP` pool, using **High Leap** (`W+I`, `+23%` evasion) to dodge Turn-1 enemy specials and **Battle Cry** (`W+K`, `38` faint recovery) to prevent stun locks.
+* **Remaining Low-Margin Matchup (`V3` at `62.9%`):** V3 (`3,150 LP`) remains Riderman's closest matchup (`8W–8L` on Master) because V3's **Double Typhoon Blow** (`W+L`, `REACH`, `42` faint damage) and **Red Lamp Focus** (`W+K`, `1.6x` `dAttack`/`sAttack`) punish Riderman's `2,800 LP` frame if **High Leap** (`W+I`) fails to evade early hits.
+* **Deployment Readiness:** With `checkpoint 3074661205` clearing every single opponent (`62.9%–95.7%`) and difficulty tier (`71.7%–86.5%`), Riderman passes the Rider-level evaluation; run a quick regression check against the other six riders on this checkpoint to verify no weight drift occurred during the Amazon fine-tune.
 
 
 

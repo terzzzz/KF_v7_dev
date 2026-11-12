@@ -241,7 +241,78 @@ With the complete `CANDIDATE` evaluation (`checkpoint 3074661205`) across all fo
 
 006:
  
+### 1. Win Rate Verification & Matchup Breakdown
 
+Across **840 completed matches** (120 per opponent; 30 per difficulty split evenly between `p1` and `p2`), Candidate Amazon achieves a **88.33% overall win rate** (**742W / 95L / 3D**, or **88.65%** excluding draws), averaging **14.0 rounds/match** with a **+47.4% average damage differential** (`93.3%` dealt vs `45.9%` taken) and **56.2% average remaining LP**.
+
+Excluding the Amazon mirror (`006_006`), the policy wins **90.42% (651W / 69L / 0D)** against the rest of the Showa roster, including **89.4% (161W / 19L)** on **Bullet Ant (Master)**.
+
+#### Matchup Matrix (Wins–Losses–Draws & Win %)
+
+| Opponent | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Total (120 Games) | Overall Win % |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Stronger (`006_007`)** | 30–0–0 (100%) | 29–1–0 (96.7%) | 26–4–0 (86.7%) | 28–2–0 (93.3%) | **113–7–0** | **94.2%** |
+| **V3 (`006_003`)** | 29–1–0 (96.7%) | 26–4–0 (86.7%) | 28–2–0 (93.3%) | 29–1–0 (96.7%) | **112–8–0** | **93.3%** |
+| **X (`006_005`)** | 29–1–0 (96.7%) | 26–4–0 (86.7%) | 27–3–0 (90.0%) | 28–2–0 (93.3%) | **110–10–0** | **91.7%** |
+| **Nigo (`006_002`)** | 29–1–0 (96.7%) | 29–1–0 (96.7%) | 23–7–0 (76.7%) | 26–4–0 (86.7%) | **107–13–0** | **89.2%** |
+| **Riderman (`006_004`)** | 30–0–0 (100%) | 28–2–0 (93.3%) | 22–8–0 (73.3%) | 26–4–0 (86.7%) | **106–14–0** | **88.3%** |
+| **Ichigo (`006_001`)** | 29–1–0 (96.7%) | 27–3–0 (90.0%) | 22–8–0 (73.3%) | 25–5–0 (83.3%) | **103–17–0** | **85.8%** |
+| **Amazon (`006_006`)** | 26–4–0 (86.7%) | 26–3–1 (86.7%) | 19–11–0 (63.3%) | 20–8–2 (66.7%) | **91–26–3** | **75.8%** |
+| **Difficulty Subtotal** | **202–8–0 (96.2%)** | **191–18–1 (91.0%)** | **167–43–0 (79.5%)** | **182–26–2 (86.7%)** | **742–95–3** | **88.3%** |
+
+* **Slot Split (`p1` vs `p2`):** Slightly stronger on `p2` overall (**377W / 40L / 3D = 89.8%**) than `p1` (**365W / 55L / 0D = 86.9%**), most noticeably against Beetle (`82.9%` p2 vs `76.2%` p1) and Bullet Ant (`90.5%` p2 vs `82.9%` p1).
+
+---
+
+### 2. Elaborated Fight Strategy (`v5-state256-action17` Policy)
+
+The telemetry and move sequences show that the agent has converged on a **Buff-First Evasion & Stun-Lock Snowball** archetype. Rather than trading hits or fishing for guards (`A` usage is only **4.7%** with a **1.0%** counter rate), it relies on a **36.5% Evasion Trigger Rate** and a **5.3× Faint advantage** (`41.5%` inflicted vs `7.8%` suffered) to lock opponents into `DO_NOTHING` turns before unloading high-charge `S` finishers.
+
+#### The 4-Phase Combat Loop
+
+1. **Phase 1 — Mandatory `W+I` Opening Protocol (Turn 1 Setup)**
+* **Execution:** In **39 out of 40** logged winning openers (and virtually 100% of matches), Amazon opens Round 1 with **`W+I` @ 26–60% charge** from its starting 8 Chi.
+* **Tactical Purpose:** `W+I` accounts for **86.2% of all `W` actions** (1,936 of 2,247 uses). It activates evasion/speed buffs at zero net Chi cost, allowing Amazon to dodge or mitigate Turn 1 opponent `S` openers (`S+L`/`S+K`/`S+J` @ 70–100%) while preserving its 8–9 Chi bank.
+* **Double-`W+I` Anti-Pressure Pivot:** When an opponent lands a heavy Turn 1 burst and inflicts 25–35 Faint (e.g., Bullet Ant Match #99/#100 vs Ichigo, Match #222/#235 vs Amazon, Beetle Match #71/#72/#86/#88), the policy immediately chains a **second `W+I` on Round 2** to bleed off Faint (`25 -> 12 -> 0`), preserve LP, and bank Chi (`9 -> 10`) before counter-attacking.
+
+
+2. **Phase 2 — `D`-Stance Chi & Faint Battery (`D+J` / `D+I` / `D+L`)**
+* **Execution:** Once `W+I` is active, Amazon cycles `D` stances (**44.7% of all decisions**) at **65–85% charge** to farm Chi (`+1` to `+3`/turn, climbing to 12–16 Chi) while stacking `+25` to `+31` Faint per hit until the opponent crosses **75–100 Fnt**:
+* **`D+J` (2,046 uses — #1 move overall):** Primary low-risk tempo poke and Chi generator.
+* **`D+I` (1,514 uses):** Secondary Chi-banking and Faint-stacking engine, heavily prioritized when charging toward 11–16 Chi or punishing opponent `W+I`/`A+I` turns.
+* **`D+L` (1,450 uses):** Heavy `D` strike used to punish passive `W`/`A` turns and push opponents from ~70–75 Fnt into full 100 Fnt stun.
+* **`D+K` (245 uses):** Niche tempo breaker used mid-sequence against low-charge `A+K`/`W+K` stances.
+
+
+
+
+3. **Phase 3 — Stun-Window `S`-Move Burst Chains (`S+L` / `S+K` / `S+I`)**
+* **Execution:** While `W` fires at ~30–55% charge and `D` at ~70–80%, Amazon holds **`S` moves (30.5% of decisions) for 85–100% charge**—specifically firing when the opponent is at **75–100 Fnt** (forcing `DO_NOTHING @ 0%` on the following turn) or trapped in a low-charge stance:
+* **`S+L` (1,404 uses — #1 heavy finisher):** Primary nuke, regularly dealing **1,100–1,600+ LP** in a single round (e.g., Beetle Match #76 vs V3: `W+I` → `S+L @ 96%` for 1,448 dmg → `D+L` → `S+L @ 90%` for 1,425 dmg → `S+K @ 96%` KO in 5 rounds).
+* **`S+I` (928 uses) & `S+K` (961 uses):** Co-primary mid-to-late burst tools (~600–1,300 dmg + 25–31 Fnt). `S+I` frequently serves as the stun-triggering hit (`70 -> 100 Fnt`), followed immediately by `S+L` or `S+K` into the stunned opponent.
+* **`S+J` (301 uses):** Low-Chi surgical closer, deployed almost exclusively when Amazon is down to **1–4 Chi** and the opponent has **<300 LP** left (e.g., Match #21 R10, Match #43 R7, Match #61 R9).
+
+
+
+
+4. **Phase 4 — Faint Purge & Damage Mitigation (`W+L` / `A+I`)**
+* **Emergency Stun Prevention (`W+L`, 122 uses):** Whenever Amazon's own Faint reaches **75–100 Fnt**, the model triggers `W+L` to dump ~65–70 Faint in one turn and avoid losing a turn to self-stun (e.g., Match #17 R11: `72 -> 4 Fnt`; Match #26 R12: `84 -> 16 Fnt`; Match #223 R17: `77 -> 9 Fnt`).
+* **Minimal Guarding (`A+I`, 259 uses):** Used strictly as a single-turn damage buffer at 50–75 Fnt to absorb incoming `S` spikes and gain +1 Chi rather than fishing for counters.
+
+
+
+---
+
+### 3. Bottleneck & Loss Diagnosis
+
+Almost all losses cluster into two specific failure modes:
+
+1. **Amazon Mirror (`006_006` — 26 of 95 total losses, 27.4% of all losses + all 3 draws):**
+* Opponent Amazon replicates Learner Amazon's high evasion (`36.5%`), uses `W` stances to regenerate LP mid-fight (e.g., Cricket Match #40 R6–9, where Opponent Amazon healed from `974 -> 1,408 LP`), and punishes Learner Amazon's near-zero `A`-guard counter rate (`1.0%`) with mirror `S+K`/`S+L` chains.
+
+
+2. **Beetle (Defensive) AI (`79.5%` win rate — lower than Bullet Ant Master's `86.7%`):**
+* Beetle's heavy `A+I`/`A+K`/`A+L` guarding and `W+I`/`W+L` healing blunt Amazon's `D`-poke Faint buildup. When Amazon fires `S+L`/`S+K` into a high-charge Beetle guard, it loses 3–6 Chi without securing a stun, leaving Amazon Chi-starved (2–4 Chi) and vulnerable to Beetle's counter-`S` bursts—most visibly against **Amazon Mirror (63.3%)**, **Ichigo (73.3%)**, **Riderman (73.3%)**, and **Nigo (76.7%)**.
 
 007:
 

@@ -101,6 +101,56 @@ When Chi drops below `S`-move thresholds or opponents turtle up, Ichigo pivots t
 
 002:
 
+**Candidate cleared for promotion — Nigo (`v5-state256-action17`, patch `charge1-reset1`) finishes the full 7-opponent evaluation suite (960 total matches) with an 83.4% overall win rate (801W – 158L – 1D)** and an **83.2% unweighted matchup average**. Integrating the 240-match replacement run against **Kamen Rider X (`002_005`)** lifts the X matchup by **+12.1 percentage points (`73.3% → 85.4%`)**, moves X from 7th to 4th in the roster standings, and eliminates the lone sub-50% cell in the matrix (`Beetle X: 46.7% → 70.0%`). Every opponent and difficulty tier in the 28-cell matrix now sits comfortably above threshold (`≥ 56.7%`).
+
+---
+
+### Full Matrix Summary by Opponent & Difficulty (960 Matches)
+
+*Note: Baseline opponents reflect 120 matches each (30 per tier: 15 P1 / 15 P2); Kamen Rider X reflects the 240-match replacement evaluation (60 per tier: 30 P1 / 30 P2).*
+
+| Opponent | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Opponent Total |
+| --- | --- | --- | --- | --- | --- |
+| **Stronger (`002_007`)** | 28–2 (93.3%) | 27–3 (90.0%) | 28–2 (93.3%) | 26–4 (86.7%) | **109–11 (90.8%)** *(120g)* |
+| **Riderman (`002_004`)** | 29–1 (96.7%) | 26–4 (86.7%) | 25–5 (83.3%) | 26–4 (86.7%) | **106–14 (88.3%)** *(120g)* |
+| **Nigo (`002_002`)** | 27–3 (90.0%) | 29–1 (96.7%) | 24–6 (80.0%) | 23–7 (76.7%) | **103–17 (85.8%)** *(120g)* |
+| **X (`002_005`) [Updated]** | 59–1 (98.3%) | 57–3 (95.0%) | 42–18 (70.0%) | 47–13 (78.3%) | **205–35 (85.4%)** *(240g)* |
+| **Ichigo (`002_001`)** | 27–3 (90.0%) | 27–3 (90.0%) | 25–5 (83.3%) | 20–10 (66.7%) | **99–21 (82.5%)** *(120g)* |
+| **V3 (`002_003`)** | 29–1 (96.7%) | 23–7 (76.7%) | 21–9 (70.0%) | 18–12 (60.0%) | **91–29 (75.8%)** *(120g)* |
+| **Amazon (`002_006`)** | 26–4 (86.7%) | 23–6–1 (76.7%) | 22–8 (73.3%) | 17–13 (56.7%) | **88–31–1 (73.3%)** *(120g)* |
+| **Tier Total (240g / tier)** | **225–15 (93.8%)** | **212–27–1 (88.3%)** | **187–53 (77.9%)** | **177–63 (73.8%)** | **801–158–1 (83.4%)** |
+
+---
+
+### Telemetry & Post-Promotion Watchpoints
+
+* **Stable Policy & Resource Discipline:** Across the baseline 6-rider suite (`Q = 1.6462`, `+2.48` net Chi/round, `30.7%` vs. `15.3%` Faint, `1.6%` `IDLE`) and the updated `vs X` run (`Q = 1.5906`, `+0.85` net Chi/round, `36.3%` vs. `7.9%` Faint, `0.6%` `IDLE`, `50.4%` vs. `9.4%` avg final LP), Nigo maintains clean Q-value stability, a 2:1+ Faint advantage, and negligible forced-recovery downtime.
+* **Resolved — Beetle (Defensive) X Deficit (`46.7% → 70.0%`):** Previously the sole losing cell in the matrix, Nigo now goes `19–11 (63.3%)` as P1 and `23–7 (76.7%)` as P2 against Beetle X, while keeping overall P1/P2 symmetry virtually flat (`85.8%` vs. `85.0%`). Minor P2 variance remains on Bullet Ant X (`21–9`, `70.0%` vs. `26–4`, `86.7%` P1).
+* **Remaining Watchpoint — Master Amazon (`56.7%` WR, `7W–8L` P1 Dip):** With X resolved, Amazon (`002_006`) is now the lowest overall matchup (`73.3%`). Her 2,700 LP glass-cannon profile paired with regeneration punishes any stalled sequence—if Nigo fails to close out the kill within a single burst window, Amazon heals back to full LP (e.g., Match #96 dragging to 40 rounds).
+
+---
+
+### How Nigo Adapts His Fight Style Across the 7 Riders
+
+Nigo's **default baseline engine** opens Round 1 with low-charge **`W+I` (`@ 26–45%`)** to establish buffs and hit 9 Chi, builds Faint and Chi through mid-charge **`D` normals**, and cashes out at 12–16 Chi with high-charge **`S+L`** and **`S+I`** finishers once the opponent's Faint crosses 75–100. Across the seven matchups, his round-by-round logs show clear policy specialization:
+
+* **vs. Stronger (`002_007` — 90.8% WR) — Immediate R1 Rushdown & Buff-Punish:**
+Stronger is the *only* opponent where Nigo regularly skips his Turn-1 `W+I` setup. Against Cricket and Beetle Stronger (Matches #69, #70, #153, #154), Nigo opens Round 1 directly with high-charge **`D+I @ 69–78%`** or **`D+L @ 79%`**. Because Stronger spends early turns on slow `W+I`/`W+K` self-buffs and `A`-guards, Nigo bullies him immediately with `D` strings to stack Faint before Stronger's buffs come online, routinely finishing with 2,500–3,200 LP remaining.
+* **vs. Riderman (`002_004` — 88.3% WR) — Turn-2 `S+L` Blitz:**
+Nigo exploits Riderman's lower starting LP (2,800) and setup-heavy kit by bypassing mid-game Chi hoarding. Across Bullet Ant Matches #91, #92, #105, and #106, Nigo plays `R1 W+I` and immediately fires a **Turn-2 `S+L @ 89–99%**`, deleting ~1,200–1,400 LP on Round 2 and keeping Riderman on the back foot for the rest of the match.
+* **vs. Nigo Mirror (`002_002` — 85.8% WR) — `D+I` Priority Footsies:**
+In mirror matches, Nigo trims risky `A`-guards and chains **consecutive mid-charge `D+I` pokes** (3–4 rounds in a row in Beetle #73 and #74) to win the Faint race while banking 15–16 Chi, holding his specials until the mirror opponent crosses 85+ Faint before double-tapping `S+I`.
+* **vs. X (`002_005` — 85.4% WR) [Updated] — `D+J`/`D+L` Faint Control, `A+I` Counter-Reads & Multi-Hit Burst Piercing:**
+In `v5-state256-action17` (`charge1-reset1`), Nigo solves X across all tiers (`41.4%` `D`, `29.7%` `S`, `22.5%` `W`, `5.9%` `A`) by concentrating his normals into **`D+J` (`45.9%`)** and **`D+L` (`41.4%`)** at `61–82%` charge rather than over-committing into X's `A+L` guards. Against Beetle (Defensive) X (`70.0%` WR, Matches `#61–#64`), Nigo layers **`R1 W+K` → `R2 W+I**` openings and banks Chi until X hits `60–100` Faint before chaining **`S+L @ 88–99%` → `S+I` / `S+K**` to punch straight through X's `W+L` healing loops. When X sits at high Chi and telegraphs `S+L`/`S+I` bursts, Nigo triggers surgical **`A+I` (`@ 42–62%`)** counter-reads (`79.2%` of all `A`-moves) to drain X's Chi pool and reclaim initiative, while showing strong comeback composure in Bullet Ant (recovering from `439 LP` and `92` Faint in Match `#92` to close out Rounds 18–20).
+* **vs. Ichigo (`002_001` — 82.5% WR) — Disciplined Turn-2 `A+I` Guard Baiting:**
+Against higher-difficulty Ichigo (Beetle #71, #85; Bullet Ant #100, #113, #114, #212), Nigo locks into a strict **`R1 W+I` → `R2 A+I**` opening script. Ichigo favors an aggressive Turn-2 `S+K` or `S+I` burst; Nigo's `A+I` absorbs the spike, drains Ichigo down to 1–3 Chi, and hands Nigo safe control of the mid-game.
+* **vs. V3 (`002_003` — 75.8% WR) — `A+L` Chi-Mirroring & `S+L` Attrition:**
+V3 leans heavily on `A+L`/`A+J` guards and `W+L` sustain loops. Against V3, Nigo increases his **`W+K`** openings and relies noticeably more on **`A+L`** (Matches #5, #19, #75, #104) to match V3's Chi swings (`+6/+7` Chi) while chaining high-charge `S+L` attacks to break through V3's defensive cycling.
+* **vs. Amazon (`002_006` — 73.3% WR) — Defensive Shell into All-In Burst:**
+Nigo opens **`R1 W+I` → `R2 A+I` / `A+K**` to blunt Amazon's Turn-2 `S`-move aggression. Once stabilized, he avoids piecemeal `S`-move trades—which Amazon regenerates out of—and instead hoards 12–15 Chi to unleash **back-to-back `S+I` / `S+L` finishers** (e.g., `2700 → 594 → 0` in Match #40) to zero Amazon out before regeneration triggers.
+
+With every matchup cleared between `73.3%` and `90.8%` and zero sub-50% difficulty tiers remaining, the `v5-state256-action17` (`charge1-reset1`) Nigo checkpoint is cleared for production promotion.
+
 003:
 
 

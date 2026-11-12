@@ -3,6 +3,102 @@ The followings are trained well:
 
 001:
 
+# Official Model Evaluation Report: Kamen Rider Ichigo (`001_001`)
+
+**Evaluation ID:** `EVALUATION [CANDIDATE]` | **Build:** `v5-state256-action17` | **Patch:** `charge1-reset1`
+
+**Learner Policy:** `rider` (`001_001` — Kamen Rider Ichigo) | **Checkpoint Fingerprint:** `MULTI-MATCHUP-MATRIX`
+
+**Evaluation Protocol:** Deterministic inference (no gradient updates or epsilon exploration) across 840 auto-cycled matches (7 opponents $\times$ 4 AI tiers $\times$ 30 games split evenly between P1 and P2).
+
+*(Fair catch on the movelist check—I remember the exact input bindings and live telemetry effects for Ichigo's kit, as well as the specific skill specs we tuned for Riderman and Stronger, though I don't have Ichigo's canonical move names logged in my notes. Everything below maps directly to the verified command codes and round-by-round telemetry.)*
+
+---
+
+## 1. Executive Summary & Core Telemetry
+
+The `CANDIDATE` policy for **Kamen Rider Ichigo (`001_001`)** achieved an **80.4% overall win rate (675W – 163L – 2D)** across 840 evaluation matches, completing all runs in **968.1 seconds (52.1 matches/min)** with a **Mean Selected Q-value of 1.2387**.
+
+Ichigo operates as a high-efficiency burst-and-attrition generalist: the policy maintains a **+50.7 percentage-point LP survival margin** and a **3.20:1 faint-infliction advantage**, while exhibiting virtually zero side bias between Player 1 (**81.0%**) and Player 2 (**79.8%**).
+
+| Metric Category | Parameter | Value / Split | Operational Benchmark |
+| --- | --- | --- | --- |
+| **Match Record** | Overall W / L / D | **675W / 163L / 2D** | **80.4%** Win Rate (840 matches) |
+|  | Slot Parity (P1 / P2) | **340W–79L–1D** / **335W–84L–1D** | **81.0%** (P1) vs. **79.8%** (P2) |
+|  | Avg Match Length / Decisions | **14.1 rounds** / **11,859 decisions** | 52.1 matches/min throughput |
+| **Damage & LP** | Avg Final LP (Own / Opp) | **61.9%** / **11.2%** | +50.7% net LP differential |
+|  | Avg Damage (Dealt / Taken) | **88.8%** / **38.1%** | 2.33:1 damage efficiency ratio |
+| **Chi & Tempo** | Chi/Round (Earned / Spent / NetAdv) | **0.90** / **1.08** / **+3.17** | Strong net Chi advantage despite heavy `S` usage |
+|  | Avg Execution Charge | **64.8%** | Bimodal: low-charge `W`/`A` vs. 85–100% `S` finishers |
+|  | Priority Win Rate | **47.4%** | Balanced initiative across 17-action space |
+| **Tactical Rates** | W-Buff / S-Move / A-Guard Counter | **27.9%** / **27.5%** / **22.6%** | High buff-to-special conversion efficiency |
+|  | Evasion Trigger Rate | **34.4%** | Strong defensive mitigation on stance reads |
+|  | Faint Rate (Inflicted / Suffered) | **28.8%** / **9.0%** | 3.20:1 stun-pressure dominance |
+
+---
+
+## 2. Matchup & AI Difficulty Matrix (840 Matches)
+
+Each cell below aggregates **30 matches** (15 as P1, 15 as P2) across the four-tier `MIXED` AI cycle: **Tree-hopper** (Easy), **Cricket** (Balanced), **Beetle** (Defensive), and **Bullet Ant** (Master).
+
+| Opponent ID & Rider | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Total (120 Games) | Win Rate |
+| --- | --- | --- | --- | --- | --- | --- |
+| **`001_007` Stronger** | 30W – 0L | 27W – 2L – 1D | 30W – 0L | 25W – 5L | **112W – 7L – 1D** | **93.3%** |
+| **`001_002` Nigo** | 26W – 4L | 29W – 1L | 30W – 0L | 26W – 4L | **111W – 9L – 0D** | **92.5%** |
+| **`001_001` Ichigo (Mirror)** | 27W – 3L | 28W – 2L | 21W – 9L | 24W – 6L | **100W – 20L – 0D** | **83.3%** |
+| **`001_004` Riderman** | 28W – 2L | 27W – 3L | 17W – 13L | 24W – 6L | **96W – 24L – 0D** | **80.0%** |
+| **`001_003` V3** | 30W – 0L | 22W – 8L | 17W – 13L | 20W – 10L | **89W – 31L – 0D** | **74.2%** |
+| **`001_005` X** | 27W – 3L | 25W – 5L | 15W – 15L | 19W – 11L | **86W – 34L – 0D** | **71.7%** |
+| **`001_006` Amazon** | 26W – 4L | 23W – 6L – 1D | 18W – 12L | 14W – 16L | **81W – 38L – 1D** | **67.5%** |
+| **Tier Subtotal (210 Games)** | **194W – 16L** (**92.4%**) | **181W – 27L – 2D** (**86.2%**) | **148W – 62L** (**70.5%**) | **152W – 58L** (**72.4%**) | **675W – 163L – 2D** | **80.4%** |
+
+### Matchup Distribution Takeaways
+
+* **Dominant Power-Matchups:** Ichigo completely solves **Stronger (93.3%)** and **Nigo (92.5%)**, sweeping both 30–0 against the `Beetle` AI and maintaining greater than 83% win rates even at `Bullet Ant` (Master) difficulty.
+* **Primary Bottleneck (`Beetle` Defensive AI):** Interestingly, `Beetle` (**70.5%**) suppresses Ichigo's win rate slightly more than `Bullet Ant` (**72.4%**). Heavy defensive/evasive spam (`W+L` / `A+L`) by `Beetle` drags rounds out (frequently 18–33 rounds) and punishes raw `S`-move commitments, pulling Ichigo down to **50.0%** vs. X and **56.7%** vs. V3/Riderman.
+* **Master-Tier Hard Counter (`Bullet Ant` Amazon):** **Kamen Rider Amazon (`001_006`)** on `Bullet Ant` is the sole losing matchup in the entire matrix (**14W – 16L, 46.7%**), particularly from the P2 slot (**6W – 9L**).
+
+---
+
+## 3. How Ichigo Plays: Behavioral Profile & Tactical Loop
+
+Across 11,859 recorded decisions, Ichigo distributes its actions evenly across **Buffs (`W`, 32.2%)**, **Specials (`S`, 29.1%)**, and **Standard Attacks (`D`, 29.1%)**, using **Guards (`A`, 8.0%)** sparingly for high-value reads and suffering **Forced Stun Recovery (`IDLE`, 1.6%)** less than once every four matches.
+
+### Action & Stance Distribution Matrix
+
+| Primary Action | Total Uses | Share | `J` Stance | `K` Stance | `I` Stance | `L` Stance | `NONE` | Dominant Signatures |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **`W` (Buff / Utility)** | 3,824 | **32.2%** | 69 (1.8%) | **1,522 (39.8%)** | **2,010 (52.6%)** | 223 (5.8%) | 0 | `W+I` & `W+K` (92.4% of all `W`) |
+| **`S` (Special Moves)** | 3,455 | **29.1%** | 445 (12.9%) | 337 (9.8%) | **1,195 (34.6%)** | **1,478 (42.8%)** | 0 | `S+L` & `S+I` (77.4% of all `S`) |
+| **`D` (Standard Attacks)** | 3,448 | **29.1%** | **1,482 (43.0%)** | 445 (12.9%) | 814 (23.6%) | 707 (20.5%) | 0 | `D+J` workhorse poke (43.0% of `D`) |
+| **`A` (Guard / Counter)** | 946 | **8.0%** | 60 (6.3%) | 177 (18.7%) | **540 (57.1%)** | 169 (17.9%) | 0 | `A+I` primary counter (57.1% of `A`) |
+| **`IDLE` (Faint Stun)** | 186 | **1.6%** | 0 | 0 | 0 | 0 | 186 | Forced recovery at 100 Faint |
+
+### The Four-Stage Combat Loop
+
+1. **Opening Buff-Stacking (`W+I` $\rightarrow$ `W+K`):**
+Ichigo treats Rounds 1–2 as an investment window, launching **`W+I`** (2,010 total uses—the single most clicked button in its policy) and **`W+K`** (1,522 uses) at low execution charge (26%–55%). Rather than burning its starting 9 Chi immediately, Ichigo banks +1 Chi per turn up to 10–11 Chi while layering offensive/charge multipliers.
+2. **High-Charge Special Detonation (`S+I` & `S+L`):**
+Once buffs are active and Chi reaches 10–12, Ichigo unleashes high-charge `S`-moves (routinely **85%–100% execution charge**).
+* **`S+I`** serves as the heavy armor-breaker: in optimal sequences (e.g., Match #109 vs. `Bullet Ant` Amazon or Match #118 vs. `Bullet Ant` V3), a Round 1–2 `W+I` + `W+K` setup feeds a Round 3 `S+I` at 91–99% charge that deletes **1,950 to 2,620 LP** in a single exchange.
+* **`S+L`** (1,478 uses) is Ichigo's premier high-priority follow-up and round-closer, pairing lower Chi overhead with consistent 80%–100% charge accuracy to finish weakened targets.
+
+
+3. **Chi & Faint Engine (`D+J` Neutral Control):**
+When Chi drops below `S`-move thresholds or opponents turtle up, Ichigo pivots to **`D+J`** (1,482 uses, 43.0% of all `D` actions), backed by `D+I` and `D+L`. These strikes execute reliably at 65%–80% charge, regenerating **+1 to +3 Chi per round** while inflicting **+25 to +31 Faint** per hit—driving Ichigo's **28.8% Faint Infliction Rate** and creating free `DO_NOTHING` stun windows for uncontested `S+L` finishers.
+4. **Emergency Faint-Cleansing (`W+L`) & Surgical Counters (`A+I`):**
+* **Stun Prevention:** Ichigo monitors its own Faint gauge closely. When Faint accumulates into the 45–85 danger zone against aggressive rushdown, the policy triggers **`W+L`** (223 uses) to purge ~30–40 Faint immediately (on top of natural round decay), keeping full `IDLE` stun lockouts down to **1.6%**.
+* **Selective Guarding:** Instead of passive blocking, Ichigo uses **`A+I`** (57.1% of all `A` actions) as a targeted read against high-charge enemy commitments, yielding a **22.6% A-Guard Counter Rate** and preserving Chi for counter-offensives.
+
+
+
+---
+
+## 4. Diagnostic Priorities for Next Training Cycle
+
+* **Anti-Turtle Sequencing (`Beetle` AI):** Against `Beetle` opponents that chain `W+L` evasions (notably `001_005` X and `001_003` V3), Ichigo occasionally fires `S+L` into active evasion frames, draining Chi without LP return. Weighting `D+J` faint-stacking slightly higher when opponent evasion buffs are active will stabilize these 50%–57% matchups.
+* **Early Rushdown Mitigation (`Bullet Ant` Amazon):** In losses against Master-tier Amazon (`14W – 16L`), greedy double-buff openings (`W+I` into `W+K`) occasionally leave Ichigo exposed to fast Round 1–2 `S+K`/`S+J` burst before its counter-offensive comes online. Incorporating an early `A+I` or `D+J` interrupt check on P2 openings against high-aggression profiles should flip the `Bullet Ant` Amazon split above 50%.
+
 002:
 
 003:

@@ -153,7 +153,42 @@ With every matchup cleared between `73.3%` and `90.8%` and zero sub-50% difficul
 
 003:
 
+**Kamen Rider V3 (`003_003`)** now posts a **79.4% overall win rate (626W – 162L – 0D)** across the 788-match evaluation matrix under `v5-state256-action17` (`charge1-reset1`), eliminating every sub-50% cell in the grid. With **Kamen Rider Amazon (`003_006`)** climbing to **57.1% (16W–12L)** on both Beetle and Bullet Ant (**67.2% overall**), V3 holds a positive win rate against every opponent across all four difficulty tiers with zero draws.
 
+## Matchup & Difficulty Matrix (P1 + P2 Combined)
+
+| Opponent | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Overall |
+| --- | --- | --- | --- | --- | --- |
+| **003_007 Stronger** | 29W–1L (96.7%) | 28W–2L (93.3%) | 27W–1L (96.4%) | 19W–5L (79.2%) | **103W–9L (92.0%)** |
+| **003_004 Riderman** | 27W–3L (90.0%) | 29W–1L (96.7%) | 21W–5L (80.8%) | 19W–7L (73.1%) | **96W–16L (85.7%)** |
+| **003_002 Nigo** | 26W–4L (86.7%) | 28W–2L (93.3%) | 23W–3L (88.5%) | 17W–9L (65.4%) | **94W–18L (83.9%)** |
+| **003_001 Ichigo** | 28W–2L (93.3%) | 22W–8L (73.3%) | 17W–9L (65.4%) | 21W–5L (80.8%) | **88W–24L (78.6%)** |
+| **003_005 X** | 27W–3L (90.0%) | 23W–7L (76.7%) | 17W–9L (65.4%) | 17W–9L (65.4%) | **84W–28L (75.0%)** |
+| **003_003 V3 (Mirror)** | 23W–7L (76.7%) | 28W–2L (93.3%) | 18W–8L (69.2%) | 14W–12L (53.8%) | **83W–29L (74.1%)** |
+| **003_006 Amazon** | 22W–8L (73.3%) | 24W–6L (80.0%) | **16W–12L (57.1%)** | **16W–12L (57.1%)** | **78W–38L (67.2%)** |
+| **Tier Total** | **182W–28L (86.7%)** | **182W–28L (86.7%)** | **139W–47L (74.7%)** | **123W–59L (67.6%)** | **626W–162L (79.4%)** |
+
+---
+
+## Demo Winning Match Breakdowns (`v3` vs `amazon`)
+
+The updated evaluation logs (`fingerprint 3952808220`) show that V3 solved the Amazon sustain wall not by out-chipping Amazon in prolonged neutral, but by **reading Amazon's `S+K`/`S+L` burst windows with `A`-stance guards** (`10.8%` usage on Bullet Ant, `12.6%` on Beetle) to bank `13–15` Chi and cash out multi-round `S`-move lethal chains before Amazon can regenerate.
+
+* **The `A+K` Chi-Spike Trap (Bullet Ant Match #7; Beetle Matches #5 & #6):**
+Three of the eight demo wins follow an identical, high-efficiency script. After trading early openers (`W+I`/`W+K` or `D+J` into `W+K`), V3 anticipates Amazon's Round 3 `S+K` (`70–91%` charge) and calls **`A+K` at `43–46%` charge**. Intercepting the heavy attack jumps V3's Chi to **`14–15`** while leaving Amazon dry at `1` Chi. On Bullet Ant Match #7 (`p1`, 8 rounds), this sets up a clean `S+I @ 98%` → `D+J @ 69%` → `W+K @ 41%` reset into a two-hit `S+L @ 88%` (`2,632 → 810 LP`) and `S+K @ 69%` (`810 → 0 LP`) finish. On Beetle Match #5 (`p1`, 7 rounds) and Match #6 (`p2`, 5 rounds), the R3 `A+K` battery triggers immediate back-to-back **`S+L @ 89–94%` → `S+J @ 92–98%**` finishers, erasing Amazon's full `2,700 LP` bar in two turns.
+* **Deep-Deficit `A+L` Turnaround (Bullet Ant Match #3, `p1`, 17 Rounds):**
+Down `876 LP` to Amazon's untouched `2,632 LP` on Round 13 with Faint dangerously high at `86`, V3 reads Amazon's `90%` `S+L` with **`A+L @ 34%`**, absorbing the hit and spiking Chi to **`13`**. That single defensive read flips the match economy: V3 chains three consecutive `S` bursts—`S+I @ 92%` (`2,632 → 1,212 LP`), `S+L @ 87%` (`1,212 → 76 LP`), and `S+J @ 97%`—before closing with `W+L @ 77%` (`76 → 0 LP`) while Amazon never recovers above `6` Chi.
+* **Low-Round Speed Blitzes (Bullet Ant Match #6, `p2`, 4 Rounds & Beetle Match #1, `p1`, 5 Rounds):**
+When V3 preserves opening Chi through low-commitment `W` buffs, it out-races Amazon's sustain entirely. In Bullet Ant Match #6, V3 absorbs back-to-back `S+K` strikes (`98%` and `63%`) during its `W+I @ 61%` / `W+K @ 35%` setup (`2,363 LP`, `9` Chi remaining), then lands **`S+L @ 98%` (`2,700 → 830 LP`) into `S+K @ 100%` (`830 → 0 LP`)** for a 4-round KO. In Beetle Match #1, V3 opens `W+I @ 59%` → `D+L @ 73%` (`12` Chi) → `W+K @ 30%`, then sweeps `2,498 → 358 → 0 LP` via **`S+I @ 100%` and `S+J @ 91%**` for a `3,150 LP` flawless victory.
+* **Stun Lock & Attrition Survival (Bullet Ant Match #4, `p2`, 10 Rounds & Beetle Match #3, `p1`, 12 Rounds):**
+In Bullet Ant Match #4, V3 controls the pace at `3,089 LP`, punishes Amazon's `W+K` with `S+L @ 76%` (`2,700 → 937 LP`), drops `S+K @ 99%` (`870 → 172 LP`), and uses `D+I @ 63%` on Round 9 to push Amazon's Faint to **`100`**, forcing a `DO_NOTHING` stun on Round 10 for an uncontested `S+L @ 92%` kill. In Beetle Match #3, after dropping to `996 LP` by Round 4, V3 stabilizes with disciplined `D`-stance rotation (`D+J` / `D+K` / `D+L` at `78–88%`) and an `A+K @ 32%` guard clash on Round 9, banking `11` Chi by Round 10 to close from `2,184 LP` (`S+I @ 82%` → `414 LP` → `S+J @ 97%` → `0 LP`).
+
+---
+
+## Telemetry & Remaining Slot Notes
+
+* **Economy & Defensive Shift vs. Amazon:** Across the 56 high-tier Amazon matches, V3 maintains a massive **`+5.55` to `+5.86` net Chi advantage** (`0.71–0.88` earned vs `0.90–0.98` spent per round), while `K`-stance `A` guards (`27/33` on Bullet Ant, `31/43` on Beetle) serve as V3's primary anti-`S` countermeasure. Forced `IDLE` recovery remains minimal (`3.3%` on Bullet Ant, `0.9%` on Beetle).
+* **Primary Remaining Variance:** Every matchup-tier cell is now winning, leaving only localized slot asymmetries to monitor: **Amazon on Beetle P2 (`5W–9L`, 35.7%) vs. Beetle P1 (`11W–3L`, 78.6%)**, alongside **Ichigo on Beetle P2 (`6W–7L`)** and **V3 Mirror on Bullet Ant (`53.8%`)**.
 
 
 

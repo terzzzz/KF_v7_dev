@@ -235,7 +235,74 @@ With the complete `CANDIDATE` evaluation (`checkpoint 3074661205`) across all fo
 005:
 
 
+**AI Candidate Evaluation Report — Kamen Rider X (`005_005`)**
 
+**Date:** November 13, 2026
+
+**Prepared by:** Terence Cheng
+
+**Build & Ruleset:** `v5-state256-action17` | Patch `charge1-reset1`
+
+**Evaluation Scope:** 840 Matches (7 Opponents × 4 Difficulty Tiers × 30 Matches/Cell)
+
+**Status:** **PASSED — Recommended for Promotion**
+
+---
+
+## 1. Executive Summary
+
+Candidate checkpoint **Kamen Rider X (`005_005`)** has passed evaluation against the **≥55.0% undefeated/win rate requirement**, achieving an **80.5% undefeated rate** (`80.4%` outright win rate; `675W / 164L / 1D` across 840 matches) and clearing the benchmark by **+25.4 percentage points**.
+
+The model cleared **4 out of 4 difficulty tiers** on aggregate—maintaining a **70.0% win rate** even at the highest difficulty (**Bullet Ant / Master**)—and passed **27 of 28** individual opponent-by-difficulty cells. Behavioral telemetry confirms that `005_005` operates as a disciplined **tempo-control and stun-conversion fighter**, combining balanced offensive pressure with strict Chi management under the `charge1-reset1` ruleset.
+
+---
+
+## 2. Undefeated Rate & Benchmark Compliance
+
+### Aggregate Performance by Difficulty Tier
+
+Every difficulty tier exceeded the 55.0% requirement by at least 15 percentage points, with near-identical performance across Player 1 (`80.7%` win / `81.0%` undefeated) and Player 2 (`80.0%` win / undefeated) starting positions.
+
+| Difficulty Tier | Record (W / L / D) | Win Rate | Undefeated Rate | Benchmark | Margin vs. Target | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Tree-hopper (Easy)** | 190 / 20 / 0 | 90.5% | **90.5%** | ≥55.0% | +35.5% | **PASS** |
+| **Cricket (Balanced)** | 179 / 30 / 1 | 85.2% | **85.7%** | ≥55.0% | +30.7% | **PASS** |
+| **Beetle (Defensive)** | 159 / 51 / 0 | 75.7% | **75.7%** | ≥55.0% | +20.7% | **PASS** |
+| **Bullet Ant (Master)** | 147 / 63 / 0 | 70.0% | **70.0%** | ≥55.0% | +15.0% | **PASS** |
+| **Overall Total** | **675 / 164 / 1** | **80.4%** | **80.5%** | **≥55.0%** | **+25.5%** | **PASS** |
+
+### Full Roster Matchup Matrix (30 Matches per Cell; ≥17 Wins to Pass)
+
+Six of the seven roster characters passed all four difficulty tiers with ≥70.0% win rates at Master level.
+
+| Opponent | Tree-hopper (Easy) | Cricket (Balanced) | Beetle (Defensive) | Bullet Ant (Master) | Overall Win Rate | Cells Passed |
+| --- | --- | --- | --- | --- | --- | --- |
+| **005_001 (Ichigo)** | 93.3% (`28-2-0`) | 90.0% (`27-3-0`) | 83.3% (`25-5-0`) | 76.7% (`23-7-0`) | **85.8%** | 4 / 4 |
+| **005_007 (Stronger)** | 93.3% (`28-2-0`) | 86.7% (`26-4-0`) | 83.3% (`25-5-0`) | 73.3% (`22-8-0`) | **84.2%** | 4 / 4 |
+| **005_002 (Nigo)** | 90.0% (`27-3-0`) | 90.0% (`27-3-0`) | 83.3% (`25-5-0`) | 70.0% (`21-9-0`) | **83.3%** | 4 / 4 |
+| **005_004 (Riderman)** | 90.0% (`27-3-0`) | 86.7% (`26-4-0`) | 76.7% (`23-7-0`) | 73.3% (`22-8-0`) | **81.7%** | 4 / 4 |
+| **005_005 (X — Mirror)** | 90.0% (`27-3-0`) | 86.7% (`26-3-1`) | 73.3% (`22-8-0`) | 73.3% (`22-8-0`) | **80.8%** | 4 / 4 |
+| **005_003 (V3)** | 90.0% (`27-3-0`) | 83.3% (`25-5-0`) | 73.3% (`22-8-0`) | 73.3% (`22-8-0`) | **80.0%** | 4 / 4 |
+| **005_006 (Amazon)** | 86.7% (`26-4-0`) | 73.3% (`22-8-0`) | 56.7% (`17-13-0`) | 50.0% (`15-15-0`) | **66.7%** | 3 / 4 |
+
+---
+
+## 3. AI Fight Style & Combat Telemetry Profile
+
+Action distribution and round-level telemetry show that `005_005` plays a **calculated, resource-disciplined pressure style** rather than relying on erratic button-spamming or single-move loops:
+
+* **Multi-Vector Offensive Pressure (`43.2%` `D` Actions):** Standard attacks are distributed evenly across `D+J`, `D+I`, and `D+L` variants, allowing the model to vary attack tempo, build faint gauge reliably, and prevent defensive AI tiers (Beetle and Bullet Ant) from locking into predictable counter-patterns.
+* **Structured Buff & Setup Cycle (`24.1%` `W` Actions):** Nearly a quarter of all turns are invested in state enhancement—anchored primarily on `W+I` and `W+J`—establishing damage and Chi-generation advantages before committing to high-cost finishers.
+* **High-Conversion Finisher Timing (`24.1%` `S` Actions):** Special finishers (`S+I` and `S+L`) are held predominantly for high-faint or stunned opponent states rather than fired raw in neutral, translating directly into a **39.3% inflicted faint rate** against a **19.0% suffered faint rate** (more than a 2:1 stun advantage).
+* **Chi Discipline & Survivability (`1.8%` Forced `IDLE`):** Under the `charge1-reset1` economy, `005_005` rarely over-extends into empty-Chi stun states (`1.8%` forced `IDLE` rate) and closes matches with an average of **45.7% remaining LP** compared to **6.5%** for opponents.
+
+---
+
+## 4. Matchup Watch Item & Deployment Recommendation
+
+The sole sub-threshold cell across the entire 28-cell matrix is **Kamen Rider Amazon (`005_006`) on Bullet Ant (Master)**, which finished at **50.0% parity** (`15W / 15L` total: `9W 6L` / `60.0%` as P1, `6W 9L` / `40.0%` as P2). Match logs indicate that Amazon's mid-fight LP regeneration extends bouts into 33–38 rounds, punishing X whenever Chi reserves are spent without securing an immediate 100-faint finisher window.
+
+Because `005_005` clears every aggregate tier by +15.0% to +35.5%, exhibits zero P1/P2 side bias, and passes 27 of 28 individual cells with strong LP and stun margins, the candidate is ready to be locked and promoted into the production multi-matchup matrix as we advance to the next rider evaluation.
 
 
 

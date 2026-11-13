@@ -176,10 +176,6 @@
     };
   }
 
-  /*
-   * Detects whether Cricket's previous S/D move failed (dealt 0 direct damage,
-   * was guarded/parried, or was evaded/interrupted) and updates the penalty flag.
-   */
   function updateCricketSDTracker(state, slot, history) {
     const tracker = cricketTrackers[slot];
     if (!tracker) return false;
@@ -196,7 +192,6 @@
       return false;
     }
 
-    // Check most recent history entry if available
     const lastTurn =
       Array.isArray(history) && history.length > 0
         ? history[history.length - 1]
@@ -232,11 +227,6 @@
     );
   }
 
-  /*
-   * Deduplicates sorted rows by action.key (keeping the highest-scoring charge variant
-   * for each move key) so Cricket's 1st-best vs 5th-best and Bullet Ant's Top-4 represent
-   * distinct move keys whenever possible.
-   */
   function buildUniqueKeyRows(rows) {
     const unique = [];
     const seenKeys = new Set();
@@ -289,34 +279,58 @@
 
     const liveContext = safeContext.liveContext || state.liveContext || null;
     const history = safeContext.history || [];
+    const enemySlot = C.other(slot);
 
     let net = safeContext.neuralNetwork || null;
     let spec = safeContext.neuralSpec || null;
+    let loadedMatrixFile = null;
 
     if (difficulty === "rider" && !net) {
+      // 1. Check policyWeights passed in by `ai_worker.js` (even when `disableAgent === true`)
       let checkpoint = safeContext.policyWeights || null;
 
-      if (!checkpoint && !safeContext.disableAgent && g.SoulAgent) {
-        checkpoint = g.SoulAgent.getSection(
-          state[slot].id,
-          state[C.other(slot)].id,
-          "active"
-        ) || null;
+      // 2. If not provided by worker and agent isn't disabled, check SoulAgent / SoulNN
+      if (!checkpoint && !safeContext.disableAgent) {
+        if (g.SoulAgent && typeof g.SoulAgent.getSection === "function") {
+          checkpoint =
+            g.SoulAgent.getSection(state[slot].id, state[enemySlot].id, "active") ||
+            g.SoulAgent.getSection(state[slot].id, state[enemySlot].id, "candidate") ||
+            null;
+        }
       }
 
       if (checkpoint) {
-        const validation = g.SoulAgent.validateCheckpoint(
-          checkpoint,
-          state[slot].id,
-          state[C.other(slot)].id
-        );
+        if (
+          g.SoulAgent &&
+          typeof g.SoulAgent.validateCheckpoint === "function" &&
+          checkpoint.version
+        ) {
+          const validation = g.SoulAgent.validateCheckpoint(
+            checkpoint,
+            state[slot].id,
+            state[enemySlot].id
+          );
 
-        if (!validation.valid) {
-          throw new Error("Invalid RIDER checkpoint: " + validation.error);
+          if (!validation.valid) {
+            throw new Error("Invalid RIDER checkpoint: " + validation.error);
+          }
         }
 
-        net = g.SoulNN.Network.fromJSON(checkpoint.net);
-        spec = checkpoint.spec;
+        net = g.SoulNN.Network.fromJSON(checkpoint.net || checkpoint);
+        spec = checkpoint.spec || spec;
+        loadedMatrixFile =
+          checkpoint.matrixFile ||
+          (g.SoulAgent && typeof g.SoulAgent.getMatrixFileName === "function"
+            ? `data/${g.SoulAgent.getMatrixFileName(state[slot].id, state[enemySlot].id)}`
+            : "SoulAgent.active");
+      } else if (!safeContext.disableAgent && g.SoulNN && typeof g.SoulNN.getMatchupMatrix === "function") {
+        // 3. Direct synchronous fallback from `data/matrix_r{A}_vs_r{B}.json`
+        const entry = g.SoulNN.getMatchupMatrix(state[slot], state[enemySlot]);
+        if (entry && entry.net) {
+          net = entry.net;
+          spec = entry.spec || spec;
+          loadedMatrixFile = entry.fileName;
+        }
       }
     }
 
@@ -421,7 +435,6 @@
 
     /*
      * LEVEL 1: Tree-hopper (easy / novice)
-     * 40% random legal move, 10% IDLE, 30% legal D, 20% legal S (fallback random legal).
      */
     if (difficulty === "easy") {
       const uniqueRows = buildUniqueKeyRows(rows);
@@ -460,12 +473,6 @@
     }
     /*
      * LEVEL 2: Cricket (balanced)
-     * - 20% 1st best move
-     * - 10% IDLE
-     * - 20% Legal W move (fallback random S/D)
-     * - 10% Balance move (A or IDLE)
-     * - 40% 5th best move
-     * Charge Rate: 50/50 between 50-75% or 76-100%, with -10% on next S/D after a failed S/D.
      */
     else if (difficulty === "balanced") {
       const sdFailedPreviously = updateCricketSDTracker(state, slot, history);
@@ -542,19 +549,17 @@
 
       const tracker = cricketTrackers[slot];
       if (tracker) {
-        const enemySlot = C.other(slot);
         tracker.lastActionWasSD = isSDKey(state, slot, selected.action.key);
         tracker.enemyLpBefore = Number(state[enemySlot]?.lp || 1600);
       }
     }
     /*
      * LEVEL 3: Beetle (defensive)
-     * Picks the 1st best move from the Two-Regime Defensive Search Tree.
      */
     else if (difficulty === "defensive") {
       selected = rows[0];
       const myChi = Number(state[slot]?.chi || 0);
-      const oppChi = Number(state[C.other(slot)]?.chi || 0);
+      const oppChi = Number(state[enemySlot]?.chi || 0);
       selectionReason =
         myChi < oppChi
           ? "Beetle: 1st best from Defensive CHI-Recovery Tree (myCHI < oppCHI)"
@@ -562,7 +567,6 @@
     }
     /*
      * LEVEL 4: Bullet Ant (master)
-     * Picks uniformly at random (25% each) from the diversified Top 4 moves.
      */
     else if (difficulty === "master" && !rider) {
       const topCount = Math.min(4, rows.length);
@@ -577,12 +581,11 @@
     }
     /*
      * LEVEL 5: Rider (rider)
-     * Picks the highest total EV action (EV_Tree + EV_Matrix + EV_Live).
      */
     else if (rider) {
       selected = rows[0];
       selectionReason = evaluator
-        ? "Rider: Max EV (EV_Tree + EV_Matrix + EV_Live)"
+        ? `Rider: Max EV (EV_Tree + EV_Matrix [${loadedMatrixFile || "custom"}] + EV_Live)`
         : "Rider fallback: Max EV (EV_Tree + EV_Live; no active matchup matrix)";
     }
 
@@ -592,6 +595,7 @@
       playstyle: label,
       chosenScore: Number(selected.score.toFixed(3)),
       neural: Boolean(evaluator),
+      matrixFile: loadedMatrixFile,
       liveReplan: Boolean(liveContext && !liveContext.isInitial),
       strategy: selectionReason
     });

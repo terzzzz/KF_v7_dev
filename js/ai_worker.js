@@ -89,8 +89,9 @@ self.onmessage = async function (event) {
       !callerSpecifiedWeights &&
       !context.disableAgent
     ) {
+      // AI slot is `learner` (e.g. Amazon = r5), Human/other slot is `opponent` (e.g. Ichigo = r0)
+      // Fetches `data/matrix_r5_vs_r0.json`
       const learner = context.state[context.slot].id;
-
       const opponent = context.state[
         CombatCore.other(context.slot)
       ].id;
@@ -108,7 +109,7 @@ self.onmessage = async function (event) {
           console.warn(
             "[AI Worker] " + (error?.message || String(error))
           );
-
+          repositoryCache.delete(key);
           return null;
         });
 
@@ -118,7 +119,8 @@ self.onmessage = async function (event) {
       prepared.policyWeights = await repositoryCache.get(key);
 
       modelSource = prepared.policyWeights
-        ? "repository checkpoint"
+        ? (prepared.policyWeights.matrixFile ||
+           `data/${SoulAgent.getMatrixFileName(learner, opponent)}`)
         : "none";
     }
 
@@ -159,7 +161,8 @@ self.onmessage = async function (event) {
       modelSource,
       chargingPatch: PATCH,
       schema: EXPECTED_SCHEMA
-    };  
+    };
+
     self.postMessage({
       id,
       result,

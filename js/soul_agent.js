@@ -1,8 +1,8 @@
 /* js/soul_agent.js
- * Exact-matchup checkpoint & Per-Rider Master Matrix Bundle storage (v7).
+ * Exact-matchup checkpoint & 49-Matchup Matrix (data/matrix_r0_vs_r0.json .. r6_vs_r6.json) storage (v7).
  *
  * Build: v5-state256-action17
- * Matrix: v7-7riders-10backup (IndexedDB + Google Drive 49-Matrix Persistence)
+ * Matrix: v7-7riders-10backup (IndexedDB + Local data/ 49-Matrix Persistence)
  * Patch: charge1-reset1
  */
 
@@ -160,7 +160,11 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   }
 
   function toCode(id) {
-    const value = String(id || "").trim().toLowerCase();
+    if (id && typeof id === "object") {
+      id = id.id ?? id.riderId ?? id.key ?? id.name ?? "";
+    }
+
+    const value = String(id ?? "").trim().toLowerCase();
 
     if (Object.prototype.hasOwnProperty.call(RIDER_CODES, value)) {
       return RIDER_CODES[value];
@@ -173,8 +177,13 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       }
     }
 
-    if (/^r[0-6]$/.test(value)) {
+    if (/^r([0-6])$/.test(value)) {
       const idx = Number(value.slice(1)) + 1;
+      return formatCodeNumber(idx);
+    }
+
+    if (/^[0-6]$/.test(value)) {
+      const idx = Number(value) + 1;
       return formatCodeNumber(idx);
     }
 
@@ -184,6 +193,24 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   function fromCode(code) {
     const normalized = String(code || "").trim();
     return REVERSE_CODES[normalized] || normalized;
+  }
+
+  /**
+   * Converts any rider identifier ("ichigo", "001", "r0", 0) to 0..6 index
+   * where r0 = Ichigo (0) .. r6 = Stronger (6).
+   */
+  function toRiderIndex(id) {
+    if (typeof id === "number" && Number.isInteger(id) && id >= 0 && id <= 6) {
+      return id;
+    }
+    const code = toCode(id);
+    return Math.max(0, Math.min(6, Number(code) - 1));
+  }
+
+  function getMatrixFileName(learner, opponent) {
+    const rA = toRiderIndex(learner);
+    const rB = toRiderIndex(opponent);
+    return `matrix_r${rA}_vs_r${rB}.json`;
   }
 
   function getCanonicalKey(learner, opponent) {
@@ -770,6 +797,28 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     return url;
   }
 
+  /**
+   * Builds candidate URLs for a 1v1 matchup in `data/`:
+   * Primary: `data/matrix_r{A}_vs_r{B}.json` (e.g. `data/matrix_r5_vs_r0.json`)
+   * Fallback: `data/matrix_r{A}_r{B}.json`
+   */
+  function matchupMatrixURLs(learner, opponent) {
+    const rA = toRiderIndex(learner);
+    const rB = toRiderIndex(opponent);
+    const base = projectBase();
+
+    const primary = new URL(`data/matrix_r${rA}_vs_r${rB}.json`, base);
+    primary.searchParams.set("v", CACHE_TAG);
+
+    const secondary = new URL(`data/matrix_r${rA}_r${rB}.json`, base);
+    secondary.searchParams.set("v", CACHE_TAG);
+
+    return [
+      { url: primary, label: `data/matrix_r${rA}_vs_r${rB}.json` },
+      { url: secondary, label: `data/matrix_r${rA}_r${rB}.json` }
+    ];
+  }
+
   function ingestRiderBundleIntoStore(bundle, overwriteActive = true) {
     const validation = validateRiderBundle(bundle);
     if (!validation.valid) {
@@ -823,35 +872,259 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     };
   }
 
-  async function fetchRiderBundleFromCDN(learner) {
-    assertRuntime();
+  function normalizeDriveCheckpoint(rawCp, expectedLearner, expectedOpponent) {
+    if (!rawCp || typeof rawCp !== "object") return null;
 
-    const code = toCode(learner);
-    const response = await fetch(riderBundleURL(code), {
-      cache: "no-store"
-    });
+    // Support raw network JSON `{ sizes, layers }` as well as `{ net: { sizes, layers } }`
+    const copy = rawCp.net
+      ? clone(rawCp)
+      : Array.isArray(rawCp.sizes) && Array.isArray(rawCp.layers)
+        ? { net: clone(rawCp) }
+        : null;
 
-    if (!response.ok) {
-      throw new Error(
-        `Cannot fetch data/matrix/${code}.json: HTTP ${response.status}.`
-      );
+    if (!copy || !copy.net) return null;
+
+    const canonicalLearnerId = expectedLearner
+      ? fromCode(toCode(expectedLearner))
+      : copy.learnerId
+        ? fromCode(toCode(copy.learnerId))
+        : null;
+
+    const canonicalOpponentId = expectedOpponent
+      ? fromCode(toCode(expectedOpponent))
+      : copy.opponentId
+        ? fromCode(toCode(copy.opponentId))
+        : null;
+
+    if (canonicalLearnerId) {
+      copy.learnerId = canonicalLearnerId;
+    }
+    if (canonicalOpponentId) {
+      copy.opponentId = canonicalOpponentId;
     }
 
-    const payload = await response.json();
+    copy.version = WORKER_VERSION;
+
+    if (
+      !copy.spec ||
+      copy.spec.schema !== EXPECTED_SCHEMA
+    ) {
+      if (typeof g.SoulEnv?.makeSpec === "function") {
+        copy.spec = g.SoulEnv.makeSpec();
+      }
+    }
+
+    if (copy.learnerId && copy.opponentId) {
+      copy.canonicalKey = getCanonicalKey(copy.learnerId, copy.opponentId);
+    }
+
+    if (!Number.isSafeInteger(copy.steps) || copy.steps < 0) {
+      copy.steps = Number(copy.steps) > 0 ? Math.floor(Number(copy.steps)) : 0;
+    }
+
+    if (!Number.isSafeInteger(copy.games) || copy.games < 0) {
+      copy.games = Number(copy.games) > 0
+        ? Math.floor(Number(copy.games))
+        : copy.steps > 0
+          ? Math.max(1, Math.floor(copy.steps / 12))
+          : 0;
+    }
+
+    const check = validateCheckpoint(copy, expectedLearner, expectedOpponent);
+    return check.valid ? copy : null;
+  }
+
+  function ingestDriveMatchup(payload, expectedLearner = null, expectedOpponent = null) {
+    if (!payload || typeof payload !== "object") {
+      return { imported: false, games: 0, steps: 0, checkpoint: null };
+    }
 
     if (isRiderBundle(payload)) {
-      const result = ingestRiderBundleIntoStore(payload, true);
+      const res = ingestRiderBundleIntoStore(payload, true);
       saveToLocalStorage();
-      return result;
+      const cp = expectedLearner && expectedOpponent
+        ? getSection(expectedLearner, expectedOpponent, "active") ||
+          getSection(expectedLearner, expectedOpponent, "candidate")
+        : null;
+      return { imported: res.loadedCount > 0, games: cp?.games || 0, steps: cp?.steps || 0, checkpoint: cp };
+    }
+
+    let imported = false;
+    let bestGames = 0;
+    let bestSteps = 0;
+    let canonicalKey = null;
+    let resolvedCheckpoint = null;
+
+    const activeRaw =
+      payload.soulActive ||
+      payload.activeCheckpoint ||
+      (payload.active && payload.active.net ? payload.active : null);
+
+    const candidateRaw =
+      payload.soulCandidate ||
+      payload.soulCheckpoint ||
+      payload.checkpoint ||
+      (payload.candidate && payload.candidate.net ? payload.candidate : null) ||
+      (payload.net ? payload : null) ||
+      (Array.isArray(payload.sizes) && Array.isArray(payload.layers) ? payload : null);
+
+    const validActive = normalizeDriveCheckpoint(
+      activeRaw || candidateRaw,
+      expectedLearner,
+      expectedOpponent
+    );
+
+    if (validActive) {
+      const key = validActive.canonicalKey;
+      const existingAct = store.active.matchups[key];
+      if (
+        !existingAct ||
+        (validActive.games || 0) >= (existingAct.games || 0) ||
+        (validActive.steps || 0) >= (existingAct.steps || 0)
+      ) {
+        resolvedCheckpoint = setActive(validActive);
+      } else {
+        resolvedCheckpoint = existingAct;
+      }
+      imported = true;
+      canonicalKey = key;
+      bestGames = Math.max(bestGames, resolvedCheckpoint.games || 0);
+      bestSteps = Math.max(bestSteps, resolvedCheckpoint.steps || 0);
+    }
+
+    const validCandidate = normalizeDriveCheckpoint(
+      candidateRaw || activeRaw,
+      expectedLearner,
+      expectedOpponent
+    );
+
+    if (validCandidate) {
+      const key = validCandidate.canonicalKey;
+      const existingCand = store.candidate.matchups[key];
+      if (
+        !existingCand ||
+        (validCandidate.games || 0) > 0 ||
+        (validCandidate.steps || 0) > 0 ||
+        (existingCand.games || 0) === 0
+      ) {
+        if (
+          !existingCand ||
+          (validCandidate.games || 0) >= (existingCand.games || 0) ||
+          (validCandidate.steps || 0) >= (existingCand.steps || 0)
+        ) {
+          const savedCand = setCandidate(validCandidate);
+          if (!resolvedCheckpoint) {
+            resolvedCheckpoint = savedCand;
+          }
+          imported = true;
+          canonicalKey = key;
+          bestGames = Math.max(bestGames, savedCand.games || 0);
+          bestSteps = Math.max(bestSteps, savedCand.steps || 0);
+        }
+      }
+    }
+
+    return {
+      imported,
+      canonicalKey,
+      games: bestGames,
+      steps: bestSteps,
+      checkpoint: resolvedCheckpoint
+    };
+  }
+
+  /**
+   * Fetches the exact 1v1 matchup file from `data/matrix_r{learner}_vs_r{opponent}.json`
+   * (e.g. AI Amazon r5 vs Human Ichigo r0 -> `data/matrix_r5_vs_r0.json`)
+   * and returns the validated checkpoint object for `ai_worker.js` and `KF_AI.choose()`.
+   */
+  async function fetchMatchupFromCDN(learner, opponent) {
+    assertRuntime();
+
+    const candidates = matchupMatrixURLs(learner, opponent);
+
+    for (const { url, label } of candidates) {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) continue;
+
+        const payload = await response.json();
+        const ingested = ingestDriveMatchup(payload, learner, opponent);
+
+        if (ingested.checkpoint) {
+          const cpCopy = clone(ingested.checkpoint);
+          cpCopy.matrixFile = label;
+          return cpCopy;
+        }
+      } catch (_) {
+        // Try next candidate path
+      }
+    }
+
+    // Fallback: check if already in active/candidate store or bundle
+    const existing =
+      getSection(learner, opponent, "active") ||
+      getSection(learner, opponent, "candidate");
+    if (existing) {
+      return clone(existing);
+    }
+
+    try {
+      await fetchRiderBundleFromCDN(learner);
+      const fromBundle =
+        getSection(learner, opponent, "active") ||
+        getSection(learner, opponent, "candidate");
+      if (fromBundle) {
+        return clone(fromBundle);
+      }
+    } catch (_) {
+      // Ignore missing bundle fallback
     }
 
     throw new Error(
-      `data/matrix/${code}.json is not a v7 Rider Matrix Bundle.`
+      `Cannot fetch ${getMatrixFileName(learner, opponent)} from data/ folder.`
     );
   }
 
-  async function fetchMatchupFromCDN(learner, opponent) {
-    return fetchRiderBundleFromCDN(learner, opponent);
+  async function fetchRiderBundleFromCDN(learner, opponent = null) {
+    assertRuntime();
+
+    // If a specific opponent was passed, fetch that 1v1 matrix file directly
+    if (opponent && opponent !== "*") {
+      return fetchMatchupFromCDN(learner, opponent);
+    }
+
+    const code = toCode(learner);
+    try {
+      const response = await fetch(riderBundleURL(code), {
+        cache: "no-store"
+      });
+
+      if (response.ok) {
+        const payload = await response.json();
+        if (isRiderBundle(payload)) {
+          const result = ingestRiderBundleIntoStore(payload, true);
+          saveToLocalStorage();
+          return result;
+        }
+      }
+    } catch (_) {
+      // Fall through to per-opponent matrix_rA_vs_rB.json scan
+    }
+
+    let loadedCount = 0;
+    for (const oppCode of getActiveCodes()) {
+      try {
+        const cp = await fetchMatchupFromCDN(code, oppCode);
+        if (cp) loadedCount++;
+      } catch (_) {}
+    }
+
+    saveToLocalStorage();
+    return {
+      learnerCode: code,
+      loadedCount
+    };
   }
 
   async function scanAllMatchupsFromRepo() {
@@ -859,24 +1132,32 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
 
     let found = 0;
     const activeCodes = getActiveCodes();
+    const jobs = [];
 
-    const jobs = activeCodes.map(async code => {
-      try {
-        const response = await fetch(riderBundleURL(code), {
-          cache: "no-store"
-        });
+    for (const learnerCode of activeCodes) {
+      for (const oppCode of activeCodes) {
+        jobs.push(
+          (async () => {
+            const candidates = matchupMatrixURLs(learnerCode, oppCode);
+            for (const { url } of candidates) {
+              try {
+                const response = await fetch(url, { cache: "no-store" });
+                if (!response.ok) continue;
 
-        if (!response.ok) return;
-
-        const payload = await response.json();
-        if (!isRiderBundle(payload)) return;
-
-        const result = ingestRiderBundleIntoStore(payload, false);
-        found += result.loadedCount;
-      } catch (_) {
-        // Missing/offline bundle files do not block fresh training.
+                const payload = await response.json();
+                const res = ingestDriveMatchup(payload, learnerCode, oppCode);
+                if (res.imported) {
+                  found++;
+                  return;
+                }
+              } catch (_) {
+                // Missing/offline matrix files do not block startup
+              }
+            }
+          })()
+        );
       }
-    });
+    }
 
     await Promise.all(jobs);
     saveToLocalStorage();
@@ -897,7 +1178,7 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
         loadFromLocalStorage();
         await loadFromIndexedDB();
 
-        // 2. Fill any missing slots from repo bundles without overwriting newer trained models
+        // 2. Scan all 49 `data/matrix_rA_vs_rB.json` files from the data folder
         await scanAllMatchupsFromRepo();
         await flushStorage();
 
@@ -1068,125 +1349,6 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
 
     saveToLocalStorage();
     return saved;
-  }
-
-  function normalizeDriveCheckpoint(rawCp, expectedLearner, expectedOpponent) {
-    if (!rawCp || typeof rawCp !== "object" || !rawCp.net) return null;
-
-    const copy = clone(rawCp);
-    if (expectedLearner && !copy.learnerId) {
-      copy.learnerId = fromCode(toCode(expectedLearner));
-    }
-    if (expectedOpponent && !copy.opponentId) {
-      copy.opponentId = fromCode(toCode(expectedOpponent));
-    }
-    if (!copy.version) {
-      copy.version = WORKER_VERSION;
-    }
-    if (!copy.spec && typeof g.SoulEnv?.makeSpec === "function") {
-      copy.spec = g.SoulEnv.makeSpec();
-    }
-    if (copy.learnerId && copy.opponentId) {
-      copy.canonicalKey = getCanonicalKey(copy.learnerId, copy.opponentId);
-    }
-    if (!Number.isSafeInteger(copy.games) || copy.games < 0) {
-      copy.games = Number(copy.games) > 0 ? Math.floor(Number(copy.games)) : 0;
-    }
-    if (!Number.isSafeInteger(copy.steps) || copy.steps < 0) {
-      copy.steps = Number(copy.steps) > 0 ? Math.floor(Number(copy.steps)) : 0;
-    }
-
-    const check = validateCheckpoint(copy, expectedLearner, expectedOpponent);
-    return check.valid ? copy : null;
-  }
-
-  function ingestDriveMatchup(payload, expectedLearner = null, expectedOpponent = null) {
-    if (!payload || typeof payload !== "object") {
-      return { imported: false, games: 0, steps: 0 };
-    }
-
-    if (isRiderBundle(payload)) {
-      const res = ingestRiderBundleIntoStore(payload, true);
-      saveToLocalStorage();
-      return { imported: res.loadedCount > 0, games: 0, steps: 0 };
-    }
-
-    let imported = false;
-    let bestGames = 0;
-    let bestSteps = 0;
-    let canonicalKey = null;
-
-    const activeRaw =
-      payload.soulActive ||
-      payload.activeCheckpoint ||
-      (payload.active && payload.active.net ? payload.active : null);
-
-    const candidateRaw =
-      payload.soulCandidate ||
-      payload.soulCheckpoint ||
-      payload.checkpoint ||
-      (payload.candidate && payload.candidate.net ? payload.candidate : null) ||
-      (payload.net ? payload : null);
-
-    const validActive = normalizeDriveCheckpoint(
-      activeRaw,
-      expectedLearner,
-      expectedOpponent
-    );
-
-    if (validActive) {
-      const key = validActive.canonicalKey;
-      const existingAct = store.active.matchups[key];
-      if (
-        !existingAct ||
-        (validActive.games || 0) >= (existingAct.games || 0)
-      ) {
-        setActive(validActive);
-        imported = true;
-        canonicalKey = key;
-        bestGames = Math.max(bestGames, validActive.games || 0);
-        bestSteps = Math.max(bestSteps, validActive.steps || 0);
-      }
-    }
-
-    const validCandidate = normalizeDriveCheckpoint(
-      candidateRaw,
-      expectedLearner,
-      expectedOpponent
-    );
-
-    if (validCandidate) {
-      const key = validCandidate.canonicalKey;
-      const existingCand = store.candidate.matchups[key];
-      // Do not overwrite an already-trained candidate in memory with a 0-game placeholder
-      if (
-        !existingCand ||
-        (validCandidate.games || 0) > 0 ||
-        (existingCand.games || 0) === 0
-      ) {
-        if (
-          !existingCand ||
-          (validCandidate.games || 0) >= (existingCand.games || 0)
-        ) {
-          setCandidate(validCandidate);
-          imported = true;
-          canonicalKey = key;
-          bestGames = Math.max(bestGames, validCandidate.games || 0);
-          bestSteps = Math.max(bestSteps, validCandidate.steps || 0);
-        }
-      }
-    } else if (validActive && !store.candidate.matchups[validActive.canonicalKey]) {
-      setCandidate(validActive);
-      imported = true;
-      canonicalKey = validActive.canonicalKey;
-    }
-
-    return {
-      imported,
-      canonicalKey,
-      games: bestGames,
-      steps: bestSteps
-    };
   }
 
   function importCandidate(payload) {
@@ -1409,6 +1571,36 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     opponent,
     target = "candidate"
   ) {
+    if (learner && opponent && opponent !== "*") {
+      const cp =
+        getSection(learner, opponent, target) ||
+        getSection(learner, opponent, "active");
+      if (!cp) {
+        throw new Error(`No trained matrix found for ${getMatrixFileName(learner, opponent)}.`);
+      }
+      const fileName = getMatrixFileName(learner, opponent);
+      const blob = new Blob(
+        [JSON.stringify(cp, null, 2)],
+        { type: "application/json" }
+      );
+      if (typeof document !== "undefined") {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      return {
+        fileName,
+        key: cp.canonicalKey,
+        sizeMB: (blob.size / 1048576).toFixed(2),
+        games: cp.games || 0
+      };
+    }
+
     return downloadRiderBundle(learner, target);
   }
 
@@ -1462,6 +1654,8 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     flushStorage,
     toCode,
     fromCode,
+    toRiderIndex,
+    getMatrixFileName,
     formatCodeNumber,
     getActiveCodes,
     getBackupCodes,

@@ -1,7 +1,7 @@
 /* js/ui.js
  * Battle HUD and status presentation (Bilingual EN / JA).
  *
- * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock + 5-insect-tiers + stronger-dynamo + movelist-riders-sync + movelist-label-hud-sync
+ * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock + 5-insect-tiers + stronger-dynamo + movelist-riders-sync + movelist-label-hud-sync + dual-battle-scoreboard
  */
 (function (g) {
   "use strict";
@@ -78,6 +78,18 @@
       finisherEn: "Super Electron Drill Kick / Stronger Electro Kick",
       finisherJa: "超電子ドリルキック / ストロンガー電キック"
     }
+  });
+
+  const DIFF_KEY_TO_MULTIPLIER = Object.freeze({
+    easy: 1.0,
+    hopper: 1.0,
+    balanced: 1.25,
+    cricket: 1.25,
+    defensive: 1.5,
+    beetle: 1.5,
+    master: 2.0,
+    ant: 2.0,
+    rider: 2.5
   });
 
   const I18N_UI = Object.freeze({
@@ -219,6 +231,26 @@
         lockedFlag: "LOCKED!",
         readyText: "READY",
         tapToCharge: "TAP DIRECTION TO CHARGE"
+      },
+      score: {
+        title: "BATTLE SCORE",
+        p1Tag: "P1",
+        p2Tag: "P2",
+        win: "WIN",
+        loss: "LOSE",
+        draw: "DRAW",
+        damageBase: "Damage / Overkill",
+        remainingLp: "Remaining LP",
+        perfectBonus: "Perfect Win Bonus",
+        roundBonus: "Speed Bonus",
+        chiScore: "Remaining CHI",
+        executionScore: "D & S Executions",
+        defenseScore: "Guard Mitigation",
+        dizzyScore: "Dizzy Inflicted",
+        subtotal: "Subtotal",
+        multiplier: "Difficulty",
+        total: "TOTAL SCORE",
+        closeAria: "Hide score panel"
       }
     },
 
@@ -360,6 +392,26 @@
         lockedFlag: "確定！",
         readyText: "準備完了",
         tapToCharge: "方向キーでチャージ"
+      },
+      score: {
+        title: "バトルスコア",
+        p1Tag: "P1",
+        p2Tag: "P2",
+        win: "勝利",
+        loss: "敗北",
+        draw: "引き分け",
+        damageBase: "与ダメージ・オーバーキル",
+        remainingLp: "残存LP",
+        perfectBonus: "パーフェクト勝利",
+        roundBonus: "スピードボーナス",
+        chiScore: "残存氣",
+        executionScore: "D・S技ヒット",
+        defenseScore: "ガード軽減",
+        dizzyScore: "気絶誘発",
+        subtotal: "小計",
+        multiplier: "難易度倍率",
+        total: "総合スコア",
+        closeAria: "スコア表示を閉じる"
       }
     }
   });
@@ -515,11 +567,26 @@
   const renderedTags = new WeakMap();
   const riderHitCounters = new Map();
   let lastTrackedRound = null;
+  let lastScoreboardSignature = "";
+  let dismissedScoreboardSignature = "";
 
   const byId = id => document.getElementById(id);
 
   function escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function escapeHtml(str) {
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function formatInt(val) {
+    return Math.round(number(val)).toLocaleString("en-US");
   }
 
   const EN_TO_JA_REGEX_RULES = Object.freeze(
@@ -981,6 +1048,11 @@
         }
       }
     });
+
+    const activeCore = getActiveCoreState();
+    if (activeCore?.winner) {
+      renderBattleScoreboard(activeCore);
+    }
   }
 
   function periodicAmount(buff, field) {
@@ -1189,6 +1261,242 @@
     diffKey = diffAliases[diffKey] || diffKey;
 
     return { isCPU, diffKey };
+  }
+
+  function getActiveCoreState() {
+    if (g.gameState?.core?.p1 && g.gameState?.core?.p2) {
+      return g.gameState.core;
+    }
+    if (g.gameState?.p1 && g.gameState?.p2) {
+      return g.gameState;
+    }
+    return null;
+  }
+
+  function computeSinglePlayerScore(coreState, slot, diffKey, multiplier) {
+    if (typeof g.CombatCore?.calculateScore === "function") {
+      return g.CombatCore.calculateScore(coreState, {
+        slot,
+        difficulty: diffKey,
+        multiplier
+      });
+    }
+
+    // Fallback if CombatCore.calculateScore is unavailable
+    const foeSlot = slot === "p1" ? "p2" : "p1";
+    const self = coreState[slot];
+    const foe = coreState[foeSlot];
+    const stats = self.scoreStats || {
+      damageDealt: Math.max(0, number(foe.maxLp) - number(foe.lp)),
+      dsExecutionPts: 0,
+      damageReduced: 0,
+      dizzyInflicted: 0
+    };
+
+    const outcome = !coreState.winner
+      ? "in_progress"
+      : coreState.winner === "draw"
+        ? "draw"
+        : coreState.winner === slot
+          ? "win"
+          : "loss";
+
+    const maxRounds = Math.max(2, number(g.COMBAT_RULES?.MAX_ROUNDS, 40));
+    const currentRoundNum = clamp(number(coreState.round, 1), 1, maxRounds);
+
+    const damageBaseScore = Math.round(5000 * (number(stats.damageDealt) / Math.max(1, number(foe.maxLp, 3000))));
+    const remainingLpScore = Math.round(4000 * clamp(number(self.lp) / Math.max(1, number(self.maxLp, 3000)), 0, 1));
+    const perfectBonus = (outcome === "win" && number(self.lp) >= number(self.maxLp)) ? 2500 : 0;
+    const roundBonus = outcome === "win"
+      ? Math.round(clamp((maxRounds - currentRoundNum) / (maxRounds - 1), 0, 1) * 3000)
+      : 0;
+    const maxChi = Math.max(1, number(self.maxChi, g.COMBAT_RULES?.MAX_CHI || 20));
+    const remChi = clamp(number(self.chi), 0, maxChi);
+    const chiScore = Math.round(remChi * (1 + remChi / maxChi) * 25);
+    const executionScore = Math.round(number(stats.dsExecutionPts));
+    const defenseScore = Math.round(number(stats.damageReduced) * 10);
+    const dizzyScore = number(stats.dizzyInflicted) * 300;
+
+    const subtotal =
+      damageBaseScore +
+      remainingLpScore +
+      perfectBonus +
+      roundBonus +
+      chiScore +
+      executionScore +
+      defenseScore +
+      dizzyScore;
+
+    const total = Math.round(subtotal * multiplier);
+
+    return {
+      outcome,
+      total,
+      subtotal,
+      multiplier,
+      stats: { ...stats },
+      breakdown: {
+        damageBaseScore,
+        remainingLpScore,
+        perfectBonus,
+        roundBonus,
+        chiScore,
+        executionScore,
+        defenseScore,
+        dizzyScore
+      }
+    };
+  }
+
+  function calculateBothBattleScores(coreState, options = {}) {
+    if (!coreState?.p1 || !coreState?.p2) return null;
+
+    const p1Ctrl = resolveControllerInfo("p1", coreState.p1);
+    const p2Ctrl = resolveControllerInfo("p2", coreState.p2);
+
+    // Each player's difficulty multiplier reflects the CPU tier of their opponent (1.0x vs Human)
+    const p1DiffKey = options.p1Difficulty ?? (p2Ctrl.isCPU ? p2Ctrl.diffKey : "easy");
+    const p2DiffKey = options.p2Difficulty ?? (p1Ctrl.isCPU ? p1Ctrl.diffKey : "easy");
+
+    const p1Multiplier = Number(
+      options.p1Multiplier ?? (p2Ctrl.isCPU ? (DIFF_KEY_TO_MULTIPLIER[p1DiffKey] ?? 1.0) : 1.0)
+    );
+    const p2Multiplier = Number(
+      options.p2Multiplier ?? (p1Ctrl.isCPU ? (DIFF_KEY_TO_MULTIPLIER[p2DiffKey] ?? 1.0) : 1.0)
+    );
+
+    return {
+      p1: computeSinglePlayerScore(coreState, "p1", p1DiffKey, p1Multiplier),
+      p2: computeSinglePlayerScore(coreState, "p2", p2DiffKey, p2Multiplier)
+    };
+  }
+
+  function hideBattleScoreboard() {
+    lastScoreboardSignature = "";
+    dismissedScoreboardSignature = "";
+    const panel = byId("kf-battle-scoreboard");
+    if (panel) {
+      panel.hidden = true;
+      panel.style.display = "none";
+    }
+  }
+
+  function renderBattleScoreboard(coreState = getActiveCoreState(), options = {}) {
+    if (!coreState?.p1 || !coreState?.p2 || !coreState?.winner) return null;
+
+    const scores = calculateBothBattleScores(coreState, options);
+    if (!scores) return null;
+
+    const lang = getLang();
+    const matchSignature = [
+      coreState.winner,
+      coreState.round,
+      coreState.p1.id,
+      coreState.p1.lp,
+      coreState.p2.id,
+      coreState.p2.lp
+    ].join("|");
+
+    if (!options.force && dismissedScoreboardSignature === matchSignature) {
+      return scores;
+    }
+
+    const fullSignature = `${lang}|${matchSignature}|${scores.p1.total}|${scores.p2.total}`;
+    let panel = byId("kf-battle-scoreboard");
+
+    if (panel && lastScoreboardSignature === fullSignature && !panel.hidden) {
+      return scores;
+    }
+    lastScoreboardSignature = fullSignature;
+
+    const d = dict();
+    const s = d.score;
+
+    const p1Name = resolveLocalizedRiderName(coreState.p1, "p1");
+    const p2Name = resolveLocalizedRiderName(coreState.p2, "p2");
+
+    const outcomeLabel = outcome =>
+      outcome === "win" ? s.win : outcome === "loss" ? s.loss : s.draw;
+
+    const outcomeClass = outcome =>
+      outcome === "win" ? "kf-sb-win" : outcome === "loss" ? "kf-sb-loss" : "kf-sb-draw";
+
+    const rows = [
+      [s.damageBase, scores.p1.breakdown.damageBaseScore, scores.p2.breakdown.damageBaseScore],
+      [s.remainingLp, scores.p1.breakdown.remainingLpScore, scores.p2.breakdown.remainingLpScore],
+      [s.perfectBonus, scores.p1.breakdown.perfectBonus, scores.p2.breakdown.perfectBonus],
+      [s.roundBonus, scores.p1.breakdown.roundBonus, scores.p2.breakdown.roundBonus],
+      [s.chiScore, scores.p1.breakdown.chiScore, scores.p2.breakdown.chiScore],
+      [s.executionScore, scores.p1.breakdown.executionScore, scores.p2.breakdown.executionScore],
+      [s.defenseScore, scores.p1.breakdown.defenseScore, scores.p2.breakdown.defenseScore],
+      [s.dizzyScore, scores.p1.breakdown.dizzyScore, scores.p2.breakdown.dizzyScore]
+    ];
+
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "kf-battle-scoreboard";
+      panel.setAttribute("role", "region");
+      panel.setAttribute("aria-label", s.title);
+      const host = byId("battle-screen") || document.body;
+      host.appendChild(panel);
+    }
+
+    panel.innerHTML = `
+      <div class="kf-sb-header">
+        <span class="kf-sb-title">${escapeHtml(s.title)}</span>
+        <button type="button" class="kf-sb-close" aria-label="${escapeHtml(s.closeAria)}">✕</button>
+      </div>
+
+      <div class="kf-sb-summary">
+        <div class="kf-sb-card kf-sb-p1 ${scores.p1.outcome === "win" ? "is-winner" : ""}">
+          <div class="kf-sb-card-top">
+            <span class="kf-sb-slot">${escapeHtml(s.p1Tag)}</span>
+            <span class="kf-sb-badge ${outcomeClass(scores.p1.outcome)}">${escapeHtml(outcomeLabel(scores.p1.outcome))}</span>
+          </div>
+          <div class="kf-sb-rider">${escapeHtml(p1Name)}</div>
+          <div class="kf-sb-total">${formatInt(scores.p1.total)}</div>
+          <div class="kf-sb-mult">${escapeHtml(s.multiplier)} ×${pretty(scores.p1.multiplier)}</div>
+        </div>
+
+        <div class="kf-sb-card kf-sb-p2 ${scores.p2.outcome === "win" ? "is-winner" : ""}">
+          <div class="kf-sb-card-top">
+            <span class="kf-sb-badge ${outcomeClass(scores.p2.outcome)}">${escapeHtml(outcomeLabel(scores.p2.outcome))}</span>
+            <span class="kf-sb-slot">${escapeHtml(s.p2Tag)}</span>
+          </div>
+          <div class="kf-sb-rider">${escapeHtml(p2Name)}</div>
+          <div class="kf-sb-total">${formatInt(scores.p2.total)}</div>
+          <div class="kf-sb-mult">${escapeHtml(s.multiplier)} ×${pretty(scores.p2.multiplier)}</div>
+        </div>
+      </div>
+
+      <div class="kf-sb-table">
+        ${rows.map(([label, v1, v2]) => `
+          <div class="kf-sb-row">
+            <span class="kf-sb-val kf-sb-v1">${formatInt(v1)}</span>
+            <span class="kf-sb-label">${escapeHtml(label)}</span>
+            <span class="kf-sb-val kf-sb-v2">${formatInt(v2)}</span>
+          </div>
+        `).join("")}
+        <div class="kf-sb-row kf-sb-subtotal-row">
+          <span class="kf-sb-val kf-sb-v1">${formatInt(scores.p1.subtotal)}</span>
+          <span class="kf-sb-label">${escapeHtml(s.subtotal)}</span>
+          <span class="kf-sb-val kf-sb-v2">${formatInt(scores.p2.subtotal)}</span>
+        </div>
+      </div>
+    `;
+
+    const closeBtn = panel.querySelector(".kf-sb-close");
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        dismissedScoreboardSignature = matchSignature;
+        panel.hidden = true;
+        panel.style.display = "none";
+      };
+    }
+
+    panel.hidden = false;
+    panel.style.display = "block";
+    return scores;
   }
 
   function updatePlayerHUD(slot, player) {
@@ -1408,6 +1716,16 @@
     }
 
     renderTags(byId(`${slot}-buff-tray`), tags);
+
+    // Automatically show dual-player scores once battle has ended, or clear on fresh match
+    const coreState = getActiveCoreState();
+    if (coreState) {
+      if (coreState.winner) {
+        renderBattleScoreboard(coreState);
+      } else {
+        hideBattleScoreboard();
+      }
+    }
   }
 
   function ensureGlassCrackOverlay(box) {
@@ -1574,6 +1892,11 @@
     banner.textContent = localized;
     banner.style.whiteSpace = "pre-line";
     banner.hidden = !localized;
+
+    const coreState = getActiveCoreState();
+    if (coreState?.winner) {
+      renderBattleScoreboard(coreState);
+    }
   }
 
   function showActionBanner(message) {
@@ -1617,6 +1940,10 @@
           if (localized !== el.textContent) {
             el.textContent = localized;
           }
+        }
+        const coreState = getActiveCoreState();
+        if (coreState?.winner) {
+          renderBattleScoreboard(coreState);
         }
       } finally {
         isMutating = false;
@@ -2085,6 +2412,247 @@
         background: rgba(68, 48, 10, 0.85) !important;
       }
 
+      /* --- End-of-Battle Dual-Player Scoreboard --- */
+      #kf-battle-scoreboard {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: min(94vw, 660px);
+        max-height: min(74vh, 520px);
+        overflow-y: auto;
+        z-index: 9500;
+        background:
+          radial-gradient(circle at 18% 12%, rgba(0, 240, 255, 0.14) 0%, transparent 45%),
+          radial-gradient(circle at 82% 12%, rgba(255, 42, 109, 0.14) 0%, transparent 45%),
+          linear-gradient(180deg, rgba(10, 15, 28, 0.96) 0%, rgba(5, 8, 16, 0.97) 100%);
+        border: 1px solid rgba(255, 209, 102, 0.55);
+        border-top: 2px solid #ffd166;
+        border-radius: 12px;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.88), 0 0 24px rgba(255, 209, 102, 0.2);
+        padding: 12px 14px 14px;
+        color: #f8fafc;
+        font-family: var(--kf-hud-font-ui);
+        backdrop-filter: blur(10px);
+        animation: kfScoreboardPop 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      }
+
+      @keyframes kfScoreboardPop {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, -44%) scale(0.94);
+        }
+        100% {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1);
+        }
+      }
+
+      .kf-sb-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .kf-sb-title {
+        font-family: var(--kf-hud-font-display);
+        font-size: clamp(0.85rem, 1.5vw, 1.05rem);
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        color: #ffd166;
+        text-shadow: 0 0 10px rgba(255, 209, 102, 0.45);
+      }
+
+      .kf-sb-close {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        color: #cbd5e1;
+        border-radius: 6px;
+        width: 26px;
+        height: 26px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+        line-height: 1;
+      }
+
+      .kf-sb-close:hover {
+        background: rgba(255, 255, 255, 0.18);
+        color: #ffffff;
+      }
+
+      .kf-sb-summary {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .kf-sb-card {
+        background: rgba(15, 23, 42, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 9px;
+        padding: 8px 10px;
+      }
+
+      .kf-sb-card.kf-sb-p1 {
+        border-left: 3px solid #00f0ff;
+        text-align: left;
+      }
+
+      .kf-sb-card.kf-sb-p2 {
+        border-right: 3px solid #ff2a6d;
+        text-align: right;
+      }
+
+      .kf-sb-card.is-winner {
+        border-color: rgba(255, 209, 102, 0.75);
+        box-shadow: 0 0 16px rgba(255, 209, 102, 0.22), inset 0 0 14px rgba(255, 209, 102, 0.08);
+      }
+
+      .kf-sb-card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 3px;
+      }
+
+      .kf-sb-slot {
+        font-family: var(--kf-hud-font-display);
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        color: #94a3b8;
+      }
+
+      .kf-sb-badge {
+        font-family: var(--kf-hud-font-display);
+        font-size: 0.65rem;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        padding: 1px 7px;
+        border-radius: 999px;
+      }
+
+      .kf-sb-badge.kf-sb-win {
+        color: #1a1200;
+        background: #ffd166;
+        box-shadow: 0 0 10px rgba(255, 209, 102, 0.6);
+      }
+
+      .kf-sb-badge.kf-sb-loss {
+        color: #fda4af;
+        background: rgba(244, 63, 94, 0.2);
+        border: 1px solid rgba(244, 63, 94, 0.45);
+      }
+
+      .kf-sb-badge.kf-sb-draw {
+        color: #bae6fd;
+        background: rgba(56, 189, 248, 0.2);
+        border: 1px solid rgba(56, 189, 248, 0.45);
+      }
+
+      .kf-sb-rider {
+        font-size: clamp(0.76rem, 1.25vw, 0.9rem);
+        font-weight: 800;
+        color: #e2e8f0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .kf-sb-total {
+        font-family: var(--kf-hud-font-display);
+        font-variant-numeric: tabular-nums;
+        font-size: clamp(1.25rem, 2.4vw, 1.7rem);
+        font-weight: 900;
+        letter-spacing: 0.04em;
+        line-height: 1.15;
+        margin-top: 2px;
+      }
+
+      .kf-sb-p1 .kf-sb-total {
+        color: #7df9ff;
+        text-shadow: 0 0 12px rgba(0, 240, 255, 0.45);
+      }
+
+      .kf-sb-p2 .kf-sb-total {
+        color: #ff8da8;
+        text-shadow: 0 0 12px rgba(255, 42, 109, 0.45);
+      }
+
+      .kf-sb-mult {
+        font-family: var(--kf-hud-font-display);
+        font-size: 0.66rem;
+        font-weight: 700;
+        color: #ffd166;
+        opacity: 0.9;
+        margin-top: 2px;
+      }
+
+      .kf-sb-table {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        background: rgba(6, 10, 19, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
+
+      .kf-sb-row {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 8px;
+        padding: 2px 0;
+        border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+        font-size: clamp(0.7rem, 1.15vw, 0.8rem);
+      }
+
+      .kf-sb-row:last-child {
+        border-bottom: none;
+      }
+
+      .kf-sb-subtotal-row {
+        margin-top: 2px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255, 209, 102, 0.3);
+        font-weight: 800;
+        color: #ffd166;
+      }
+
+      .kf-sb-label {
+        text-align: center;
+        color: #cbd5e1;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+      }
+
+      .kf-sb-subtotal-row .kf-sb-label {
+        color: #ffd166;
+      }
+
+      .kf-sb-val {
+        font-family: var(--kf-hud-font-display);
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+      }
+
+      .kf-sb-v1 {
+        text-align: left;
+        color: #a5f3fc;
+      }
+
+      .kf-sb-v2 {
+        text-align: right;
+        color: #fecdd3;
+      }
+
       /* Base Glass Crack Overlay Container */
       .glass-crack-overlay {
         position: absolute;
@@ -2321,7 +2889,7 @@
 
   g.UI = {
     ...(g.UI || {}),
-    PATCH: "numeric-status-hud-2-i18n-5tiers-stronger-movelist-label-sync",
+    PATCH: "numeric-status-hud-2-i18n-5tiers-stronger-movelist-label-sync-dual-scoreboard",
     RIDER_META,
     updatePlayerHUD,
     showDamagePopup,
@@ -2332,7 +2900,10 @@
     describeStatus,
     statusName,
     localizeBattleText,
-    syncBattleStaticDOM
+    syncBattleStaticDOM,
+    calculateBothBattleScores,
+    renderBattleScoreboard,
+    hideBattleScoreboard
   };
 
   g.updatePlayerHUD = updatePlayerHUD;
@@ -2342,4 +2913,6 @@
   g.showBattleBanner = showBattleBanner;
   g.showActionBanner = showActionBanner;
   g.localizeBattleText = localizeBattleText;
+  g.renderBattleScoreboard = renderBattleScoreboard;
+  g.hideBattleScoreboard = hideBattleScoreboard;
 })(window);

@@ -27,6 +27,19 @@
 
   const CHARGE_STEP_MS = 50;
 
+  const DIFFICULTY_MULTIPLIERS = Object.freeze({
+    hopper: 1.0,
+    "tree-hopper": 1.0,
+    treehopper: 1.0,
+    cricket: 1.25,
+    beetle: 1.5,
+    ant: 2.0,
+    "bullet-ant": 2.0,
+    "bullet ant": 2.0,
+    bulletant: 2.0,
+    rider: 2.5
+  });
+
   // Returns the opposing fighter slot.
   const other = slot => slot === "p1" ? "p2" : "p1";
 
@@ -380,7 +393,15 @@
       activeBuffs: (player.activeBuffs || []).map(buff => ({
         ...buff,
         effects: { ...(buff.effects || {}) }
-      }))
+      })),
+
+      scoreStats: {
+        damageDealt: 0,
+        dsExecutionPts: 0,
+        damageReduced: 0,
+        dizzyInflicted: 0,
+        ...(player.scoreStats || {})
+      }
     };
   }
 
@@ -422,7 +443,14 @@
       airborneChargePercent: 100,
 
       activeChargePercent: 0,
-      idleStreak: 0
+      idleStreak: 0,
+
+      scoreStats: {
+        damageDealt: 0,
+        dsExecutionPts: 0,
+        damageReduced: 0,
+        dizzyInflicted: 0
+      }
     };
   }
 
@@ -1236,6 +1264,9 @@
           { cancelStatuses: false }
         );
 
+        // Credit full uncapped periodic bleed damage to the opponent
+        state[other(slot)].scoreStats.damageDealt += bleeding[slot];
+
         emit({
           type: "bleeding",
           slot,
@@ -1245,7 +1276,7 @@
       }
     }
 
-    function addFaint(slot, amount) {
+    function addFaint(slot, amount, creditedSlot = other(slot)) {
       const player = state[slot];
 
       if (
@@ -1262,13 +1293,19 @@
         ? Math.floor(amount * 1.25)
         : amount;
 
+      const wasFainted = player.isFainted;
+
       player.faintMeter = Math.min(
         R.FAINT_THRESHOLD,
         player.faintMeter + adjusted
       );
 
-      if (player.faintMeter >= R.FAINT_THRESHOLD) {
+      if (!wasFainted && player.faintMeter >= R.FAINT_THRESHOLD) {
         player.isFainted = true;
+
+        if (creditedSlot && state[creditedSlot]?.scoreStats) {
+          state[creditedSlot].scoreStats.dizzyInflicted += 1;
+        }
       }
     }
 
@@ -1530,14 +1567,15 @@
           ? atk.sAttack
           : 1;
 
-      let damage =
+      const preGuardDamage =
         move.baseDamage *
         chargeFactor *
         atk.attack *
         stanceAttack *
         def.armor *
-        (startedLowPower[targetSlot] ? 1.25 : 1) *
-        damageRatio;
+        (startedLowPower[targetSlot] ? 1.25 : 1);
+
+      let damage = preGuardDamage * damageRatio;
 
       if (glancing) {
         damage *= 0.20;
@@ -1547,9 +1585,18 @@
         ? Math.max(1, Math.floor(damage))
         : Math.floor(damage);
 
+      // Accumulate full uncapped damage dealt (preserves KO overkill)
+      attacker.scoreStats.damageDealt += damage;
+
       dealLpDamage(targetSlot, damage);
 
       if (guarded) {
+        const reduced = Math.max(
+          0,
+          Math.floor(preGuardDamage) - damage
+        );
+        defender.scoreStats.damageReduced += reduced;
+
         addFaint(
           targetSlot,
           defenseMove.chiCost > 0
@@ -1567,6 +1614,10 @@
           R.SCRATCH_BUILDUP
         );
       } else {
+        if (move.direction === "D" || move.direction === "S") {
+          attacker.scoreStats.dsExecutionPts += move.chiCost * 15;
+        }
+
         addFaint(
           targetSlot,
           Number(
@@ -1632,7 +1683,8 @@
       ) {
         addFaint(
           slot,
-          R.FAINT_PENALTY_IDLE_GUARD
+          R.FAINT_PENALTY_IDLE_GUARD,
+          null
         );
       }
 
@@ -1785,8 +1837,98 @@
     return results;
   }
 
+  /**
+   * Calculates turn-based end-of-match score and itemized breakdown for `slot`
+   * (default "p1") across wins, losses, and draws.
+   */
+  function calculateScore(state, options = {}) {
+    const slot = options.slot === "p2" ? "p2" : "p1";
+    const foeSlot = other(slot);
+    const self = state[slot];
+    const foe = state[foeSlot];
+    const stats = self.scoreStats || {
+      damageDealt: 0,
+      dsExecutionPts: 0,
+      damageReduced: 0,
+      dizzyInflicted: 0
+    };
+
+    const diffKey = String(options.difficulty || "hopper")
+      .trim()
+      .toLowerCase();
+    const multiplier = Number(
+      options.multiplier ?? DIFFICULTY_MULTIPLIERS[diffKey] ?? 1.0
+    );
+
+    const outcome = !state.winner
+      ? "in_progress"
+      : state.winner === "draw"
+        ? "draw"
+        : state.winner === slot
+          ? "win"
+          : "loss";
+
+    const maxRounds = Math.max(2, Number(R.MAX_ROUNDS || 40));
+    const currentRound = K.clamp(Number(state.round || 1), 1, maxRounds);
+
+    // 1. Overkill-enabled Damage Base: 5,000 * (totalDamageDealt / foe.maxLp)
+    const damageRatio = stats.damageDealt / Math.max(1, foe.maxLp);
+    const damageBaseScore = Math.round(5000 * damageRatio);
+
+    // 2. Remaining LP + 2,500 Perfect Win Bonus
+    const selfLpRatio = K.clamp(self.lp / Math.max(1, self.maxLp), 0, 1);
+    const remainingLpScore = Math.round(4000 * selfLpRatio);
+    const perfectBonus = (outcome === "win" && self.lp >= self.maxLp) ? 2500 : 0;
+
+    // 3. Round Efficiency (Win only)
+    const roundBonus = outcome === "win"
+      ? Math.round(K.clamp((maxRounds - currentRound) / (maxRounds - 1), 0, 1) * 3000)
+      : 0;
+
+    // 4. Remaining Chi: chi * (1 + chi / maxChi) * 25
+    const maxChi = Math.max(1, Number(self.maxChi || R.MAX_CHI || 20));
+    const remChi = K.clamp(Number(self.chi || 0), 0, maxChi);
+    const chiScore = Math.round(remChi * (1 + remChi / maxChi) * 25);
+
+    // 5. Execution (Chi cost * 15), Guard Reduction (* 10), and Dizzy (* 300)
+    const executionScore = Math.round(stats.dsExecutionPts);
+    const defenseScore = Math.round(stats.damageReduced * 10);
+    const dizzyScore = stats.dizzyInflicted * 300;
+
+    const subtotal =
+      damageBaseScore +
+      remainingLpScore +
+      perfectBonus +
+      roundBonus +
+      chiScore +
+      executionScore +
+      defenseScore +
+      dizzyScore;
+
+    const total = Math.round(subtotal * multiplier);
+
+    return {
+      outcome,
+      total,
+      subtotal,
+      multiplier,
+      stats: { ...stats },
+      breakdown: {
+        damageBaseScore,
+        remainingLpScore,
+        perfectBonus,
+        roundBonus,
+        chiScore,
+        executionScore,
+        defenseScore,
+        dizzyScore
+      }
+    };
+  }
+
   g.CombatCore = {
     IDLE,
+    DIFFICULTY_MULTIPLIERS,
     compileMoves,
     createMatch,
     copyFighter,
@@ -1803,6 +1945,7 @@
     comparePriority,
     resolve,
     distribution,
+    calculateScore,
     CHARGE_STEP_MS,
     decisionLimitMs,
     cpuReadyAtMs,

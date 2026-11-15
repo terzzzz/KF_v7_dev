@@ -473,10 +473,10 @@
       "video": "grounding.mp4",
       "faintRecovery": 40
     },
-    "D+J": { "name": "Electro Punch", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 52, "hitChance": 79, "video": "punch.mp4" },
-    "D+K": { "name": "Electro Kick", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 56, "hitChance": 79, "video": "kick.mp4" },
-    "D+L": { "name": "Kabuto Protector Tackle", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 102, "hitChance": 77, "video": "tackle.mp4" },
-    "D+I": { "name": "Electro Shock Chop", "type": "PHYSICAL", "chiCost": 1,"chiRefundOnHit": 4, "baseDamage": 94, "hitChance": 76, "video": "electro_chop.mp4" },
+    "D+J": { "name": "Elec-Punch", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 52, "hitChance": 79, "video": "punch.mp4" },
+    "D+K": { "name": "Elec-Kick", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 56, "hitChance": 79, "video": "kick.mp4" },
+    "D+L": { "name": "Tackle", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 102, "hitChance": 77, "video": "tackle.mp4" },
+    "D+I": { "name": "Electro Kicks", "type": "PHYSICAL", "chiCost": 1,"chiRefundOnHit": 4, "baseDamage": 94, "hitChance": 76, "video": "electro_kicks.mp4" },
     "S+J": {
       "name": "Electro Fire",
       "type": "SPECIAL",

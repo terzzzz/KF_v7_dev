@@ -1,0 +1,75 @@
+{
+  "id": "x",
+  "en": {
+    "name": "Kamen Rider X",
+    "basic": [
+      { "name": "Standard Punch", "cmd": "D+J", "chi": 0, "dmg": 55, "remarks": "Gain 2 CHI if hit" },
+      { "name": "Standard Kick", "cmd": "D+K", "chi": 0, "dmg": 65, "remarks": "Gain 2 CHI if hit" },
+      { "name": "Ridol Rod Strike", "cmd": "D+L", "chi": 1, "dmg": 120, "remarks": "Gain 3 CHI if hit" },
+      { "name": "Ridol Whip Lash", "cmd": "D+I", "chi": 1, "dmg": 105, "remarks": "Gain 3 CHI if hit, build faint" }
+    ],
+    "special": [
+      { "name": "Rider Kick", "cmd": "S+J", "chi": 4, "dmg": 440, "remarks": "" },
+      { "name": "X-Kick", "cmd": "S+K", "chi": 6, "dmg": 700, "remarks": "" },
+      { "name": "Ridol Crown Split", "cmd": "S+L", "chi": 7, "dmg": 740, "remarks": "Long reach, build faint" },
+      { "name": "Vacuum Hell Wheel", "cmd": "S+I", "chi": 10, "dmg": 1111, "remarks": "" }
+    ],
+    "utilities": [
+      { "name": "Jump", "cmd": "W+I", "chi": 0, "effect": "Buff basic attack and evasion", "remarks": "Last 3 rounds" },
+      { "name": "Mercury Overdrive", "cmd": "W+J", "chi": 1, "effect": "Buff attack", "remarks": "Last 3 rounds" },
+      { "name": "Mercury Fortification", "cmd": "W+K", "chi": 1, "effect": "Buff armor", "remarks": "Last 3 rounds" },
+      { "name": "Kaizorg Vitality", "cmd": "W+L", "chi": 4, "effect": "Recover LP and decrease faint", "remarks": "" }
+    ],
+    "defense": [
+      { "name": "Standard Guard", "cmd": "A+I, A+J, A+K, A+L", "chi": 0, "effect": "Defense against I, J, K & L attacks respectively", "remarks": "" }
+    ]
+  },
+  "ja": {
+    "name": "仮面ライダーX",
+    "basic": [
+      { "name": "通常パンチ", "cmd": "D+J", "chi": 0, "dmg": 55, "remarks": "ヒット時、氣+2" },
+      { "name": "通常キック", "cmd": "D+K", "chi": 0, "dmg": 65, "remarks": "ヒット時、氣+2" },
+      { "name": "ライドルロッドストライク", "cmd": "D+L", "chi": 1, "dmg": 120, "remarks": "ヒット時、氣+3" },
+      { "name": "ライドルホイップラッシュ", "cmd": "D+I", "chi": 1, "dmg": 105, "remarks": "ヒット時、氣+3・気絶値蓄積" }
+    ],
+    "special": [
+      { "name": "ライダーキック", "cmd": "S+J", "chi": 4, "dmg": 440, "remarks": "" },
+      { "name": "Xキック", "cmd": "S+K", "chi": 6, "dmg": 700, "remarks": "" },
+      { "name": "ライドル脳天割り", "cmd": "S+L", "chi": 7, "dmg": 740, "remarks": "遠距離リーチ・気絶値蓄積" },
+      { "name": "真空地獄車", "cmd": "S+I", "chi": 10, "dmg": 1111, "remarks": "" }
+    ],
+    "utilities": [
+      { "name": "ジャンプ", "cmd": "W+I", "chi": 0, "effect": "通常攻撃・回避率アップ", "remarks": "3ラウンド持続" },
+      { "name": "マーキュリー・オーバードライブ", "cmd": "W+J", "chi": 1, "effect": "攻撃力アップ", "remarks": "3ラウンド持続" },
+      { "name": "マーキュリー装甲強化", "cmd": "W+K", "chi": 1, "effect": "防御力アップ", "remarks": "3ラウンド持続" },
+      { "name": "カイゾーグ活性", "cmd": "W+L", "chi": 4, "effect": "LPを回復し気絶値を減少", "remarks": "" }
+    ],
+    "defense": [
+      { "name": "通常ガード", "cmd": "A+I, A+J, A+K, A+L", "chi": 0, "effect": "I・J・K・L攻撃をそれぞれ防御", "remarks": "" }
+    ]
+  },
+  "zh": {
+    "name": "假面騎士X",
+    "basic": [
+      { "name": "拳擊", "cmd": "D+J", "chi": 0, "dmg": 55, "remarks": "命中時氣+2" },
+      { "name": "踢腿", "cmd": "D+K", "chi": 0, "dmg": 65, "remarks": "命中時氣+2" },
+      { "name": "拉多棍擊", "cmd": "D+L", "chi": 1, "dmg": 120, "remarks": "命中時氣+3" },
+      { "name": "拉多鞭擊", "cmd": "D+I", "chi": 1, "dmg": 105, "remarks": "命中時氣+3、累積暈眩值" }
+    ],
+    "special": [
+      { "name": "騎士踢", "cmd": "S+J", "chi": 4, "dmg": 440, "remarks": "" },
+      { "name": "X飛踢", "cmd": "S+K", "chi": 6, "dmg": 700, "remarks": "" },
+      { "name": "拉多頂劈", "cmd": "S+L", "chi": 7, "dmg": 740, "remarks": "遠距離攻擊、累積暈眩值" },
+      { "name": "真空地獄車", "cmd": "S+I", "chi": 10, "dmg": 1111, "remarks": "" }
+    ],
+    "utilities": [
+      { "name": "騰空", "cmd": "W+I", "chi": 0, "effect": "提升普通攻擊與迴避率", "remarks": "持續3回合" },
+      { "name": "水銀超頻", "cmd": "W+J", "chi": 1, "effect": "提升攻擊力", "remarks": "持續3回合" },
+      { "name": "水銀強化", "cmd": "W+K", "chi": 1, "effect": "提升防禦力", "remarks": "持續3回合" },
+      { "name": "拉多活性化", "cmd": "W+L", "chi": 4, "effect": "回復LP並降低暈眩值", "remarks": "" }
+    ],
+    "defense": [
+      { "name": "防守", "cmd": "A+I, A+J, A+K, A+L", "chi": 0, "effect": "分別防禦 I、J、K 與 L 攻擊", "remarks": "" }
+    ]
+  }
+}

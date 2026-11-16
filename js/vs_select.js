@@ -138,7 +138,7 @@
         '',
         'Dedicated to the heroes who taught us the meaning of Henshin!!',
         '',
-        '[ Kamen Fight ]',
+        '[ Kamen Fight ver 6.1]',
         'A Game By Terence Cheng',
         '',
         '----------------------------------------',
@@ -182,7 +182,7 @@
 
           <div class="kf-howto-section">
             <h3>2. Learn the Combat Controls</h3>
-            <p>Every action requires combining a <strong>Direction Key</strong> (to choose move type and build charge) with an <strong>Action Key</strong> (to execute the move).</p>
+            <p>Ey action requires combining a <strong>Direction Key</strong> (to choose move type and build charge) with an <strong>Action Key</strong> (to execute the move).</p>
 
             <div class="kf-howto-table-wrap">
               <table class="kf-howto-table">
@@ -197,7 +197,7 @@
                   <tr>
                     <td class="kf-key-cell">W Key</td>
                     <td class="kf-stance-cell">Utility &amp; Buffs</td>
-                    <td>High Jumps, Speed Enhancements, Attack Focus, and Stun Recovery</td>
+                    <td>High Jumps, Speed Enhancements, Attack Focus, and Stun Recoy</td>
                   </tr>
                   <tr>
                     <td class="kf-key-cell">D Key</td>

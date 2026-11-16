@@ -65,7 +65,7 @@
       { "name": "颱風硬爆破", "cmd": "S+I", "chi": 10, "dmg": 1065, "remarks": "" }
     ],
     "utilities": [
-      { "name": "滕空", "cmd": "W+I", "chi": 0, "effect": "提升攻擊力與命中率", "remarks": "持續3回合" },
+      { "name": "騰空", "cmd": "W+I", "chi": 0, "effect": "提升攻擊力與命中率", "remarks": "持續3回合" },
       { "name": "颱風紅閘", "cmd": "W+J", "chi": 0, "effect": "提升蓄力速度與防禦力", "remarks": "持續3回合" },
       { "name": "集力", "cmd": "W+K", "chi": 1, "effect": "提升普通攻擊威力", "remarks": "持續4回合" },
       { "name": "戰吼", "cmd": "W+L", "chi": 2, "effect": "降低暈眩值", "remarks": "" }

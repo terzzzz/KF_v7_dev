@@ -65,7 +65,7 @@
       { "name": "螺旋騎士踢", "cmd": "S+I", "chi": 9, "dmg": 1100, "remarks": "" }
     ],
     "utilities": [
-      { "name": "滕空", "cmd": "W+I", "chi": 0, "effect": "提升攻擊力與迴避率", "remarks": "持續3回合" },
+      { "name": "騰空", "cmd": "W+I", "chi": 0, "effect": "提升攻擊力與迴避率", "remarks": "持續3回合" },
       { "name": "颱風運能", "cmd": "W+J", "chi": 1, "effect": "提升蓄力速度", "remarks": "持續3回合" },
       { "name": "颱風集能", "cmd": "W+K", "chi": 0, "effect": "提升必殺技威力", "remarks": "持續3回合" },
       { "name": "颱風護佑", "cmd": "W+L", "chi": 0, "effect": "降低暈眩值", "remarks": "" }

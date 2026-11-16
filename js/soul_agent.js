@@ -1,8 +1,8 @@
 /* js/soul_agent.js
- * Exact-matchup checkpoint & 49-Matchup Matrix (data/matrix_r0_vs_r0.json .. r6_vs_r6.json) storage (v7).
+ * Exact-matchup checkpoint & 49-Matchup Matrix (data/matrix/matrix_r0_vs_r0.json .. r6_vs_r6.json) storage (v7).
  *
  * Build: v5-state256-action17
- * Matrix: v7-7riders-10backup (IndexedDB + Local data/ 49-Matrix Persistence)
+ * Matrix: v7-7riders-10backup (IndexedDB + data/matrix/ 49-Matrix Persistence)
  * Patch: charge1-reset1
  */
 
@@ -291,15 +291,26 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     return merged;
   }
 
+  function makeFallbackSpec() {
+    if (typeof g.SoulEnv?.makeSpec === "function") {
+      return g.SoulEnv.makeSpec();
+    }
+    return {
+      schema: EXPECTED_SCHEMA,
+      input: 256,
+      hidden: [128, 64],
+      output: 17
+    };
+  }
+
   function assertRuntime() {
     if (
-      g.SoulEnv?.SCHEMA !== EXPECTED_SCHEMA ||
-      typeof g.SoulEnv?.assertSpec !== "function" ||
-      typeof g.SoulNN?.validateJSON !== "function"
+      g.SoulEnv &&
+      g.SoulEnv.SCHEMA &&
+      g.SoulEnv.SCHEMA !== EXPECTED_SCHEMA
     ) {
       throw new Error(
-        "SoulAgent requires the charge1-reset1 " +
-        "environment and neural modules."
+        "SoulAgent requires the charge1-reset1 environment module."
       );
     }
   }
@@ -309,9 +320,10 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       throw new Error("Cannot fingerprint a missing network.");
     }
 
-    return String(
-      g.KF.hash(JSON.stringify(checkpoint.net))
-    );
+    if (typeof g.KF?.hash === "function") {
+      return String(g.KF.hash(JSON.stringify(checkpoint.net)));
+    }
+    return String(JSON.stringify(checkpoint.net).length);
   }
 
   function validateCheckpoint(
@@ -338,8 +350,18 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
         );
       }
 
-      g.SoulEnv.assertSpec(checkpoint.spec);
-      g.SoulNN.validateJSON(checkpoint.net);
+      if (typeof g.SoulEnv?.assertSpec === "function") {
+        g.SoulEnv.assertSpec(checkpoint.spec);
+      }
+      if (typeof g.SoulNN?.validateJSON === "function") {
+        g.SoulNN.validateJSON(checkpoint.net);
+      } else if (
+        !checkpoint.net ||
+        !Array.isArray(checkpoint.net.sizes) ||
+        !Array.isArray(checkpoint.net.layers)
+      ) {
+        throw new Error("Checkpoint network structure is invalid.");
+      }
 
       const sizes = checkpoint.net.sizes;
 
@@ -366,7 +388,12 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
         );
       }
 
-      if (expectedLearner && expectedOpponent) {
+      if (
+        expectedLearner !== undefined &&
+        expectedLearner !== null &&
+        expectedOpponent !== undefined &&
+        expectedOpponent !== null
+      ) {
         const expected = getCanonicalKey(
           expectedLearner,
           expectedOpponent
@@ -436,7 +463,11 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
 
       const learnerCode = toCode(bundle.learnerCode || bundle.learnerId);
 
-      if (expectedLearner && toCode(expectedLearner) !== learnerCode) {
+      if (
+        expectedLearner !== null &&
+        expectedLearner !== undefined &&
+        toCode(expectedLearner) !== learnerCode
+      ) {
         throw new Error(
           `Bundle learner mismatch: got ${learnerCode}, expected ${toCode(expectedLearner)}.`
         );
@@ -452,17 +483,17 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
         const oppCode = parts.length === 2 ? parts[1] : cp.opponentId;
         const expectedKey = `${learnerCode}_${toCode(oppCode)}`;
 
-        const validation = validateCheckpoint(
+        const normalized = normalizeDriveCheckpoint(
           cp,
-          cp.learnerId || fromCode(learnerCode),
-          cp.opponentId || fromCode(toCode(oppCode))
+          fromCode(learnerCode),
+          fromCode(toCode(oppCode))
         );
 
-        if (!validation.valid) {
-          throw new Error(`${expectedKey}: ${validation.error}`);
+        if (!normalized) {
+          throw new Error(`${expectedKey}: Invalid checkpoint in bundle.`);
         }
 
-        validMatchups[validation.canonicalKey] = cp;
+        validMatchups[normalized.canonicalKey] = normalized;
       }
 
       return {
@@ -547,7 +578,7 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       backupSlotCount: backupCodes.length,
       reservedParamSlotCount: RESERVED_PARAM_SLOTS,
       savedAt: new Date().toISOString(),
-      spec: g.SoulEnv.makeSpec(),
+      spec: makeFallbackSpec(),
       matchups,
       backupSlots,
       riderParameterSummary: {
@@ -798,25 +829,110 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   }
 
   /**
-   * Builds candidate URLs for a 1v1 matchup in `data/`:
-   * Primary: `data/matrix_r{A}_vs_r{B}.json` (e.g. `data/matrix_r5_vs_r0.json`)
-   * Fallback: `data/matrix_r{A}_r{B}.json`
+   * Builds candidate URLs for a 1v1 matchup:
+   * 1. `data/matrix/matrix_r{A}_vs_r{B}.json` (Primary location in `data/matrix/`)
+   * 2. `data/matrix/matrix_r{A}_r{B}.json`
+   * 3. `data/matrix_r{A}_vs_r{B}.json`
+   * 4. `data/matrix_r{A}_r{B}.json`
    */
   function matchupMatrixURLs(learner, opponent) {
     const rA = toRiderIndex(learner);
     const rB = toRiderIndex(opponent);
     const base = projectBase();
 
-    const primary = new URL(`data/matrix_r${rA}_vs_r${rB}.json`, base);
-    primary.searchParams.set("v", CACHE_TAG);
-
-    const secondary = new URL(`data/matrix_r${rA}_r${rB}.json`, base);
-    secondary.searchParams.set("v", CACHE_TAG);
-
-    return [
-      { url: primary, label: `data/matrix_r${rA}_vs_r${rB}.json` },
-      { url: secondary, label: `data/matrix_r${rA}_r${rB}.json` }
+    const relPaths = [
+      `data/matrix/matrix_r${rA}_vs_r${rB}.json`,
+      `data/matrix/matrix_r${rA}_r${rB}.json`,
+      `data/matrix_r${rA}_vs_r${rB}.json`,
+      `data/matrix_r${rA}_r${rB}.json`
     ];
+
+    return relPaths.map(rel => {
+      const url = new URL(rel, base);
+      url.searchParams.set("v", CACHE_TAG);
+      return { url, label: rel };
+    });
+  }
+
+  function extractNetworkJSON(rawObj) {
+    if (!rawObj || typeof rawObj !== "object") return null;
+
+    if (Array.isArray(rawObj.sizes) && Array.isArray(rawObj.layers)) {
+      return rawObj;
+    }
+
+    const keys = [
+      "net",
+      "onlineNet",
+      "qNet",
+      "policyNet",
+      "network",
+      "model",
+      "targetNet"
+    ];
+
+    for (const k of keys) {
+      const sub = rawObj[k];
+      if (sub && typeof sub === "object" && Array.isArray(sub.sizes) && Array.isArray(sub.layers)) {
+        return sub;
+      }
+    }
+
+    return null;
+  }
+
+  function normalizeDriveCheckpoint(rawCp, expectedLearner, expectedOpponent) {
+    if (!rawCp || typeof rawCp !== "object") return null;
+
+    const extractedNet = extractNetworkJSON(rawCp);
+    if (!extractedNet) return null;
+
+    const copy = clone(rawCp);
+    copy.net = clone(extractedNet);
+
+    const hasExpectedLearner =
+      expectedLearner !== undefined && expectedLearner !== null && expectedLearner !== "";
+    const hasExpectedOpponent =
+      expectedOpponent !== undefined && expectedOpponent !== null && expectedOpponent !== "";
+
+    const canonicalLearnerId = hasExpectedLearner
+      ? fromCode(toCode(expectedLearner))
+      : copy.learnerId !== undefined && copy.learnerId !== null
+        ? fromCode(toCode(copy.learnerId))
+        : null;
+
+    const canonicalOpponentId = hasExpectedOpponent
+      ? fromCode(toCode(expectedOpponent))
+      : copy.opponentId !== undefined && copy.opponentId !== null
+        ? fromCode(toCode(copy.opponentId))
+        : null;
+
+    if (canonicalLearnerId) {
+      copy.learnerId = canonicalLearnerId;
+    }
+    if (canonicalOpponentId) {
+      copy.opponentId = canonicalOpponentId;
+    }
+
+    copy.version = WORKER_VERSION;
+    copy.spec = makeFallbackSpec();
+
+    if (copy.learnerId && copy.opponentId) {
+      copy.canonicalKey = getCanonicalKey(copy.learnerId, copy.opponentId);
+    }
+
+    if (!Number.isSafeInteger(copy.steps) || copy.steps <= 0) {
+      copy.steps = Number(copy.steps) > 0 ? Math.floor(Number(copy.steps)) : 100;
+    }
+
+    if (!Number.isSafeInteger(copy.games) || copy.games <= 0) {
+      copy.games = Number(copy.games) > 0
+        ? Math.floor(Number(copy.games))
+        : Math.max(1, Math.floor(copy.steps / 12));
+    }
+
+    const check = validateCheckpoint(copy, canonicalLearnerId, canonicalOpponentId);
+    return check.valid ? copy : null;
   }
 
   function ingestRiderBundleIntoStore(bundle, overwriteActive = true) {
@@ -872,68 +988,6 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     };
   }
 
-  function normalizeDriveCheckpoint(rawCp, expectedLearner, expectedOpponent) {
-    if (!rawCp || typeof rawCp !== "object") return null;
-
-    // Support raw network JSON `{ sizes, layers }` as well as `{ net: { sizes, layers } }`
-    const copy = rawCp.net
-      ? clone(rawCp)
-      : Array.isArray(rawCp.sizes) && Array.isArray(rawCp.layers)
-        ? { net: clone(rawCp) }
-        : null;
-
-    if (!copy || !copy.net) return null;
-
-    const canonicalLearnerId = expectedLearner
-      ? fromCode(toCode(expectedLearner))
-      : copy.learnerId
-        ? fromCode(toCode(copy.learnerId))
-        : null;
-
-    const canonicalOpponentId = expectedOpponent
-      ? fromCode(toCode(expectedOpponent))
-      : copy.opponentId
-        ? fromCode(toCode(copy.opponentId))
-        : null;
-
-    if (canonicalLearnerId) {
-      copy.learnerId = canonicalLearnerId;
-    }
-    if (canonicalOpponentId) {
-      copy.opponentId = canonicalOpponentId;
-    }
-
-    copy.version = WORKER_VERSION;
-
-    if (
-      !copy.spec ||
-      copy.spec.schema !== EXPECTED_SCHEMA
-    ) {
-      if (typeof g.SoulEnv?.makeSpec === "function") {
-        copy.spec = g.SoulEnv.makeSpec();
-      }
-    }
-
-    if (copy.learnerId && copy.opponentId) {
-      copy.canonicalKey = getCanonicalKey(copy.learnerId, copy.opponentId);
-    }
-
-    if (!Number.isSafeInteger(copy.steps) || copy.steps < 0) {
-      copy.steps = Number(copy.steps) > 0 ? Math.floor(Number(copy.steps)) : 0;
-    }
-
-    if (!Number.isSafeInteger(copy.games) || copy.games < 0) {
-      copy.games = Number(copy.games) > 0
-        ? Math.floor(Number(copy.games))
-        : copy.steps > 0
-          ? Math.max(1, Math.floor(copy.steps / 12))
-          : 0;
-    }
-
-    const check = validateCheckpoint(copy, expectedLearner, expectedOpponent);
-    return check.valid ? copy : null;
-  }
-
   function ingestDriveMatchup(payload, expectedLearner = null, expectedOpponent = null) {
     if (!payload || typeof payload !== "object") {
       return { imported: false, games: 0, steps: 0, checkpoint: null };
@@ -942,11 +996,20 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     if (isRiderBundle(payload)) {
       const res = ingestRiderBundleIntoStore(payload, true);
       saveToLocalStorage();
-      const cp = expectedLearner && expectedOpponent
-        ? getSection(expectedLearner, expectedOpponent, "active") ||
-          getSection(expectedLearner, expectedOpponent, "candidate")
-        : null;
-      return { imported: res.loadedCount > 0, games: cp?.games || 0, steps: cp?.steps || 0, checkpoint: cp };
+      const cp =
+        expectedLearner !== null &&
+        expectedLearner !== undefined &&
+        expectedOpponent !== null &&
+        expectedOpponent !== undefined
+          ? getSection(expectedLearner, expectedOpponent, "active") ||
+            getSection(expectedLearner, expectedOpponent, "candidate")
+          : null;
+      return {
+        imported: res.loadedCount > 0,
+        games: cp?.games || 0,
+        steps: cp?.steps || 0,
+        checkpoint: cp
+      };
     }
 
     let imported = false;
@@ -958,15 +1021,14 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     const activeRaw =
       payload.soulActive ||
       payload.activeCheckpoint ||
-      (payload.active && payload.active.net ? payload.active : null);
+      (payload.active && extractNetworkJSON(payload.active) ? payload.active : null);
 
     const candidateRaw =
       payload.soulCandidate ||
       payload.soulCheckpoint ||
       payload.checkpoint ||
-      (payload.candidate && payload.candidate.net ? payload.candidate : null) ||
-      (payload.net ? payload : null) ||
-      (Array.isArray(payload.sizes) && Array.isArray(payload.layers) ? payload : null);
+      (payload.candidate && extractNetworkJSON(payload.candidate) ? payload.candidate : null) ||
+      (extractNetworkJSON(payload) ? payload : null);
 
     const validActive = normalizeDriveCheckpoint(
       activeRaw || candidateRaw,
@@ -1003,24 +1065,17 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       const existingCand = store.candidate.matchups[key];
       if (
         !existingCand ||
-        (validCandidate.games || 0) > 0 ||
-        (validCandidate.steps || 0) > 0 ||
-        (existingCand.games || 0) === 0
+        (validCandidate.games || 0) >= (existingCand.games || 0) ||
+        (validCandidate.steps || 0) >= (existingCand.steps || 0)
       ) {
-        if (
-          !existingCand ||
-          (validCandidate.games || 0) >= (existingCand.games || 0) ||
-          (validCandidate.steps || 0) >= (existingCand.steps || 0)
-        ) {
-          const savedCand = setCandidate(validCandidate);
-          if (!resolvedCheckpoint) {
-            resolvedCheckpoint = savedCand;
-          }
-          imported = true;
-          canonicalKey = key;
-          bestGames = Math.max(bestGames, savedCand.games || 0);
-          bestSteps = Math.max(bestSteps, savedCand.steps || 0);
+        const savedCand = setCandidate(validCandidate);
+        if (!resolvedCheckpoint) {
+          resolvedCheckpoint = setActive(validCandidate);
         }
+        imported = true;
+        canonicalKey = key;
+        bestGames = Math.max(bestGames, savedCand.games || 0);
+        bestSteps = Math.max(bestSteps, savedCand.steps || 0);
       }
     }
 
@@ -1034,8 +1089,8 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
   }
 
   /**
-   * Fetches the exact 1v1 matchup file from `data/matrix_r{learner}_vs_r{opponent}.json`
-   * (e.g. AI Amazon r5 vs Human Ichigo r0 -> `data/matrix_r5_vs_r0.json`)
+   * Fetches the exact 1v1 matchup file from `data/matrix/matrix_r{learner}_vs_r{opponent}.json`
+   * (with fallbacks to `data/matrix_r{learner}_vs_r{opponent}.json`)
    * and returns the validated checkpoint object for `ai_worker.js` and `KF_AI.choose()`.
    */
   async function fetchMatchupFromCDN(learner, opponent) {
@@ -1061,7 +1116,7 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       }
     }
 
-    // Fallback: check if already in active/candidate store or bundle
+    // Fallback: check if already in active/candidate store
     const existing =
       getSection(learner, opponent, "active") ||
       getSection(learner, opponent, "candidate");
@@ -1069,54 +1124,41 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       return clone(existing);
     }
 
-    try {
-      await fetchRiderBundleFromCDN(learner);
-      const fromBundle =
-        getSection(learner, opponent, "active") ||
-        getSection(learner, opponent, "candidate");
-      if (fromBundle) {
-        return clone(fromBundle);
-      }
-    } catch (_) {
-      // Ignore missing bundle fallback
-    }
-
     throw new Error(
-      `Cannot fetch ${getMatrixFileName(learner, opponent)} from data/ folder.`
+      `Cannot fetch data/matrix/${getMatrixFileName(learner, opponent)}.`
     );
   }
 
   async function fetchRiderBundleFromCDN(learner, opponent = null) {
     assertRuntime();
 
-    // If a specific opponent was passed, fetch that 1v1 matrix file directly
     if (opponent && opponent !== "*") {
       return fetchMatchupFromCDN(learner, opponent);
     }
 
     const code = toCode(learner);
-    try {
-      const response = await fetch(riderBundleURL(code), {
-        cache: "no-store"
-      });
-
-      if (response.ok) {
-        const payload = await response.json();
-        if (isRiderBundle(payload)) {
-          const result = ingestRiderBundleIntoStore(payload, true);
-          saveToLocalStorage();
-          return result;
-        }
-      }
-    } catch (_) {
-      // Fall through to per-opponent matrix_rA_vs_rB.json scan
-    }
-
     let loadedCount = 0;
+
     for (const oppCode of getActiveCodes()) {
       try {
         const cp = await fetchMatchupFromCDN(code, oppCode);
         if (cp) loadedCount++;
+      } catch (_) {}
+    }
+
+    if (loadedCount === 0) {
+      try {
+        const response = await fetch(riderBundleURL(code), {
+          cache: "no-store"
+        });
+        if (response.ok) {
+          const payload = await response.json();
+          if (isRiderBundle(payload)) {
+            const result = ingestRiderBundleIntoStore(payload, true);
+            saveToLocalStorage();
+            return result;
+          }
+        }
       } catch (_) {}
     }
 
@@ -1139,7 +1181,7 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
         jobs.push(
           (async () => {
             const candidates = matchupMatrixURLs(learnerCode, oppCode);
-            for (const { url } of candidates) {
+            for (const { url, label } of candidates) {
               try {
                 const response = await fetch(url, { cache: "no-store" });
                 if (!response.ok) continue;
@@ -1147,6 +1189,9 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
                 const payload = await response.json();
                 const res = ingestDriveMatchup(payload, learnerCode, oppCode);
                 if (res.imported) {
+                  if (res.checkpoint) {
+                    res.checkpoint.matrixFile = label;
+                  }
                   found++;
                   return;
                 }
@@ -1169,16 +1214,20 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       readyPromise = (async () => {
         assertRuntime();
 
-        cachedData = await g.KF.loadData();
-        if (Array.isArray(cachedData?.riders)) {
-          syncRosterCodes(cachedData.riders);
+        if (typeof g.KF?.loadData === "function") {
+          try {
+            cachedData = await g.KF.loadData();
+            if (Array.isArray(cachedData?.riders)) {
+              syncRosterCodes(cachedData.riders);
+            }
+          } catch (_) {}
         }
 
         // 1. Load local checkpoints from LocalStorage + IndexedDB first
         loadFromLocalStorage();
         await loadFromIndexedDB();
 
-        // 2. Scan all 49 `data/matrix_rA_vs_rB.json` files from the data folder
+        // 2. Scan all 49 `data/matrix/matrix_rA_vs_rB.json` files
         await scanAllMatchupsFromRepo();
         await flushStorage();
 
@@ -1197,6 +1246,8 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     opponent,
     target = "candidate"
   ) {
+    loadFromLocalStorage();
+
     const bucket = store[target];
 
     if (!bucket) {
@@ -1204,12 +1255,21 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     }
 
     if (!learner || !opponent || opponent === "*") {
-      return bucket.legacy;
+      return bucket.legacy || (target === "active" ? store.candidate.legacy : null);
     }
 
-    return bucket.matchups[
-      getCanonicalKey(learner, opponent)
-    ] || null;
+    const key = getCanonicalKey(learner, opponent);
+    const match =
+      bucket.matchups[key] ||
+      (target === "active" ? store.candidate.matchups[key] : null) ||
+      null;
+
+    if (!match) {
+      // Trigger non-blocking background fetch so the store is populated immediately if not yet loaded
+      fetchMatchupFromCDN(learner, opponent).catch(() => {});
+    }
+
+    return match;
   }
 
   function getLearnerSections(learner, target = "candidate") {
@@ -1367,6 +1427,7 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       for (const [, cp] of Object.entries(allEntries)) {
         if (!cp) continue;
         const saved = setCandidate(cp);
+        setActive(cp);
         importedKeys.push(saved.canonicalKey);
       }
 
@@ -1383,7 +1444,14 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
       };
     }
 
-    const single = setCandidate(payload);
+    const normalized = normalizeDriveCheckpoint(
+      payload,
+      payload?.learnerId,
+      payload?.opponentId
+    ) || payload;
+
+    const single = setCandidate(normalized);
+    setActive(normalized);
     return {
       isBundle: false,
       learnerCode: toCode(single.learnerId),
@@ -1690,4 +1758,12 @@ if (typeof window !== "undefined" && !Storage.prototype.__kfRam) {
     seedFromSearchEngine,
     status
   };
+
+  // Auto-preload all 49 `data/matrix/matrix_rX_vs_rY.json` files on the main thread
+  if (typeof document !== "undefined") {
+    loadFromLocalStorage();
+    setTimeout(() => {
+      ready().catch(() => {});
+    }, 0);
+  }
 })(globalThis);

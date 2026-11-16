@@ -77,20 +77,12 @@ self.onmessage = async function (event) {
       ? "request checkpoint"
       : "none";
 
-    // Explicit null deliberately disables repository substitution.
-    const callerSpecifiedWeights =
-      Object.prototype.hasOwnProperty.call(
-        context,
-        "policyWeights"
-      );
-
+    // Fetch from `data/matrix/matrix_r{A}_vs_r{B}.json` whenever policyWeights is missing/null
     if (
       rider &&
-      !callerSpecifiedWeights &&
+      !context.policyWeights &&
       !context.disableAgent
     ) {
-      // AI slot is `learner` (e.g. Amazon = r5), Human/other slot is `opponent` (e.g. Ichigo = r0)
-      // Fetches `data/matrix_r5_vs_r0.json`
       const learner = context.state[context.slot].id;
       const opponent = context.state[
         CombatCore.other(context.slot)
@@ -120,7 +112,7 @@ self.onmessage = async function (event) {
 
       modelSource = prepared.policyWeights
         ? (prepared.policyWeights.matrixFile ||
-           `data/${SoulAgent.getMatrixFileName(learner, opponent)}`)
+           `data/matrix/${SoulAgent.getMatrixFileName(learner, opponent)}`)
         : "none";
     }
 

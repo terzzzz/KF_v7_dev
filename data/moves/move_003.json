@@ -1,0 +1,75 @@
+{
+  "id": "v3",
+  "en": {
+    "name": "Kamen Rider V3",
+    "basic": [
+      { "name": "Chop", "cmd": "D+J", "chi": 0, "dmg": 60, "remarks": "Gain 2 CHI if hit" },
+      { "name": "High Kick", "cmd": "D+K", "chi": 0, "dmg": 63, "remarks": "Gain 2 CHI if hit" },
+      { "name": "Chop Combo", "cmd": "D+L", "chi": 1, "dmg": 116, "remarks": "Gain 3 CHI if hit" },
+      { "name": "Mixed Hits", "cmd": "D+I", "chi": 1, "dmg": 106, "remarks": "Gain 3 CHI if hit" }
+    ],
+    "special": [
+      { "name": "V3 Kick", "cmd": "S+J", "chi": 4, "dmg": 430, "remarks": "" },
+      { "name": "V3 Return Kick", "cmd": "S+K", "chi": 5, "dmg": 560, "remarks": "" },
+      { "name": "V3 Screw Kick", "cmd": "S+L", "chi": 8, "dmg": 940, "remarks": "" },
+      { "name": "V3 Triple Kick", "cmd": "S+I", "chi": 11, "dmg": 1160, "remarks": "" }
+    ],
+    "utilities": [
+      { "name": "Leap", "cmd": "W+I", "chi": 0, "effect": "Buff basic attack and evasion", "remarks": "Last 3 rounds" },
+      { "name": "Accelerator", "cmd": "W+J", "chi": 0, "effect": "Buff charging speed", "remarks": "Last 3 rounds" },
+      { "name": "Red Lamp Focus", "cmd": "W+K", "chi": 1, "effect": "Buff attack", "remarks": "Last 3 rounds" },
+      { "name": "Double Typhoon Blow", "cmd": "W+L", "chi": 2, "effect": "Deal damage and build faint", "remarks": "Long reach" }
+    ],
+    "defense": [
+      { "name": "Standard Guard", "cmd": "A+I, A+J, A+K, A+L", "chi": 0, "effect": "Defense against I, J, K & L attacks respectively", "remarks": "" }
+    ]
+  },
+  "ja": {
+    "name": "仮面ライダーV3",
+    "basic": [
+      { "name": "チョップ", "cmd": "D+J", "chi": 0, "dmg": 60, "remarks": "ヒット時、氣+2" },
+      { "name": "ハイキック", "cmd": "D+K", "chi": 0, "dmg": 63, "remarks": "ヒット時、氣+2" },
+      { "name": "チョップコンボ", "cmd": "D+L", "chi": 1, "dmg": 116, "remarks": "ヒット時、氣+3" },
+      { "name": "ミックスヒット", "cmd": "D+I", "chi": 1, "dmg": 106, "remarks": "ヒット時、氣+3" }
+    ],
+    "special": [
+      { "name": "V3キック", "cmd": "S+J", "chi": 4, "dmg": 430, "remarks": "" },
+      { "name": "V3反転キック", "cmd": "S+K", "chi": 5, "dmg": 560, "remarks": "" },
+      { "name": "V3きりもみキック", "cmd": "S+L", "chi": 8, "dmg": 940, "remarks": "" },
+      { "name": "V3トリプルキック", "cmd": "S+I", "chi": 11, "dmg": 1160, "remarks": "" }
+    ],
+    "utilities": [
+      { "name": "リープ", "cmd": "W+I", "chi": 0, "effect": "通常攻撃・回避率アップ", "remarks": "3ラウンド持続" },
+      { "name": "アクセラレーター", "cmd": "W+J", "chi": 0, "effect": "チャージ速度アップ", "remarks": "3ラウンド持続" },
+      { "name": "レッドランプフォーカス", "cmd": "W+K", "chi": 1, "effect": "攻撃力アップ", "remarks": "3ラウンド持続" },
+      { "name": "ダブルタイフーン・ブロー", "cmd": "W+L", "chi": 2, "effect": "ダメージを与え気絶値を蓄積", "remarks": "遠距離リーチ" }
+    ],
+    "defense": [
+      { "name": "通常ガード", "cmd": "A+I, A+J, A+K, A+L", "chi": 0, "effect": "I・J・K・L攻撃をそれぞれ防御", "remarks": "" }
+    ]
+  },
+  "zh": {
+    "name": "假面騎士V3",
+    "basic": [
+      { "name": "手刀", "cmd": "D+J", "chi": 0, "dmg": 60, "remarks": "命中時氣+2" },
+      { "name": "踢腿", "cmd": "D+K", "chi": 0, "dmg": 63, "remarks": "命中時氣+2" },
+      { "name": "連環手刀", "cmd": "D+L", "chi": 1, "dmg": 116, "remarks": "命中時氣+3" },
+      { "name": "連擊", "cmd": "D+I", "chi": 1, "dmg": 106, "remarks": "命中時氣+3" }
+    ],
+    "special": [
+      { "name": "V3踢", "cmd": "S+J", "chi": 4, "dmg": 430, "remarks": "" },
+      { "name": "V3反轉踢", "cmd": "S+K", "chi": 5, "dmg": 560, "remarks": "" },
+      { "name": "V3螺旋踢", "cmd": "S+L", "chi": 8, "dmg": 940, "remarks": "" },
+      { "name": "V3三連踢", "cmd": "S+I", "chi": 11, "dmg": 1160, "remarks": "" }
+    ],
+    "utilities": [
+      { "name": "飛躍", "cmd": "W+I", "chi": 0, "effect": "提升普通攻擊與迴避率", "remarks": "持續3回合" },
+      { "name": "雙重颱風運能", "cmd": "W+J", "chi": 0, "effect": "提升蓄力速度", "remarks": "持續3回合" },
+      { "name": "雙重颱風聚焦", "cmd": "W+K", "chi": 1, "effect": "提升攻擊力", "remarks": "持續3回合" },
+      { "name": "雙重颱風衝擊波", "cmd": "W+L", "chi": 2, "effect": "造成傷害並累積暈眩值", "remarks": "遠距離攻擊" }
+    ],
+    "defense": [
+      { "name": "防守", "cmd": "A+I, A+J, A+K, A+L", "chi": 0, "effect": "分別防禦 I、J、K 與 L 攻擊", "remarks": "" }
+    ]
+  }
+}

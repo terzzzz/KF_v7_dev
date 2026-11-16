@@ -63,8 +63,8 @@
       { "name": "鉤爪電擊", "cmd": "S+I", "chi": 10, "dmg": 980, "remarks": "遠距離攻擊" }
     ],
     "utilities": [
-      { "name": "高躍", "cmd": "W+I", "chi": 0, "effect": "提升迴避率", "remarks": "持續3回合" },
-      { "name": "目標鎖定", "cmd": "W+J", "chi": 1, "effect": "提升命中率", "remarks": "持續3回合" },
+      { "name": "騰空", "cmd": "W+I", "chi": 0, "effect": "提升迴避率", "remarks": "持續3回合" },
+      { "name": "校對目標", "cmd": "W+J", "chi": 1, "effect": "提升命中率", "remarks": "持續3回合" },
       { "name": "戰吼", "cmd": "W+K", "chi": 0, "effect": "降低暈眩值", "remarks": "" },
       { "name": "繩索臂束縛", "cmd": "W+L", "chi": 2, "effect": "使對手蓄力速度降低2回合", "remarks": "遠距離攻擊、造成傷害" }
     ],

@@ -1,5 +1,5 @@
 /**
- * Character Selection Screen, BGM Manager, Bilingual (EN/JA) UI & Match Preparation
+ * Character Selection Screen, BGM Manager, Trilingual (EN/JA/ZH) UI & Match Preparation
  * Path: js/vs_select.js
  */
 
@@ -33,6 +33,54 @@
     'qr.png'
   ];
 
+  // External per-Rider movelist JSON files (EN + JA + ZH in each file)
+  const RIDER_MOVE_FILES = {
+    ichigo: 'data/moves/move_001.json',
+    nigo: 'data/moves/move_002.json',
+    v3: 'data/moves/move_003.json',
+    riderman: 'data/moves/move_004.json',
+    x: 'data/moves/move_005.json',
+    amazon: 'data/moves/move_006.json',
+    stronger: 'data/moves/move_007.json'
+  };
+
+  const MOVELIST_CACHE = {};
+
+  function normalizeLang(lang) {
+    if (lang === 'ja' || lang === 'zh') return lang;
+    return 'en';
+  }
+
+  /** Fetches and caches a Rider's trilingual movelist JSON file. */
+  async function loadRiderMovelist(riderId) {
+    const id = String(riderId || 'ichigo').toLowerCase();
+    if (MOVELIST_CACHE[id]) {
+      return MOVELIST_CACHE[id];
+    }
+
+    const riders = window.AVAILABLE_RIDERS || [];
+    const riderObj = riders.find(r => String(r.id).toLowerCase() === id);
+    const filePath = (riderObj && riderObj.moveFile) || RIDER_MOVE_FILES[id] || RIDER_MOVE_FILES.ichigo;
+
+    try {
+      const res = await fetch(filePath);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      MOVELIST_CACHE[id] = json;
+      return json;
+    } catch (err) {
+      console.warn(`Failed to load movelist from ${filePath}:`, err);
+      return null;
+    }
+  }
+
+  /** Preloads all Rider movelist files in the background so modal clicks feel instant. */
+  function preloadAllMovelists() {
+    const riders = window.AVAILABLE_RIDERS || [];
+    const ids = riders.length > 0 ? riders.map(r => r.id) : Object.keys(RIDER_MOVE_FILES);
+    Promise.allSettled(ids.map(id => loadRiderMovelist(id)));
+  }
+
   /** Permanently disables and removes any portrait-rotation blocker overlay (fixes PLiCy/browser iframe lock). */
   function disablePortraitOrientationOverlay() {
     const selectors = [
@@ -56,7 +104,7 @@
   }
 
   /*
-   * Bilingual UI Dictionary (English & Japanese)
+   * Trilingual UI Dictionary (English, Japanese & Traditional Chinese)
    */
   const I18N = {
     en: {
@@ -75,6 +123,8 @@
       naLabel: 'N/A',
       difficultyLabel: 'DIFFICULTY:',
       movelistBtn: '📋 MOVELIST',
+      movelistLoading: 'Loading movelist...',
+      movelistError: 'Unable to load movelist file.',
       dockStep1: 'QUICK SELECT — CLICK TO ASSIGN PLAYER 1',
       dockStep2: 'QUICK SELECT — CLICK TO ASSIGN PLAYER 2',
       dockStep3: 'MATCHUP LOCKED — READY FOR BATTLE',
@@ -182,7 +232,7 @@
 
           <div class="kf-howto-section">
             <h3>2. Learn the Combat Controls</h3>
-            <p>Ey action requires combining a <strong>Direction Key</strong> (to choose move type and build charge) with an <strong>Action Key</strong> (to execute the move).</p>
+            <p>Every action requires combining a <strong>Direction Key</strong> (to choose move type and build charge) with an <strong>Action Key</strong> (to execute the move).</p>
 
             <div class="kf-howto-table-wrap">
               <table class="kf-howto-table">
@@ -197,7 +247,7 @@
                   <tr>
                     <td class="kf-key-cell">W Key</td>
                     <td class="kf-stance-cell">Utility &amp; Buffs</td>
-                    <td>High Jumps, Speed Enhancements, Attack Focus, and Stun Recoy</td>
+                    <td>High Jumps, Speed Enhancements, Attack Focus, and Stun Recovery</td>
                   </tr>
                   <tr>
                     <td class="kf-key-cell">D Key</td>
@@ -249,6 +299,8 @@
       naLabel: 'なし',
       difficultyLabel: '難易度:',
       movelistBtn: '📋 技表',
+      movelistLoading: '技表を読み込み中...',
+      movelistError: '技表ファイルを読み込めませんでした。',
       dockStep1: 'クイック選択 ― クリックしてプレイヤー1を決定',
       dockStep2: 'クイック選択 ― クリックしてプレイヤー2を決定',
       dockStep3: '対戦カード決定 ― バトル開始可能',
@@ -313,7 +365,7 @@
         '',
         '「変身」の意味を教えてくれた全てのヒーローたちに捧ぐ！！',
         '',
-        '[ Kamen Fight ]',
+        '[ Kamen Fight ver 6.1 ]',
         '制作：Terence Cheng',
         '',
         '----------------------------------------',
@@ -406,365 +458,188 @@
           </div>
         </div>
       `
-    }
-  };
-
-  /*
-   * Complete Tabulated Movelist Database for all 7 Riders (EN & JA)
-   */
-  const RIDER_MOVELISTS = {
-    en: {
-      ichigo: {
-        name: 'Kamen Rider Ichigo',
-        basic: [
-          { name: 'Standard Punch', cmd: 'D+J', chi: 0, dmg: 52, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Standard Kick', cmd: 'D+K', chi: 0, dmg: 52, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Combo Punch', cmd: 'D+L', chi: 1, dmg: 95, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Combo Kick', cmd: 'D+I', chi: 1, dmg: 90, remarks: 'Gain 3 CHI if hit' }
-        ],
-        special: [
-          { name: 'Rider Power Chop', cmd: 'S+J', chi: 3, dmg: 400, remarks: '' },
-          { name: 'Rider Head Crusher', cmd: 'S+K', chi: 4, dmg: 480, remarks: '' },
-          { name: 'Rider Kick', cmd: 'S+L', chi: 6, dmg: 860, remarks: '' },
-          { name: 'Kirimomi Kick', cmd: 'S+I', chi: 9, dmg: 1100, remarks: '' }
-        ],
-        utilities: [
-          { name: 'Rider High Jump', cmd: 'W+I', chi: 0, effect: 'Buff attack and evasion', remarks: 'Last 3 rounds' },
-          { name: 'Typhoon Charge', cmd: 'W+J', chi: 1, effect: 'Buff charge speed', remarks: 'Last 3 rounds' },
-          { name: 'Typhoon Focus', cmd: 'W+K', chi: 0, effect: 'Buff special attack', remarks: 'Last 3 rounds' },
-          { name: 'Typhoon Bless', cmd: 'W+L', chi: 0, effect: 'Decrease faint', remarks: '' }
-        ],
-        defense: [
-          { name: 'Windmill Guard', cmd: 'A+I', chi: 4, effect: 'Defense against all attacks', remarks: '' },
-          { name: 'Standard Guard', cmd: 'A+J, A+K, A+L', chi: 0, effect: 'Defense against J, K & L attacks respectively', remarks: '' }
-        ]
-      },
-      nigo: {
-        name: 'Kamen Rider Nigo',
-        basic: [
-          { name: 'Standard Punch', cmd: 'D+J', chi: 0, dmg: 75, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Standing Kick', cmd: 'D+K', chi: 0, dmg: 80, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Punches', cmd: 'D+L', chi: 1, dmg: 140, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Mixed Combo', cmd: 'D+I', chi: 1, dmg: 130, remarks: 'Gain 3 CHI if hit' }
-        ],
-        special: [
-          { name: 'Rider Punch', cmd: 'S+J', chi: 3, dmg: 370, remarks: '' },
-          { name: 'Rider Flying Knee', cmd: 'S+K', chi: 5, dmg: 480, remarks: '' },
-          { name: 'Rider Power Kick', cmd: 'S+L', chi: 7, dmg: 860, remarks: '' },
-          { name: 'Typhoon Power Break', cmd: 'S+I', chi: 10, dmg: 1065, remarks: '' }
-        ],
-        utilities: [
-          { name: 'Rider Power Jump', cmd: 'W+I', chi: 0, effect: 'Buff attack and accuracy', remarks: 'Last 3 rounds' },
-          { name: 'Typhoon Red Shutter', cmd: 'W+J', chi: 0, effect: 'Buff charge speed and armor', remarks: 'Last 3 rounds' },
-          { name: 'Power Focus', cmd: 'W+K', chi: 1, effect: 'Buff basic attack', remarks: 'Last 4 rounds' },
-          { name: 'Battle Cry', cmd: 'W+L', chi: 2, effect: 'Decrease faint', remarks: '' }
-        ],
-        defense: [
-          { name: 'Windmill Guard', cmd: 'A+I', chi: 4, effect: 'Defense against all attacks', remarks: '' },
-          { name: 'Standard Guard', cmd: 'A+J, A+K, A+L', chi: 0, effect: 'Defense against J, K & L attacks respectively', remarks: '' }
-        ]
-      },
-      v3: {
-        name: 'Kamen Rider V3',
-        basic: [
-          { name: 'Chop', cmd: 'D+J', chi: 0, dmg: 60, remarks: 'Gain 2 CHI if hit' },
-          { name: 'High Kick', cmd: 'D+K', chi: 0, dmg: 63, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Chop Combo', cmd: 'D+L', chi: 1, dmg: 116, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Mixed Hits', cmd: 'D+I', chi: 1, dmg: 106, remarks: 'Gain 3 CHI if hit' }
-        ],
-        special: [
-          { name: 'V3 Kick', cmd: 'S+J', chi: 4, dmg: 430, remarks: '' },
-          { name: 'V3 Return Kick', cmd: 'S+K', chi: 5, dmg: 560, remarks: '' },
-          { name: 'V3 Screw Kick', cmd: 'S+L', chi: 8, dmg: 940, remarks: '' },
-          { name: 'V3 Triple Kick', cmd: 'S+I', chi: 11, dmg: 1160, remarks: '' }
-        ],
-        utilities: [
-          { name: 'Leap', cmd: 'W+I', chi: 0, effect: 'Buff basic attack and evasion', remarks: 'Last 3 rounds' },
-          { name: 'Accelerator', cmd: 'W+J', chi: 0, effect: 'Buff charging speed', remarks: 'Last 3 rounds' },
-          { name: 'Red Lamp Focus', cmd: 'W+K', chi: 1, effect: 'Buff attack', remarks: 'Last 3 rounds' },
-          { name: 'Double Typhoon Blow', cmd: 'W+L', chi: 2, effect: 'Deal damage and build faint', remarks: 'Long reach' }
-        ],
-        defense: [
-          { name: 'Standard Guard', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'Defense against I, J, K & L attacks respectively', remarks: '' }
-        ]
-      },
-      riderman: {
-        name: 'Riderman',
-        basic: [
-          { name: 'Standard Punch', cmd: 'D+J', chi: 0, dmg: 55, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Standard Kick', cmd: 'D+K', chi: 0, dmg: 58, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Classic Combo', cmd: 'D+L', chi: 1, dmg: 125, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Rope Arm Hook', cmd: 'D+I', chi: 2, dmg: 100, remarks: 'Gain 3 CHI if hit, Long reach, build faint' }
-        ],
-        special: [
-          { name: 'Riderman Kick', cmd: 'S+J', chi: 4, dmg: 420, remarks: '' },
-          { name: 'Drill Arm Break', cmd: 'S+K', chi: 6, dmg: 560, remarks: 'Long reach, build faint' },
-          { name: 'Power Arm Strike', cmd: 'S+L', chi: 7, dmg: 645, remarks: 'Long reach' },
-          { name: 'Hook Finisher', cmd: 'S+I', chi: 10, dmg: 980, remarks: 'Long reach' }
-        ],
-        utilities: [
-          { name: 'High Leap', cmd: 'W+I', chi: 0, effect: 'Buff evasion', remarks: 'Last 3 rounds' },
-          { name: 'Target Lock', cmd: 'W+J', chi: 1, effect: 'Buff accuracy', remarks: 'Last 3 rounds' },
-          { name: 'Battle Cry', cmd: 'W+K', chi: 0, effect: 'Decrease faint', remarks: '' },
-          { name: 'Rope Arm Tie-Up', cmd: 'W+L', chi: 2, effect: 'Slows opponent charge speed for 2 rounds', remarks: 'Long reach, deals damage' }
-        ],
-        defense: [
-          { name: 'Standard Guard', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'Defense against I, J, K & L attacks respectively', remarks: '' }
-        ]
-      },
-      x: {
-        name: 'Kamen Rider X',
-        basic: [
-          { name: 'Standard Punch', cmd: 'D+J', chi: 0, dmg: 55, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Standard Kick', cmd: 'D+K', chi: 0, dmg: 65, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Ridol Rod Strike', cmd: 'D+L', chi: 1, dmg: 120, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Ridol Whip Lash', cmd: 'D+I', chi: 1, dmg: 105, remarks: 'Gain 3 CHI if hit, build faint' }
-        ],
-        special: [
-          { name: 'Rider Kick', cmd: 'S+J', chi: 4, dmg: 440, remarks: '' },
-          { name: 'X-Kick', cmd: 'S+K', chi: 6, dmg: 700, remarks: '' },
-          { name: 'Ridol Crown Split', cmd: 'S+L', chi: 7, dmg: 740, remarks: 'Long reach, build faint' },
-          { name: 'Vacuum Hell Wheel', cmd: 'S+I', chi: 10, dmg: 1111, remarks: '' }
-        ],
-        utilities: [
-          { name: 'Jump', cmd: 'W+I', chi: 0, effect: 'Buff basic attack and evasion', remarks: 'Last 3 rounds' },
-          { name: 'Mercury Overdrive', cmd: 'W+J', chi: 1, effect: 'Buff attack', remarks: 'Last 3 rounds' },
-          { name: 'Mercury Fortification', cmd: 'W+K', chi: 1, effect: 'Buff armor', remarks: 'Last 3 rounds' },
-          { name: 'Kaizorg Vitality', cmd: 'W+L', chi: 4, effect: 'Recover LP and decrease faint', remarks: '' }
-        ],
-        defense: [
-          { name: 'Standard Guard', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'Defense against I, J, K & L attacks respectively', remarks: '' }
-        ]
-      },
-      amazon: {
-        name: 'Kamen Rider Amazon',
-        basic: [
-          { name: 'Mystic Kick', cmd: 'D+J', chi: 0, dmg: 77, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Claw Attack', cmd: 'D+K', chi: 1, dmg: 130, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Claw Combo', cmd: 'D+L', chi: 1, dmg: 142, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Standard Kick', cmd: 'D+I', chi: 0, dmg: 74, remarks: 'Gain 2 CHI if hit' }
-        ],
-        special: [
-          { name: 'Amazon Kick', cmd: 'S+J', chi: 4, dmg: 420, remarks: '' },
-          { name: 'Jaguar Shock', cmd: 'S+K', chi: 5, dmg: 480, remarks: 'Inflict Bleed for 3 rounds' },
-          { name: 'Wild Tackle', cmd: 'S+L', chi: 7, dmg: 880, remarks: '' },
-          { name: 'Daisetsudan', cmd: 'S+I', chi: 9, dmg: 1020, remarks: '' }
-        ],
-        utilities: [
-          { name: 'Wild Leap', cmd: 'W+I', chi: 1, effect: 'Buff attack and evasion', remarks: 'Last 4 rounds' },
-          { name: 'Inca Blessing', cmd: 'W+J', chi: 4, effect: 'Regenerate LP', remarks: 'Last 3 rounds' },
-          { name: 'Gigi Focus', cmd: 'W+K', chi: 1, effect: 'Buff evasion', remarks: 'Last 3 rounds' },
-          { name: 'Wild Instinct', cmd: 'W+L', chi: 0, effect: 'Decrease faint', remarks: '' }
-        ],
-        defense: [
-          { name: 'Standard Guard', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'Defense against I, J, K & L attacks respectively', remarks: '' }
-        ]
-      },
-      stronger: {
-        name: 'Kamen Rider Stronger',
-        basic: [
-          { name: 'Elec-Punch', cmd: 'D+J', chi: 0, dmg: 52, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Elec-Kick', cmd: 'D+K', chi: 0, dmg: 56, remarks: 'Gain 2 CHI if hit' },
-          { name: 'Tackle', cmd: 'D+L', chi: 1, dmg: 102, remarks: 'Gain 3 CHI if hit' },
-          { name: 'Electro Kicks', cmd: 'D+I', chi: 1, dmg: 94, remarks: 'Gain 4 CHI if hit' }
-        ],
-        special: [
-          { name: 'Electro Fire', cmd: 'S+J', chi: 4, dmg: 480, remarks: 'Long reach, slows opponent charge speed for 2 rounds' },
-          { name: 'Electro Waterfall', cmd: 'S+K', chi: 5, dmg: 440, remarks: 'Long reach, build faint' },
-          { name: 'Stronger Electro Kick', cmd: 'S+L', chi: 7, dmg: 880, remarks: '' },
-          { name: 'Super Electronic Drill Kick', cmd: 'S+I', chi: 10, dmg: 1250, remarks: '' }
-        ],
-        utilities: [
-          { name: 'Jump', cmd: 'W+I', chi: 0, effect: 'Buff attack and evasion', remarks: 'Last 3 rounds' },
-          { name: 'Electro-Magnetic Field', cmd: 'W+J', chi: 0, effect: 'Buff armor', remarks: 'Last 4 rounds' },
-          { name: 'Electro Dynamo', cmd: 'W+K', chi: 2, effect: 'Enable special moves', remarks: 'Last 15 rounds, refund 2 CHI' },
-          { name: 'War Cry', cmd: 'W+L', chi: 0, effect: 'Decrease faint', remarks: '' }
-        ],
-        defense: [
-          { name: 'Electro Barrier', cmd: 'A+I', chi: 4, effect: 'Defense against all attacks', remarks: '' },
-          { name: 'Standard Guard', cmd: 'A+J, A+K, A+L', chi: 0, effect: 'Defense against J, K & L attacks respectively', remarks: '' }
-        ]
-      }
     },
 
-    ja: {
-      ichigo: {
-        name: '仮面ライダー1号',
-        basic: [
-          { name: '通常パンチ', cmd: 'D+J', chi: 0, dmg: 52, remarks: 'ヒット時、氣+2' },
-          { name: '通常キック', cmd: 'D+K', chi: 0, dmg: 52, remarks: 'ヒット時、氣+2' },
-          { name: 'コンボパンチ', cmd: 'D+L', chi: 1, dmg: 95, remarks: 'ヒット時、氣+3' },
-          { name: 'コンボキック', cmd: 'D+I', chi: 1, dmg: 90, remarks: 'ヒット時、氣+3' }
-        ],
-        special: [
-          { name: 'ライダーパワーチョップ', cmd: 'S+J', chi: 3, dmg: 400, remarks: '' },
-          { name: 'ライダーヘッドクラッシャー', cmd: 'S+K', chi: 4, dmg: 480, remarks: '' },
-          { name: 'ライダーキック', cmd: 'S+L', chi: 6, dmg: 860, remarks: '' },
-          { name: 'きりもみキック', cmd: 'S+I', chi: 9, dmg: 1100, remarks: '' }
-        ],
-        utilities: [
-          { name: 'ライダーハイジャンプ', cmd: 'W+I', chi: 0, effect: '攻撃力・回避率アップ', remarks: '3ラウンド持続' },
-          { name: 'タイフーンチャージ', cmd: 'W+J', chi: 1, effect: 'チャージ速度アップ', remarks: '3ラウンド持続' },
-          { name: 'タイフーンフォーカス', cmd: 'W+K', chi: 0, effect: '必殺技の威力アップ', remarks: '3ラウンド持続' },
-          { name: 'タイフーンの加護', cmd: 'W+L', chi: 0, effect: '気絶値を減少', remarks: '' }
-        ],
-        defense: [
-          { name: '風車ガード', cmd: 'A+I', chi: 4, effect: 'すべての攻撃を防御', remarks: '' },
-          { name: '通常ガード', cmd: 'A+J, A+K, A+L', chi: 0, effect: 'J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
+    zh: {
+      rotateTitle: '請旋轉裝置螢幕',
+      rotateSub: '請使用直向模式進行遊戲。',
+      step1Header: 'STEP 1: 選擇玩家1的騎士',
+      step2Header: 'STEP 2: 選擇玩家2的騎士',
+      step3Header: '戰鬥準備就緒！',
+      trackerStep1: '01 P1選擇',
+      trackerStep2: '02 P2選擇',
+      trackerStep3: '03 準備就緒',
+      player1Heading: '玩家 1',
+      player2Heading: '玩家 2',
+      humanLabel: '玩家',
+      cpuLabel: 'CPU',
+      naLabel: '無',
+      difficultyLabel: '難度:',
+      movelistBtn: '📋 出招表',
+      movelistLoading: '正在載入出招表...',
+      movelistError: '無法載入出招表檔案。',
+      dockStep1: '快速選擇 — 點擊指派玩家 1',
+      dockStep2: '快速選擇 — 點擊指派玩家 2',
+      dockStep3: '對戰陣容已鎖定 — 準備開戰',
+      backBtn: '返回',
+      confirmP1Btn: '確認 P1',
+      confirmP2Btn: '確認 P2',
+      startGameBtn: '開始戰鬥',
+      errorCpuBanner: '至少需要一名玩家設為 CPU。',
+      howtoLink: '? 遊戲說明',
+      creditsLink: '★ 製作名單',
+      howtoCloseBtn: '明白了',
+      creditsCloseBtn: '關閉',
+      movelistCloseBtn: '關閉',
+      diffLabels: {
+        easy: '角蟬',
+        balanced: '蟋蟀',
+        defensive: '獨角仙',
+        master: '子彈蟻',
+        soul: '子彈蟻',
+        rider: '騎士'
       },
-      nigo: {
-        name: '仮面ライダー2号',
-        basic: [
-          { name: '通常パンチ', cmd: 'D+J', chi: 0, dmg: 75, remarks: 'ヒット時、氣+2' },
-          { name: '立ちキック', cmd: 'D+K', chi: 0, dmg: 80, remarks: 'ヒット時、氣+2' },
-          { name: '連続パンチ', cmd: 'D+L', chi: 1, dmg: 140, remarks: 'ヒット時、氣+3' },
-          { name: 'ミックスコンボ', cmd: 'D+I', chi: 1, dmg: 130, remarks: 'ヒット時、氣+3' }
-        ],
-        special: [
-          { name: 'ライダーパンチ', cmd: 'S+J', chi: 3, dmg: 370, remarks: '' },
-          { name: 'ライダー飛び膝蹴り', cmd: 'S+K', chi: 5, dmg: 480, remarks: '' },
-          { name: 'ライダーパワーキック', cmd: 'S+L', chi: 7, dmg: 860, remarks: '' },
-          { name: 'タイフーン・パワーブレイク', cmd: 'S+I', chi: 10, dmg: 1065, remarks: '' }
-        ],
-        utilities: [
-          { name: 'ライダーパワージャンプ', cmd: 'W+I', chi: 0, effect: '攻撃力・命中率アップ', remarks: '3ラウンド持続' },
-          { name: 'タイフーン・レッドシャッター', cmd: 'W+J', chi: 0, effect: 'チャージ速度・防御力アップ', remarks: '3ラウンド持続' },
-          { name: 'パワーフォーカス', cmd: 'W+K', chi: 1, effect: '通常攻撃の威力アップ', remarks: '4ラウンド持続' },
-          { name: 'バトルクライ', cmd: 'W+L', chi: 2, effect: '気絶値を減少', remarks: '' }
-        ],
-        defense: [
-          { name: '風車ガード', cmd: 'A+I', chi: 4, effect: 'すべての攻撃を防御', remarks: '' },
-          { name: '通常ガード', cmd: 'A+J, A+K, A+L', chi: 0, effect: 'J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
+      riderNames: {
+        ichigo: '假面騎士1號',
+        nigo: '假面騎士2號',
+        v3: '假面騎士V3',
+        riderman: '騎士人',
+        x: '假面騎士X',
+        amazon: '假面騎士亞馬遜',
+        stronger: '假面騎士強人'
       },
-      v3: {
-        name: '仮面ライダーV3',
-        basic: [
-          { name: 'チョップ', cmd: 'D+J', chi: 0, dmg: 60, remarks: 'ヒット時、氣+2' },
-          { name: 'ハイキック', cmd: 'D+K', chi: 0, dmg: 63, remarks: 'ヒット時、氣+2' },
-          { name: 'チョップコンボ', cmd: 'D+L', chi: 1, dmg: 116, remarks: 'ヒット時、氣+3' },
-          { name: 'ミックスヒット', cmd: 'D+I', chi: 1, dmg: 106, remarks: 'ヒット時、氣+3' }
-        ],
-        special: [
-          { name: 'V3キック', cmd: 'S+J', chi: 4, dmg: 430, remarks: '' },
-          { name: 'V3反転キック', cmd: 'S+K', chi: 5, dmg: 560, remarks: '' },
-          { name: 'V3きりもみキック', cmd: 'S+L', chi: 8, dmg: 940, remarks: '' },
-          { name: 'V3トリプルキック', cmd: 'S+I', chi: 11, dmg: 1160, remarks: '' }
-        ],
-        utilities: [
-          { name: 'リープ', cmd: 'W+I', chi: 0, effect: '通常攻撃・回避率アップ', remarks: '3ラウンド持続' },
-          { name: 'アクセラレーター', cmd: 'W+J', chi: 0, effect: 'チャージ速度アップ', remarks: '3ラウンド持続' },
-          { name: 'レッドランプフォーカス', cmd: 'W+K', chi: 1, effect: '攻撃力アップ', remarks: '3ラウンド持続' },
-          { name: 'ダブルタイフーン・ブロー', cmd: 'W+L', chi: 2, effect: 'ダメージを与え気絶値を蓄積', remarks: '遠距離リーチ' }
-        ],
-        defense: [
-          { name: '通常ガード', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'I・J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
+      riderShortNames: {
+        ichigo: '1號',
+        nigo: '2號',
+        v3: 'V3',
+        riderman: '騎士人',
+        x: 'X',
+        amazon: '亞馬遜',
+        stronger: '強人'
       },
-      riderman: {
-        name: 'ライダーマン',
-        basic: [
-          { name: '通常パンチ', cmd: 'D+J', chi: 0, dmg: 55, remarks: 'ヒット時、氣+2' },
-          { name: '通常キック', cmd: 'D+K', chi: 0, dmg: 58, remarks: 'ヒット時、氣+2' },
-          { name: 'クラシックコンボ', cmd: 'D+L', chi: 1, dmg: 125, remarks: 'ヒット時、氣+3' },
-          { name: 'ロープアーム・フック', cmd: 'D+I', chi: 2, dmg: 100, remarks: 'ヒット時、氣+3・遠距離リーチ・気絶値蓄積' }
-        ],
-        special: [
-          { name: 'ライダーマンキック', cmd: 'S+J', chi: 4, dmg: 420, remarks: '' },
-          { name: 'ドリルアーム・ブレイク', cmd: 'S+K', chi: 6, dmg: 560, remarks: '遠距離リーチ・気絶値蓄積' },
-          { name: 'パワーアーム・ストライク', cmd: 'S+L', chi: 7, dmg: 645, remarks: '遠距離リーチ' },
-          { name: 'フック・フィニッシャー', cmd: 'S+I', chi: 10, dmg: 980, remarks: '遠距離リーチ' }
-        ],
-        utilities: [
-          { name: 'ハイリープ', cmd: 'W+I', chi: 0, effect: '回避率アップ', remarks: '3ラウンド持続' },
-          { name: 'ターゲットロック', cmd: 'W+J', chi: 1, effect: '命中率アップ', remarks: '3ラウンド持続' },
-          { name: 'バトルクライ', cmd: 'W+K', chi: 0, effect: '気絶値を減少', remarks: '' },
-          { name: 'ロープアーム拘束', cmd: 'W+L', chi: 2, effect: '2ラウンドの間、相手のチャージ速度を低下', remarks: '遠距離リーチ・ダメージを与える' }
-        ],
-        defense: [
-          { name: '通常ガード', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'I・J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
-      },
-      x: {
-        name: '仮面ライダーX',
-        basic: [
-          { name: '通常パンチ', cmd: 'D+J', chi: 0, dmg: 55, remarks: 'ヒット時、氣+2' },
-          { name: '通常キック', cmd: 'D+K', chi: 0, dmg: 65, remarks: 'ヒット時、氣+2' },
-          { name: 'ライドルロッドストライク', cmd: 'D+L', chi: 1, dmg: 120, remarks: 'ヒット時、氣+3' },
-          { name: 'ライドルホイップラッシュ', cmd: 'D+I', chi: 1, dmg: 105, remarks: 'ヒット時、氣+3・気絶値蓄積' }
-        ],
-        special: [
-          { name: 'ライダーキック', cmd: 'S+J', chi: 4, dmg: 440, remarks: '' },
-          { name: 'Xキック', cmd: 'S+K', chi: 6, dmg: 700, remarks: '' },
-          { name: 'ライドル脳天割り', cmd: 'S+L', chi: 7, dmg: 740, remarks: '遠距離リーチ・気絶値蓄積' },
-          { name: '真空地獄車', cmd: 'S+I', chi: 10, dmg: 1111, remarks: '' }
-        ],
-        utilities: [
-          { name: 'ジャンプ', cmd: 'W+I', chi: 0, effect: '通常攻撃・回避率アップ', remarks: '3ラウンド持続' },
-          { name: 'マーキュリー・オーバードライブ', cmd: 'W+J', chi: 1, effect: '攻撃力アップ', remarks: '3ラウンド持続' },
-          { name: 'マーキュリー装甲強化', cmd: 'W+K', chi: 1, effect: '防御力アップ', remarks: '3ラウンド持続' },
-          { name: 'カイゾーグ活性', cmd: 'W+L', chi: 4, effect: 'LPを回復し気絶値を減少', remarks: '' }
-        ],
-        defense: [
-          { name: '通常ガード', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'I・J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
-      },
-      amazon: {
-        name: '仮面ライダーアマゾン',
-        basic: [
-          { name: 'ミスティックキック', cmd: 'D+J', chi: 0, dmg: 77, remarks: 'ヒット時、氣+2' },
-          { name: 'クローアタック', cmd: 'D+K', chi: 1, dmg: 130, remarks: 'ヒット時、氣+3' },
-          { name: 'クローコンボ', cmd: 'D+L', chi: 1, dmg: 142, remarks: 'ヒット時、氣+3' },
-          { name: '通常キック', cmd: 'D+I', chi: 0, dmg: 74, remarks: 'ヒット時、氣+2' }
-        ],
-        special: [
-          { name: 'アマゾンキック', cmd: 'S+J', chi: 4, dmg: 420, remarks: '' },
-          { name: 'ジャガーショック', cmd: 'S+K', chi: 5, dmg: 480, remarks: '3ラウンドの間、出血状態を付与' },
-          { name: 'ワイルドタックル', cmd: 'S+L', chi: 7, dmg: 880, remarks: '' },
-          { name: '大切断', cmd: 'S+I', chi: 9, dmg: 1020, remarks: '' }
-        ],
-        utilities: [
-          { name: 'ワイルドリープ', cmd: 'W+I', chi: 1, effect: '攻撃力・回避率アップ', remarks: '4ラウンド持続' },
-          { name: 'インカの秘術', cmd: 'W+J', chi: 4, effect: 'LPを継続回復', remarks: '3ラウンド持続' },
-          { name: 'ギギフォーカス', cmd: 'W+K', chi: 1, effect: '回避率アップ', remarks: '3ラウンド持続' },
-          { name: 'ワイルドインスティンクト', cmd: 'W+L', chi: 0, effect: '気絶値を減少', remarks: '' }
-        ],
-        defense: [
-          { name: '通常ガード', cmd: 'A+I, A+J, A+K, A+L', chi: 0, effect: 'I・J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
-      },
-      stronger: {
-        name: '仮面ライダーストロンガー',
-        basic: [
-          { name: 'エレキパンチ', cmd: 'D+J', chi: 0, dmg: 52, remarks: 'ヒット時、氣+2' },
-          { name: 'エレキキック', cmd: 'D+K', chi: 0, dmg: 56, remarks: 'ヒット時、氣+2' },
-          { name: 'タックル', cmd: 'D+L', chi: 1, dmg: 102, remarks: 'ヒット時、氣+3' },
-          { name: 'エレクトロキック連撃', cmd: 'D+I', chi: 1, dmg: 94, remarks: 'ヒット時、氣+4' }
-        ],
-        special: [
-          { name: 'エレクトロファイヤー', cmd: 'S+J', chi: 4, dmg: 480, remarks: '遠距離リーチ・2ラウンドの間、相手のチャージ速度を低下' },
-          { name: 'エレクトロウォーターフォール', cmd: 'S+K', chi: 5, dmg: 440, remarks: '遠距離リーチ・気絶値蓄積' },
-          { name: 'ストロンガー電キック', cmd: 'S+L', chi: 7, dmg: 880, remarks: '' },
-          { name: '超電子ドリルキック', cmd: 'S+I', chi: 10, dmg: 1250, remarks: '' }
-        ],
-        utilities: [
-          { name: 'ジャンプ', cmd: 'W+I', chi: 0, effect: '攻撃力・回避率アップ', remarks: '3ラウンド持続' },
-          { name: '電磁フィールド', cmd: 'W+J', chi: 0, effect: '防御力アップ', remarks: '4ラウンド持続' },
-          { name: 'エレクトロダイナモ', cmd: 'W+K', chi: 2, effect: '必殺技の使用を解放', remarks: '15ラウンド持続・氣+2還元' },
-          { name: 'ウォークライ', cmd: 'W+L', chi: 0, effect: '気絶値を減少', remarks: '' }
-        ],
-        defense: [
-          { name: 'エレクトロバリア', cmd: 'A+I', chi: 4, effect: 'すべての攻撃を防御', remarks: '' },
-          { name: '通常ガード', cmd: 'A+J, A+K, A+L', chi: 0, effect: 'J・K・L攻撃をそれぞれ防御', remarks: '' }
-        ]
-      }
+      movelistSheetSub: (lp) => `最大LP: ${lp} • 指令與招式數據表`,
+      catBasicTitle: '普通攻擊 (D架式)',
+      catBasicSub: '體術打擊',
+      catSpecialTitle: '必殺技 (S架式)',
+      catSpecialSub: '招牌終結技',
+      catUtilityTitle: '輔助與強化 (W架式)',
+      catUtilitySub: '增益與特殊技',
+      catDefenseTitle: '防禦 (A架式)',
+      catDefenseSub: '格擋與防護',
+      colName: '招式名稱',
+      colCmd: '指令',
+      colChi: '氣消耗',
+      colDmg: '傷害',
+      colEffect: '效果',
+      colRemarks: '備註',
+      creditsContent: [
+        '感謝您的遊玩！！衷心祝您享受熱血的戰鬥體驗，並在騎士難度擊敗所有假面騎士！！',
+        '',
+        '========================================',
+        '遊戲製作名單',
+        '========================================',
+        '',
+        '獻給所有教會我們「變身」意義的英雄們！！',
+        '',
+        '[ Kamen Fight ver 6.1 ]',
+        '製作：Terence Cheng',
+        '',
+        '----------------------------------------',
+        '企劃・開發・程式設計',
+        '----------------------------------------',
+        '首席開發者: Terence Cheng',
+        '遊戲設計: Terence Cheng',
+        '程式設計: Terence Cheng',
+        '',
+        '----------------------------------------',
+        '美術與動畫',
+        '----------------------------------------',
+        '首席美術: Terence Cheng',
+        'UI / UX 設計: Terence Cheng',
+        '素材製作: Terence Cheng',
+        '',
+        '----------------------------------------',
+        '音效與音樂',
+        '----------------------------------------',
+        '作曲與音效: Terence Cheng',
+        '',
+        '----------------------------------------',
+        '特別鳴謝',
+        '----------------------------------------',
+        '    Terence Cheng 的朋友們',
+        '    所有參與測試的玩家們',
+        '',
+        '========================================',
+        'Thank you for playing!',
+        '© 2026',
+        '========================================'
+      ].join('\n'),
+      howtoHtml: `
+        <div class="kf-howto-content">
+          <h2 class="kf-howto-main-title">遊戲說明（HOW TO PLAY）</h2>
+
+          <div class="kf-howto-section">
+            <h3>1. 選擇騎士與對戰設定</h3>
+            <p>在角色選擇畫面挑選您的假面騎士。您可以選擇雙人對戰，或挑戰從入門級<strong>「角蟬」</strong>到搭載49矩陣神經AI的最高階<strong>「騎士」</strong>級別CPU對手。</p>
+          </div>
+
+          <div class="kf-howto-section">
+            <h3>2. 戰鬥操作與架式系統</h3>
+            <p>所有行動皆需結合<strong>方向鍵（選擇招式類型並蓄力）</strong>與<strong>動作鍵（發動招式）</strong>來執行。</p>
+
+            <div class="kf-howto-table-wrap">
+              <table class="kf-howto-table">
+                <thead>
+                  <tr>
+                    <th>方向鍵</th>
+                    <th>架式類型</th>
+                    <th>動作按鈕 (I, J, K, L) 效果</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="kf-key-cell">W 鍵</td>
+                    <td class="kf-stance-cell">輔助與增益</td>
+                    <td>高躍、蓄力加速、攻擊集中與恢復暈眩值等</td>
+                  </tr>
+                  <tr>
+                    <td class="kf-key-cell">D 鍵</td>
+                    <td class="kf-stance-cell">物理攻擊</td>
+                    <td>快速拳擊、踢擊與連擊（命中時額外獲得「氣」）</td>
+                  </tr>
+                  <tr>
+                    <td class="kf-key-cell">S 鍵</td>
+                    <td class="kf-stance-cell">必殺技</td>
+                    <td>強力終結技（例如騎士踢、騎士拳等）</td>
+                  </tr>
+                  <tr>
+                    <td class="kf-key-cell">A 鍵</td>
+                    <td class="kf-stance-cell">防禦架式</td>
+                    <td>防禦護盾與格擋，減少受到的傷害並吸收額外的「氣」</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="kf-howto-section">
+            <h3>3. 戰鬥策略要點</h3>
+            <ul class="kf-howto-list">
+              <li><strong>長按方向鍵：</strong> 按住 W、A、S 或 D 鍵可將能量蓄力至 100%。</li>
+              <li><strong>鎖定出招：</strong> 在決策倒數結束前按下 I、J、K 或 L 確認您的行動。</li>
+              <li><strong>以普攻累積「氣」：</strong> 使用 D 架式物理攻擊命中對手，快速充能氣量表。</li>
+              <li><strong>防禦致命威脅：</strong> 預判對手準備施放高傷大招時，切換 A 架式進行減傷防禦。</li>
+              <li><strong>施放必殺終結：</strong> 當「氣」累積充足時，發動 S 架式必殺技給予重創並擊倒對手！</li>
+            </ul>
+          </div>
+        </div>
+      `
     }
   };
 
-  /** Returns active language dictionary ('en' or 'ja'). */
+  /** Returns active language dictionary ('en', 'ja', or 'zh'). */
   function t() {
-    return I18N[window.gameLang === 'ja' ? 'ja' : 'en'];
+    return I18N[normalizeLang(window.gameLang)];
   }
 
   /** Returns localized full name for a Rider object. */
@@ -786,9 +661,9 @@
     return String(rider.name || rider.id).replace(/^Kamen Rider\s+/i, '');
   }
 
-  /** Sets the active game language ('en' or 'ja') and refreshes all VS Select UI & Modals. */
+  /** Sets the active game language ('en', 'ja', or 'zh') and refreshes all VS Select UI & Modals. */
   window.setGameLanguage = function (lang) {
-    window.gameLang = lang === 'ja' ? 'ja' : 'en';
+    window.gameLang = normalizeLang(lang);
     document.documentElement.lang = window.gameLang;
 
     disablePortraitOrientationOverlay();
@@ -817,7 +692,7 @@
       movelistCloseBtn.textContent = dict.movelistCloseBtn;
     }
 
-    window.updateSelectionUI();
+    window.refreshVsSelectLanguage();
 
     // Ensure transition from loading screen to vs-select-screen happens smoothly
     const loadingScreen = document.getElementById('loading-screen');
@@ -834,14 +709,14 @@
     }
   };
 
-  /** Protects the 2-button language selector inside #start-prompt from being overwritten by game.js. */
+  /** Protects the 3-button language selector inside #start-prompt from being overwritten by game.js. */
   function protectStartPromptButtons() {
     const startPrompt = document.getElementById('start-prompt');
     if (!startPrompt || startPrompt.dataset.kfLangProtected) return;
     startPrompt.dataset.kfLangProtected = '1';
 
     const BUTTONS_MARKUP = `
-      <div class="start-lang-caption">SELECT LANGUAGE / 言語を選択</div>
+      <div class="start-lang-caption">SELECT LANGUAGE / 言語を選択 / 選擇語言</div>
       <div class="start-lang-btn-row">
         <button id="start-btn-en"
                 type="button"
@@ -854,6 +729,12 @@
                 class="start-lang-btn lang-ja"
                 onclick="if(window.setGameLanguage) window.setGameLanguage('ja');">
           日本語
+        </button>
+        <button id="start-btn-zh"
+                type="button"
+                class="start-lang-btn lang-zh"
+                onclick="if(window.setGameLanguage) window.setGameLanguage('zh');">
+          中文
         </button>
       </div>
     `;
@@ -936,12 +817,12 @@
       return;
     }
 
-    // Load modern geometric display fonts + Noto Sans JP for Japanese UI
+    // Load modern geometric display fonts + Noto Sans JP/TC for Japanese & Chinese UI
     if (!document.getElementById('kf-modern-fonts')) {
       const fontLink = document.createElement('link');
       fontLink.id = 'kf-modern-fonts';
       fontLink.rel = 'stylesheet';
-      fontLink.href = 'https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&family=Noto+Sans+JP:wght@500;700;900&family=Orbitron:wght@600;700;800;900&display=swap';
+      fontLink.href = 'https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&family=Noto+Sans+JP:wght@500;700;900&family=Noto+Sans+TC:wght@500;700;900&family=Orbitron:wght@600;700;800;900&display=swap';
       (document.head || document.documentElement).appendChild(fontLink);
     }
 
@@ -950,8 +831,8 @@
 
     style.textContent = `
       :root {
-        --kf-font-display: 'Orbitron', 'Chakra Petch', 'Noto Sans JP', 'Segoe UI', system-ui, sans-serif;
-        --kf-font-ui: 'Chakra Petch', 'Noto Sans JP', 'Segoe UI', Roboto, system-ui, sans-serif;
+        --kf-font-display: 'Orbitron', 'Chakra Petch', 'Noto Sans JP', 'Noto Sans TC', 'Segoe UI', system-ui, sans-serif;
+        --kf-font-ui: 'Chakra Petch', 'Noto Sans JP', 'Noto Sans TC', 'Segoe UI', Roboto, system-ui, sans-serif;
         --kf-p1-accent: #00f0ff;
         --kf-p1-glow: rgba(0, 240, 255, 0.38);
         --kf-p2-accent: #ff2a6d;
@@ -2214,13 +2095,11 @@
   }
 
   /** Renders the HTML content for a specific Rider's movelist inside #kf-movelist-modal in the active language. */
-  function renderMovelistModalContent(riderId) {
+  async function renderMovelistModalContent(riderId) {
     const dict = t();
-    const langKey = window.gameLang === 'ja' ? 'ja' : 'en';
-    const langMovelists = RIDER_MOVELISTS[langKey] || RIDER_MOVELISTS.en;
+    const langKey = normalizeLang(window.gameLang);
     const riders = window.AVAILABLE_RIDERS || [];
     const riderObj = riders.find(r => r.id === riderId) || riders[0] || { id: 'ichigo', name: 'Kamen Rider Ichigo', icon: 'assets/images/icons/ichigo.png', maxLp: 3000 };
-    const data = langMovelists[riderObj.id] || langMovelists.ichigo;
 
     const watermarkEl = document.getElementById('kf-movelist-watermark');
     const switcherEl = document.getElementById('kf-movelist-switcher');
@@ -2249,24 +2128,46 @@
       });
     }
 
-    if (bodyEl) {
+    if (!bodyEl) return;
+
+    // Show immediate header + loading indicator if JSON is not cached yet
+    if (!MOVELIST_CACHE[riderObj.id]) {
       bodyEl.innerHTML = `
         <div class="kf-movelist-header-banner">
           <img class="kf-movelist-avatar" src="${riderObj.icon}" alt="${getLocalizedRiderName(riderObj)}">
           <div class="kf-movelist-title-group">
-            <h2 class="kf-movelist-rider-title">${data.name || getLocalizedRiderName(riderObj)}</h2>
+            <h2 class="kf-movelist-rider-title">${getLocalizedRiderName(riderObj)}</h2>
             <div class="kf-movelist-subtitle">${dict.movelistSheetSub(riderObj.maxLp || 3000)}</div>
           </div>
         </div>
-        <div class="kf-movelist-grid">
-          ${buildMovelistCategoryHtml(dict.catBasicTitle, dict.catBasicSub, 'kf-cat-basic', data.basic, true)}
-          ${buildMovelistCategoryHtml(dict.catSpecialTitle, dict.catSpecialSub, 'kf-cat-special', data.special, true)}
-          ${buildMovelistCategoryHtml(dict.catUtilityTitle, dict.catUtilitySub, 'kf-cat-utility', data.utilities, false)}
-          ${buildMovelistCategoryHtml(dict.catDefenseTitle, dict.catDefenseSub, 'kf-cat-defense', data.defense, false)}
-        </div>
+        <div style="padding:24px;color:#94a3b8;font-weight:700;">${dict.movelistLoading}</div>
       `;
-      bodyEl.scrollTop = 0;
     }
+
+    const moveFile = await loadRiderMovelist(riderObj.id);
+    const data = moveFile && (moveFile[langKey] || moveFile.en);
+
+    if (!data) {
+      bodyEl.innerHTML = `<div style="padding:24px;color:#ff8da8;font-weight:700;">${dict.movelistError}</div>`;
+      return;
+    }
+
+    bodyEl.innerHTML = `
+      <div class="kf-movelist-header-banner">
+        <img class="kf-movelist-avatar" src="${riderObj.icon}" alt="${getLocalizedRiderName(riderObj)}">
+        <div class="kf-movelist-title-group">
+          <h2 class="kf-movelist-rider-title">${data.name || getLocalizedRiderName(riderObj)}</h2>
+          <div class="kf-movelist-subtitle">${dict.movelistSheetSub(riderObj.maxLp || 3000)}</div>
+        </div>
+      </div>
+      <div class="kf-movelist-grid">
+        ${buildMovelistCategoryHtml(dict.catBasicTitle, dict.catBasicSub, 'kf-cat-basic', data.basic, true)}
+        ${buildMovelistCategoryHtml(dict.catSpecialTitle, dict.catSpecialSub, 'kf-cat-special', data.special, true)}
+        ${buildMovelistCategoryHtml(dict.catUtilityTitle, dict.catUtilitySub, 'kf-cat-utility', data.utilities, false)}
+        ${buildMovelistCategoryHtml(dict.catDefenseTitle, dict.catDefenseSub, 'kf-cat-defense', data.defense, false)}
+      </div>
+    `;
+    bodyEl.scrollTop = 0;
   }
 
   /** Ensures the Movelist modal container exists inside #vs-select-screen. */
@@ -3296,6 +3197,7 @@
       console.warn("Could not load riders.json, defaulting to fallback roster.");
     }
 
+    preloadAllMovelists();
     window.updateSelectionUI();
 
     const unlockAudio = () => {

@@ -925,9 +925,9 @@
           { "name": "大切断", "cmd": "S+I", "chi": 9, "dmg": 1020, "remarks": "" }
         ],
         "utilities": [
-          { "name": "ワイルドリープ", "cmd": "W+I", "chi": 1, "effect": "攻撃力・回避率アップ", "remarks": "4ラウンド持続" },
+          { "name": "ワイルドリープ", "cmd": "W+I", "chi": 2, "effect": "攻撃力・回避率アップ", "remarks": "3ラウンド持続" },
           { "name": "インカの秘術", "cmd": "W+J", "chi": 4, "effect": "LPを継続回復", "remarks": "3ラウンド持続" },
-          { "name": "ギギフォーカス", "cmd": "W+K", "chi": 1, "effect": "回避率アップ", "remarks": "3ラウンド持続" },
+          { "name": "ギギフォーカス", "cmd": "W+K", "chi": 2, "effect": "回避率アップ", "remarks": "3ラウンド持続" },
           { "name": "ワイルドインスティンクト", "cmd": "W+L", "chi": 0, "effect": "気絶値を減少", "remarks": "" }
         ],
         "defense": [
@@ -949,9 +949,9 @@
           { "name": "大切斷", "cmd": "S+I", "chi": 9, "dmg": 1020, "remarks": "" }
         ],
         "utilities": [
-          { "name": "躍上樹", "cmd": "W+I", "chi": 1, "effect": "提升攻擊力與迴避率", "remarks": "持續4回合" },
+          { "name": "躍上樹", "cmd": "W+I", "chi": 2, "effect": "提升攻擊力與迴避率", "remarks": "持續3回合" },
           { "name": "印加秘術", "cmd": "W+J", "chi": 4, "effect": "持續回復LP", "remarks": "持續3回合" },
-          { "name": "唧唧臂環集能", "cmd": "W+K", "chi": 1, "effect": "提升迴避率", "remarks": "持續3回合" },
+          { "name": "唧唧臂環集能", "cmd": "W+K", "chi": 2, "effect": "提升迴避率", "remarks": "持續3回合" },
           { "name": "狂野本能", "cmd": "W+L", "chi": 0, "effect": "降低暈眩值", "remarks": "" }
         ],
         "defense": [

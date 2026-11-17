@@ -19,7 +19,7 @@
 (function (g) {
   "use strict";
 
-  const VERSION = "sequential-media-1";
+  const VERSION = "sequential-media-2";
   const SLOTS = ["p1", "p2"];
   const VIDEO_IDS = ["p1-video", "p2-video", "center-video"];
 
@@ -32,6 +32,9 @@
 
   const tasks = new Map();
   const preferredSources = new Map();
+
+  // Tracks the latest attack executed by each slot ("p1" / "p2")
+  const lastAttackBySlot = { p1: null, p2: null };
 
   let requestNumber = 0;
   let epoch = 0;
@@ -125,13 +128,128 @@
       : "scaleX(-1)";
   }
 
-  function normalizedState(slot, requested) {
+  /**
+   * Extracts attack direction ("W", "A", "S", or "D") from a move object or video filename.
+   */
+  function extractAttackDirection(moveOrOptions, videoFile = "") {
+    if (moveOrOptions && typeof moveOrOptions === "object") {
+      const directDir =
+        moveOrOptions.direction ??
+        moveOrOptions.dir ??
+        moveOrOptions.attackDirection ??
+        moveOrOptions.inputDirection ??
+        moveOrOptions.moveDirection;
+
+      if (typeof directDir === "string" && /^[WASD]$/i.test(directDir.trim())) {
+        return directDir.trim().toUpperCase();
+      }
+
+      const keyCandidate =
+        moveOrOptions.key ??
+        moveOrOptions.input ??
+        moveOrOptions.code ??
+        moveOrOptions.command ??
+        moveOrOptions.id ??
+        moveOrOptions.moveId;
+
+      if (typeof keyCandidate === "string") {
+        const keyMatch = keyCandidate.trim().match(/^([WASD])(?:[+_-]|[JKIL]\b)/i);
+        if (keyMatch) return keyMatch[1].toUpperCase();
+      }
+
+      if (!videoFile) {
+        videoFile = moveOrOptions.video || moveOrOptions.videoFile || moveOrOptions.file || "";
+      }
+    } else if (typeof moveOrOptions === "string") {
+      const trimmed = moveOrOptions.trim();
+      if (/^[WASD]$/i.test(trimmed)) return trimmed.toUpperCase();
+      const strMatch = trimmed.match(/^([WASD])(?:[+_-]|[JKIL]\b)/i);
+      if (strMatch) return strMatch[1].toUpperCase();
+    }
+
+    if (typeof videoFile === "string" && videoFile.trim()) {
+      const base = videoFile.trim().split("/").pop() || "";
+      const fileMatch = base.match(/^([wasd])[_+-]/i);
+      if (fileMatch) return fileMatch[1].toUpperCase();
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolves whether a hit on `defenderSlot` came from a D attack (HIT_PHYSICAL)
+   * or a non-D attack (HIT).
+   */
+  function resolveHitState(defenderSlot, rawState, options = {}) {
+    const attackerSlot = defenderSlot === "p1" ? "p2" : "p1";
+    const recentAttack = lastAttackBySlot[attackerSlot];
+
+    // 1. Check explicit options or moveObj passed to playReactionVideo / updateCharacterMedia
+    const optMove = options?.moveObj || options?.move || options?.attackMove || options;
+    let dir =
+      extractAttackDirection(optMove, options?.videoFile) ||
+      extractAttackDirection(options, options?.videoFile);
+
+    if (!dir && typeof options?.isDAttack === "boolean") {
+      return options.isDAttack ? "HIT_PHYSICAL" : "HIT";
+    }
+
+    // 2. Check the attack just played by the opponent in playCenterVideo
+    if (!dir && recentAttack && (performance.now() - recentAttack.time < 15000)) {
+      dir =
+        extractAttackDirection(recentAttack.moveObj, recentAttack.videoFile) ||
+        extractAttackDirection(recentAttack.options, recentAttack.videoFile);
+    }
+
+    // 3. Check the opponent's active move in gameState
+    if (!dir) {
+      const attacker = playerFor(attackerSlot);
+      const gs = g.gameState;
+      const candidateMoves = [
+        attacker?.currentMove,
+        attacker?.selectedMove,
+        attacker?.lastMove,
+        attacker?.activeMove,
+        attacker?.move,
+        attacker?.action,
+        gs?.currentMove?.[attackerSlot],
+        gs?.selectedMoves?.[attackerSlot],
+        gs?.moves?.[attackerSlot],
+        gs?.actions?.[attackerSlot],
+        gs?.[`${attackerSlot}Move`]
+      ];
+
+      for (const cand of candidateMoves) {
+        dir = extractAttackDirection(cand);
+        if (dir) break;
+      }
+    }
+
+    // Rule: Hit by D attack -> HIT_PHYSICAL (hit_physical.mp4); otherwise -> HIT (hit.mp4)
+    if (dir) {
+      return dir === "D" ? "HIT_PHYSICAL" : "HIT";
+    }
+
+    // 4. Fallback if no move direction context exists
+    if (typeof options?.isPhysical === "boolean") {
+      return options.isPhysical ? "HIT_PHYSICAL" : "HIT";
+    }
+
+    return (rawState === "HIT_PHYSICAL" || rawState === "HIT2")
+      ? "HIT_PHYSICAL"
+      : "HIT";
+  }
+
+  function normalizedState(slot, requested, options = {}) {
     let state = String(requested || "IDLE")
       .replace(/\.(mp4|webm)$/i, "")
       .toUpperCase();
 
     const aliases = {
-      HIT_PHYSICAL: "HIT2",
+      HIT2: "HIT_PHYSICAL",
+      PHYSICAL_HIT: "HIT_PHYSICAL",
+      HIT_D: "HIT_PHYSICAL",
+      D_HIT: "HIT_PHYSICAL",
       BEING_HIT: "HIT",
       BLOCK: "GUARD",
       MISS: "DODGE",
@@ -140,6 +258,10 @@
     };
 
     state = aliases[state] || state;
+
+    if (state === "HIT" || state === "HIT_PHYSICAL") {
+      return resolveHitState(slot, state, options);
+    }
 
     if (state === "IDLE") {
       const player = playerFor(slot);
@@ -159,10 +281,8 @@
   function filesForState(state) {
     const files = {
       IDLE: ["idle.mp4"],
-
-      // Actual reaction filename first; legacy alias second.
       HIT: ["hit.mp4"],
-      HIT2: ["hit_physical.mp4", "hit.mp4"],
+      HIT_PHYSICAL: ["hit_physical.mp4", "hit.mp4"],
       GUARD: ["guard.mp4"],
       DODGE: ["dodge.mp4", "guard.mp4"],
       FAINT: ["faint.mp4"],
@@ -449,28 +569,32 @@
           log("playing", task.id, attemptToken, src);
 
           // Reaction hit audio SFX and visual glass shatter integration
-        // Inside markPlaying() in js/media.js
-if (task.channel === "p1" || task.channel === "p2") {
-  const srcLower = String(src || "").toLowerCase();
-  const isHitPhysical = srcLower.includes("hit_physical");
-  const isHit = srcLower.includes("hit");
+          if (task.channel === "p1" || task.channel === "p2") {
+            const srcLower = String(src || "").toLowerCase();
+            const isHitPhysical = srcLower.includes("hit_physical");
+            const isHit = !isHitPhysical && srcLower.includes("hit");
 
-  if (isHitPhysical || isHit) {
-    // Determine heavy hit based on move properties or explicitly passed options
-    const isHeavy = Boolean(task.isSpecial || task.heavy || task.moveObj?.type === "S");
+            if (isHitPhysical || isHit) {
+              const moveDir = extractAttackDirection(task.moveObj);
+              const isHeavy = Boolean(
+                task.isSpecial ||
+                task.heavy ||
+                task.moveObj?.type === "S" ||
+                moveDir === "S"
+              );
 
-    if (isHitPhysical) {
-      syncTimestamp(video, 0.12, () => g.KFAudio?.playHitSFX(false));
-    } else {
-      syncTimestamp(video, 0.22, () => g.KFAudio?.playHitSFX(isHeavy));
-    }
+              if (isHitPhysical) {
+                syncTimestamp(video, 0.12, () => g.KFAudio?.playHitSFX(false));
+              } else {
+                syncTimestamp(video, 0.22, () => g.KFAudio?.playHitSFX(isHeavy));
+              }
 
-    const triggerCrack = g.triggerGlassCrack || g.UI?.triggerGlassCrack;
-    if (typeof triggerCrack === "function") {
-      triggerCrack(`${task.channel}-box`, isHeavy ? 350 : 150, null, isHeavy);
-    }
-  }
-}
+              const triggerCrack = g.triggerGlassCrack || g.UI?.triggerGlassCrack;
+              if (typeof triggerCrack === "function") {
+                triggerCrack(`${task.channel}-box`, isHeavy ? 350 : 150, null, isHeavy);
+              }
+            }
+          }
 
           // Background loops resolve as soon as playback is active.
           if (task.background) {
@@ -756,6 +880,9 @@ if (task.channel === "p1" || task.channel === "p2") {
       transform: spec.transform,
       cacheKey: spec.cacheKey,
       identity: spec.identity,
+      moveObj: spec.moveObj || null,
+      isSpecial: Boolean(spec.isSpecial),
+      heavy: Boolean(spec.heavy),
       stallMs: positive(
         spec.stallMs,
         positive(CONFIG.STALL_TIMEOUT_MS, 8000)
@@ -917,10 +1044,23 @@ if (task.channel === "p1" || task.channel === "p2") {
       return Promise.resolve({ status: "unavailable" });
     }
 
-    const state = normalizedState(slot, stateType);
+    const attackerSlot = slot === "p1" ? "p2" : "p1";
+    const recentAttack = lastAttackBySlot[attackerSlot];
+    const state = normalizedState(slot, stateType, options);
+
+    // Consume the attacker's cached attack context once the defender reacts
+    if (lastAttackBySlot[attackerSlot]) {
+      lastAttackBySlot[attackerSlot] = null;
+    }
+
     const rider = riderFor(slot);
     const files = filesForState(state);
     const transform = getTransformFlip(playerFor(slot), slot);
+    const attackMoveObj =
+      options?.moveObj ||
+      options?.move ||
+      recentAttack?.moveObj ||
+      null;
 
     return enqueueForeground(valid => runChannel(slot, {
       slot,
@@ -930,8 +1070,11 @@ if (task.channel === "p1" || task.channel === "p2") {
       identity: `${rider}|${state}`,
       background: false, // Even FAINT must end when used as a reaction.
       transform,
-      stallMs: options.stallMs,
-      signal: options.signal,
+      moveObj: attackMoveObj,
+      isSpecial: Boolean(options?.isSpecial || recentAttack?.options?.isSpecial),
+      heavy: Boolean(options?.heavy || recentAttack?.options?.heavy),
+      stallMs: options?.stallMs,
+      signal: options?.signal,
       valid
     }), options);
   }
@@ -941,10 +1084,10 @@ if (task.channel === "p1" || task.channel === "p2") {
       return Promise.resolve({ status: "unavailable" });
     }
 
-    const state = normalizedState(slot, stateType);
+    const state = normalizedState(slot, stateType, options);
     const isBackground = ["IDLE", "FAINT", "MID-AIR"].includes(state);
 
-    if (!isBackground || options.once === true) {
+    if (!isBackground || options?.once === true) {
       return playReactionVideo(slot, state, options);
     }
 
@@ -981,8 +1124,8 @@ if (task.channel === "p1" || task.channel === "p2") {
       identity,
       background: true,
       transform: getTransformFlip(playerFor(slot), slot),
-      stallMs: options.stallMs,
-      signal: options.signal,
+      stallMs: options?.stallMs,
+      signal: options?.signal,
       valid: () => (
         baseValid() &&
         pendingForeground === 0 &&
@@ -1003,6 +1146,18 @@ if (task.channel === "p1" || task.channel === "p2") {
       return Promise.resolve({ status: "unavailable" });
     }
 
+    // Record the attacker's move so the subsequent defender hit reaction knows if it was a D attack
+    if (SLOTS.includes(slot)) {
+      lastAttackBySlot[slot] = {
+        slot,
+        videoFile,
+        actionName,
+        moveObj,
+        options,
+        time: performance.now()
+      };
+    }
+
     const rider = riderFor(slot);
     const transform = getTransformFlip(playerFor(slot), slot, moveObj);
 
@@ -1020,6 +1175,17 @@ if (task.channel === "p1" || task.channel === "p2") {
         return { status: "unavailable" };
       }
 
+      if (SLOTS.includes(slot)) {
+        lastAttackBySlot[slot] = {
+          slot,
+          videoFile,
+          actionName,
+          moveObj,
+          options,
+          time: performance.now()
+        };
+      }
+
       const owner = Symbol("center-request");
       centerOwner = owner;
 
@@ -1035,12 +1201,13 @@ if (task.channel === "p1" || task.channel === "p2") {
           identity: `${rider}|${videoFile}`,
           background: false,
           transform,
+          moveObj,
 
           // Compatibility argument now acts as a no-progress timeout.
           // A healthy clip longer than 8 seconds is not cut short.
-          stallMs: options.stallMs ?? maxDurationMs,
+          stallMs: options?.stallMs ?? maxDurationMs,
 
-          signal: options.signal,
+          signal: options?.signal,
           valid
         });
       } finally {
@@ -1057,6 +1224,8 @@ if (task.channel === "p1" || task.channel === "p2") {
   function cancelAll() {
     // Invalidates active AND queued requests.
     epoch += 1;
+    lastAttackBySlot.p1 = null;
+    lastAttackBySlot.p2 = null;
 
     for (const task of tasks.values()) {
       task.controller.abort();

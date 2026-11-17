@@ -33,52 +33,74 @@
     'qr.png'
   ];
 
-  // External per-Rider movelist JSON files (EN + JA + ZH in each file)
-  const RIDER_MOVE_FILES = {
-    ichigo: 'data/moves/move_001.json',
-    nigo: 'data/moves/move_002.json',
-    v3: 'data/moves/move_003.json',
-    riderman: 'data/moves/move_004.json',
-    x: 'data/moves/move_005.json',
-    amazon: 'data/moves/move_006.json',
-    stronger: 'data/moves/move_007.json'
-  };
-
+  // Unified moves & trilingual movelists JSON path
+  const MOVES_DATA_PATH = 'data/moves.json';
   const MOVELIST_CACHE = {};
+  let movesDataFetchPromise = null;
 
   function normalizeLang(lang) {
     if (lang === 'ja' || lang === 'zh') return lang;
     return 'en';
   }
 
-  /** Fetches and caches a Rider's trilingual movelist JSON file. */
+  /** Populates MOVELIST_CACHE from the loaded data/moves.json object. */
+  function hydrateMovelistCache(movesJson) {
+    if (!movesJson || typeof movesJson !== 'object') return;
+    const source = (movesJson.movelists && typeof movesJson.movelists === 'object')
+      ? movesJson.movelists
+      : movesJson;
+
+    Object.keys(source).forEach(key => {
+      const entry = source[key];
+      if (entry && typeof entry === 'object' && (entry.en || entry.ja || entry.zh)) {
+        MOVELIST_CACHE[String(key).toLowerCase()] = entry;
+      }
+    });
+  }
+
+  /** Fetches and caches trilingual movelists from data/moves.json. */
   async function loadRiderMovelist(riderId) {
     const id = String(riderId || 'ichigo').toLowerCase();
     if (MOVELIST_CACHE[id]) {
       return MOVELIST_CACHE[id];
     }
 
-    const riders = window.AVAILABLE_RIDERS || [];
-    const riderObj = riders.find(r => String(r.id).toLowerCase() === id);
-    const filePath = (riderObj && riderObj.moveFile) || RIDER_MOVE_FILES[id] || RIDER_MOVE_FILES.ichigo;
+    const preloadedGlobal = window.MOVES_DATA || window.movesData || window.GAME_MOVES;
+    if (preloadedGlobal) {
+      hydrateMovelistCache(preloadedGlobal);
+      if (MOVELIST_CACHE[id]) {
+        return MOVELIST_CACHE[id];
+      }
+    }
 
     try {
-      const res = await fetch(filePath);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      MOVELIST_CACHE[id] = json;
-      return json;
+      if (!movesDataFetchPromise) {
+        movesDataFetchPromise = fetch(MOVES_DATA_PATH)
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(json => {
+            hydrateMovelistCache(json);
+            return json;
+          })
+          .catch(err => {
+            movesDataFetchPromise = null;
+            throw err;
+          });
+      }
+
+      await movesDataFetchPromise;
+      return MOVELIST_CACHE[id] || null;
     } catch (err) {
-      console.warn(`Failed to load movelist from ${filePath}:`, err);
+      console.warn(`Failed to load movelists from ${MOVES_DATA_PATH}:`, err);
       return null;
     }
   }
 
-  /** Preloads all Rider movelist files in the background so modal clicks feel instant. */
+  /** Preloads data/moves.json in the background so movelist modal clicks feel instant. */
   function preloadAllMovelists() {
-    const riders = window.AVAILABLE_RIDERS || [];
-    const ids = riders.length > 0 ? riders.map(r => r.id) : Object.keys(RIDER_MOVE_FILES);
-    Promise.allSettled(ids.map(id => loadRiderMovelist(id)));
+    loadRiderMovelist('ichigo');
   }
 
   /** Permanently disables and removes any portrait-rotation blocker overlay (fixes PLiCy/browser iframe lock). */

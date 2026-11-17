@@ -2,7 +2,7 @@
  * Sequential combat playback, including periodic status events.
  *
  * Compatibility: live-ui-2
- * Patch: complete-status-playback-3-hit-reaction-fix
+ * Patch: complete-status-playback-3-hit-reaction-fix-i18n
  *
  * CombatCore.resolve() remains the sole combat authority.
  * This file never calculates damage, recovery or status duration.
@@ -11,13 +11,156 @@
   "use strict";
 
   const VERSION = "live-ui-2";
-  const PATCH = "complete-status-playback-3-hit-reaction-fix";
+  const PATCH = "complete-status-playback-3-hit-reaction-fix-i18n";
 
   const SLOTS = ["p1", "p2"];
   const C = g.CombatCore;
   const K = g.KF;
 
+  const I18N_COMBAT = Object.freeze({
+    en: {
+      resolving: "RESOLVING…",
+      statusUpdate: "STATUS UPDATE",
+      interruptedPopup: "INTERRUPTED",
+      interruptedBanner: (actor, move) => `${actor}: ${move} interrupted.`,
+      guardReadyPopup: "GUARD READY",
+      guardReadyBanner: (actor, move) => `${actor}: ${move} ready`,
+      utilityDefault: "UTILITY",
+      lpFull: "LP FULL",
+      periodicRecovery: (actor, amount) => `${actor}: periodic recovery +${amount} LP`,
+      bleedingPopup: (amount) => `BLEEDING\n-${amount} LP`,
+      bleedingBanner: (actor, amount) => `${actor}: bleeding -${amount} LP`,
+      cancelledLine: (actor, list) => `${actor}: cancelled ${list} — LP damage`,
+      buffGained: (actor, status, rounds) => `${actor}: gained ${status} (${rounds}t)`,
+      buffRefreshed: (actor, status, rounds) => `${actor}: refreshed ${status} (${rounds}t)`,
+      faintRecover: (amount) => `-${amount} FAINT`,
+      chiSuffix: (gain) => ` (+${gain} CHI)`,
+      miss: "MISS",
+      block: (dmg, chi) => (dmg > 0 ? `BLOCK: -${dmg}` : "BLOCK") + chi,
+      partialBlock: (dmg, chi) => `PARTIAL BLOCK: -${dmg}${chi}`,
+      guardFail: (dmg) => `GUARD FAILED: -${dmg}`,
+      glancing: (dmg) => `SCRATCH: -${dmg}`
+    },
+    ja: {
+      resolving: "判定中…",
+      statusUpdate: "ステータス更新",
+      interruptedPopup: "中断！",
+      interruptedBanner: (actor, move) => `${actor}：${move} が中断された！`,
+      guardReadyPopup: "ガード態勢",
+      guardReadyBanner: (actor, move) => `${actor}：${move} 準備完了`,
+      utilityDefault: "補助技",
+      lpFull: "LP 最大",
+      periodicRecovery: (actor, amount) => `${actor}：継続回復 +${amount} LP`,
+      bleedingPopup: (amount) => `出血\n-${amount} LP`,
+      bleedingBanner: (actor, amount) => `${actor}：出血ダメージ -${amount} LP`,
+      cancelledLine: (actor, list) => `${actor}：LPダメージにより ${list} が解除された`,
+      buffGained: (actor, status, rounds) => `${actor}：${status} 付与 (${rounds}T)`,
+      buffRefreshed: (actor, status, rounds) => `${actor}：${status} 更新 (${rounds}T)`,
+      faintRecover: (amount) => `-${amount} 気絶値`,
+      chiSuffix: (gain) => ` (+${gain} 気力)`,
+      miss: "MISS",
+      block: (dmg, chi) => (dmg > 0 ? `ガード: -${dmg}` : "ガード") + chi,
+      partialBlock: (dmg, chi) => `部分ガード: -${dmg}${chi}`,
+      guardFail: (dmg) => `ガード崩れ: -${dmg}`,
+      glancing: (dmg) => `かすり傷: -${dmg}`
+    },
+    zh: {
+      resolving: "回合結算中…",
+      statusUpdate: "狀態更新",
+      interruptedPopup: "動作中斷！",
+      interruptedBanner: (actor, move) => `${actor}：${move} 被中斷！`,
+      guardReadyPopup: "防禦架勢",
+      guardReadyBanner: (actor, move) => `${actor}：${move} 就緒`,
+      utilityDefault: "輔助技能",
+      lpFull: "LP 已滿",
+      periodicRecovery: (actor, amount) => `${actor}：持續回復 +${amount} LP`,
+      bleedingPopup: (amount) => `流血\n-${amount} LP`,
+      bleedingBanner: (actor, amount) => `${actor}：流血傷害 -${amount} LP`,
+      cancelledLine: (actor, list) => `${actor}：因受到 LP 傷害，已解除 ${list}`,
+      buffGained: (actor, status, rounds) => `${actor}：獲得 ${status} (${rounds}回合)`,
+      buffRefreshed: (actor, status, rounds) => `${actor}：刷新 ${status} (${rounds}回合)`,
+      faintRecover: (amount) => `-${amount} 暈眩值`,
+      chiSuffix: (gain) => ` (+${gain} 氣力)`,
+      miss: "落空",
+      block: (dmg, chi) => (dmg > 0 ? `防禦: -${dmg}` : "防禦成功") + chi,
+      partialBlock: (dmg, chi) => `部分防禦: -${dmg}${chi}`,
+      guardFail: (dmg) => `防禦崩潰: -${dmg}`,
+      glancing: (dmg) => `擦傷: -${dmg}`
+    }
+  });
+
+  function getLang() {
+    const lang = String(
+      g.GAME_LANG ||
+      g.currentLang ||
+      (typeof g.getGameLanguage === "function" ? g.getGameLanguage() : "") ||
+      document.documentElement?.lang ||
+      "en"
+    ).toLowerCase();
+
+    if (lang.startsWith("zh")) return "zh";
+    if (lang.startsWith("ja")) return "ja";
+    return "en";
+  }
+
+  function L() {
+    return I18N_COMBAT[getLang()] || I18N_COMBAT.en;
+  }
+
+  function localizeFighterName(fighter) {
+    if (!fighter) return "";
+    const lang = getLang();
+    if (typeof g.UI?.riderName === "function") {
+      return g.UI.riderName(fighter);
+    }
+    if (lang === "zh") {
+      return fighter.name_zh || fighter.nameZh || fighter.zhName || fighter.name || "";
+    }
+    if (lang === "ja") {
+      return fighter.name_ja || fighter.nameJa || fighter.jaName || fighter.name || "";
+    }
+    return fighter.name_en || fighter.name || "";
+  }
+
+  function localizeMoveName(move, fallbackKey = "") {
+    if (!move) return fallbackKey;
+    const lang = getLang();
+    if (typeof g.UI?.moveName === "function") {
+      const uiName = g.UI.moveName(move);
+      if (uiName) return uiName;
+    }
+    if (lang === "zh") {
+      return move.name_zh || move.nameZh || move.zhName || move.name || move.key || fallbackKey;
+    }
+    if (lang === "ja") {
+      return move.name_ja || move.nameJa || move.jaName || move.name || move.key || fallbackKey;
+    }
+    return move.name_en || move.name || move.key || fallbackKey;
+  }
+
+  function ensureMediaBindings() {
+    if (g.KFMedia) {
+      if (typeof g.playCenterVideo !== "function" && typeof g.KFMedia.playCenterVideo === "function") {
+        g.playCenterVideo = g.KFMedia.playCenterVideo;
+      }
+      if (typeof g.playReactionVideo !== "function" && typeof g.KFMedia.playReactionVideo === "function") {
+        g.playReactionVideo = g.KFMedia.playReactionVideo;
+      }
+      if (typeof g.KFMedia.freezeSides !== "function" && typeof g.freezeSides === "function") {
+        g.KFMedia.freezeSides = g.freezeSides;
+      }
+    }
+  }
+
   function assertReady() {
+    ensureMediaBindings();
+
+    const mediaOk =
+      Boolean(g.KFMedia) &&
+      typeof g.KFMedia.freezeSides === "function" &&
+      typeof g.playCenterVideo === "function" &&
+      typeof g.playReactionVideo === "function";
+
     const requirements = [
       [
         typeof C?.resolve === "function",
@@ -43,11 +186,8 @@
         "The game view is missing."
       ],
       [
-        g.KFMedia?.VERSION === "sequential-media-1" &&
-        typeof g.KFMedia.freezeSides === "function" &&
-        typeof g.playCenterVideo === "function" &&
-        typeof g.playReactionVideo === "function",
-        "Sequential media.js is missing or incompatible."
+        mediaOk,
+        `Sequential media.js is missing or incompatible. (KFMedia=${Boolean(g.KFMedia)}, version=${g.KFMedia?.VERSION || "none"}, freezeSides=${typeof g.KFMedia?.freezeSides}, playCenterVideo=${typeof g.playCenterVideo}, playReactionVideo=${typeof g.playReactionVideo})`
       ],
       [
         typeof g.MatchManager?.begin === "function",
@@ -159,15 +299,18 @@
       }
     }
 
-    return [...grouped.entries()].map(([slot, ids]) => (
-      `${gs[slot].name}: cancelled ` +
-      [...ids].map(nameForStatus).join(", ") +
-      " — LP damage"
-    ));
+    const t = L();
+    return [...grouped.entries()].map(([slot, ids]) =>
+      t.cancelledLine(
+        localizeFighterName(gs[slot]),
+        [...ids].map(nameForStatus).join(", ")
+      )
+    );
   }
 
   function appliedStatusLines(gs, before, after) {
     const lines = [];
+    const t = L();
 
     for (const slot of SLOTS) {
       const previous = new Map(
@@ -188,11 +331,13 @@
 
         if (!newlyApplied && !refreshed) continue;
 
+        const actor = localizeFighterName(gs[slot]);
+        const status = nameForStatus(buff.id);
+
         lines.push(
-          `${gs[slot].name}: ` +
-          `${refreshed ? "refreshed" : "gained"} ` +
-          `${nameForStatus(buff.id)} ` +
-          `(${buff.roundsLeft}t)`
+          refreshed
+            ? t.buffRefreshed(actor, status, buff.roundsLeft)
+            : t.buffGained(actor, status, buff.roundsLeft)
         );
       }
     }
@@ -209,6 +354,7 @@
   }
 
   function outcomeLabel(event) {
+    const t = L();
     const damage = Math.max(
       0,
       Number(event.damage) || 0
@@ -220,18 +366,15 @@
     );
 
     const chiSuffix = chiGain > 0
-      ? ` (+${chiGain} CHI)`
+      ? t.chiSuffix(chiGain)
       : "";
 
     const labels = {
-      miss: "MISS",
-      block:
-        (damage > 0 ? `BLOCK: -${damage}` : "BLOCK") +
-        chiSuffix,
-      partialBlock:
-        `PARTIAL BLOCK: -${damage}${chiSuffix}`,
-      guardFail: `GUARD FAILED: -${damage}`,
-      glancing: `SCRATCH: -${damage}`
+      miss: t.miss,
+      block: t.block(damage, chiSuffix),
+      partialBlock: t.partialBlock(damage, chiSuffix),
+      guardFail: t.guardFail(damage),
+      glancing: t.glancing(damage)
     };
 
     return labels[event.outcome] ||
@@ -320,11 +463,13 @@
       Number(g.GAME_CONFIG?.VIDEO_TIMEOUT_MS) || 8000
     );
 
+    const displayMoveName = localizeMoveName(move);
+
     return awaitClip(context, () =>
       g.playCenterVideo(
         slot,
         move.video,
-        move.name || move.key || "",
+        displayMoveName,
         stallTimeout,
         move,
         videoOptions(context)
@@ -349,6 +494,7 @@
   ) {
     const gs = context.gs;
     const slot = event.slot;
+    const t = L();
 
     paintSnapshot(gs, event);
 
@@ -356,6 +502,8 @@
       gs,
       cancellations
     );
+
+    const actorName = localizeFighterName(gs[slot]);
 
     if (event.type === "recovery") {
       const recovery = Math.max(
@@ -367,13 +515,12 @@
         slot,
         recovery > 0
           ? `+${recovery} LP`
-          : "LP FULL",
+          : t.lpFull,
         "heal"
       );
 
       setBanner(
-        `${gs[slot].name}: periodic recovery ` +
-        `+${recovery} LP`,
+        t.periodicRecovery(actorName, recovery),
         notes
       );
 
@@ -388,12 +535,12 @@
 
     popup(
       slot,
-      `BLEEDING\n-${damage} LP`,
+      t.bleedingPopup(damage),
       "damage"
     );
 
     setBanner(
-      `${gs[slot].name}: bleeding -${damage} LP`,
+      t.bleedingBanner(actorName, damage),
       notes
     );
 
@@ -413,6 +560,7 @@
 
     const gs = context.gs;
     const slot = event.slot;
+    const t = L();
 
     if (
       event.type === "bleeding" ||
@@ -428,15 +576,16 @@
     }
 
     const move = resolveMoveData(gs, slot, event);
+    const moveTitle = localizeMoveName(move, event.key);
+    const actorName = localizeFighterName(gs[slot]);
 
     if (event.type === "interrupted") {
       paintSnapshot(gs, event);
 
-      popup(slot, "INTERRUPTED");
+      popup(slot, t.interruptedPopup);
 
       setBanner(
-        `${gs[slot].name}: ` +
-        `${move.name || event.key} interrupted.`,
+        t.interruptedBanner(actorName, moveTitle),
         cancellationLines(gs, cancellations)
       );
 
@@ -453,16 +602,13 @@
       );
     }
 
-    const actorName = gs[slot].name;
-
     const displayedBefore = {
       p1: C.copyFighter(gs.p1),
       p2: C.copyFighter(gs.p2)
     };
 
     setBanner(
-      `[${slot.toUpperCase()}] ${actorName}: ` +
-      `${move.name || event.key}`
+      `[${slot.toUpperCase()}] ${actorName}: ${moveTitle}`
     );
 
     if (!await playAction(context, slot, move)) {
@@ -483,10 +629,10 @@
     ];
 
     if (event.type === "guardReady") {
-      popup(slot, "GUARD READY");
+      popup(slot, t.guardReadyPopup);
 
       setBanner(
-        `${actorName}: ${move.name || event.key} ready`,
+        t.guardReadyBanner(actorName, moveTitle),
         notes
       );
 
@@ -513,19 +659,19 @@
       }
 
       if (recoveredFaint > 0) {
-        changes.push(`-${recoveredFaint} FAINT`);
+        changes.push(t.faintRecover(recoveredFaint));
       }
 
       popup(
         slot,
         changes.length
           ? changes.join("\n")
-          : move.name || "UTILITY",
+          : moveTitle || t.utilityDefault,
         recoveredLp > 0 ? "heal" : "scratch"
       );
 
       setBanner(
-        `${actorName}: ${move.name || event.key}` +
+        `${actorName}: ${moveTitle}` +
         (
           changes.length
             ? ` — ${changes.join(", ")}`
@@ -539,6 +685,7 @@
     }
 
     const target = event.target;
+    const targetName = localizeFighterName(gs[target]);
     const label = outcomeLabel(event);
 
     const popupType = event.outcome === "miss"
@@ -554,8 +701,8 @@
     popup(target, label, popupType, isSpecialMove);
 
     setBanner(
-      `${actorName}: ${move.name || event.key}\n` +
-      `${gs[target].name}: ${label}`,
+      `${actorName}: ${moveTitle}\n` +
+      `${targetName}: ${label}`,
       notes
     );
 
@@ -630,7 +777,7 @@
       );
 
       if (timer) {
-        timer.textContent = "RESOLVING…";
+        timer.textContent = L().resolving;
       }
 
       let pendingCancellations = [];
@@ -690,7 +837,7 @@
 
       if (pendingCancellations.length) {
         setBanner(
-          "STATUS UPDATE",
+          L().statusUpdate,
           cancellationLines(
             gs,
             pendingCancellations

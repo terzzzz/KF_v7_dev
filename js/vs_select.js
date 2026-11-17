@@ -33,74 +33,51 @@
     'qr.png'
   ];
 
-  // Unified moves & trilingual movelists JSON path
-  const MOVES_DATA_PATH = 'data/moves.json';
   const MOVELIST_CACHE = {};
-  let movesDataFetchPromise = null;
+  let movesFetch = null;
+  let creditsCache = null;
+  let creditsFetch = null;
 
   function normalizeLang(lang) {
-    if (lang === 'ja' || lang === 'zh') return lang;
-    return 'en';
-  }
-
-  /** Populates MOVELIST_CACHE from the loaded data/moves.json object. */
-  function hydrateMovelistCache(movesJson) {
-    if (!movesJson || typeof movesJson !== 'object') return;
-    const source = (movesJson.movelists && typeof movesJson.movelists === 'object')
-      ? movesJson.movelists
-      : movesJson;
-
-    Object.keys(source).forEach(key => {
-      const entry = source[key];
-      if (entry && typeof entry === 'object' && (entry.en || entry.ja || entry.zh)) {
-        MOVELIST_CACHE[String(key).toLowerCase()] = entry;
-      }
-    });
+    return (lang === 'ja' || lang === 'zh') ? lang : 'en';
   }
 
   /** Fetches and caches trilingual movelists from data/moves.json. */
   async function loadRiderMovelist(riderId) {
     const id = String(riderId || 'ichigo').toLowerCase();
-    if (MOVELIST_CACHE[id]) {
-      return MOVELIST_CACHE[id];
-    }
-
-    const preloadedGlobal = window.MOVES_DATA || window.movesData || window.GAME_MOVES;
-    if (preloadedGlobal) {
-      hydrateMovelistCache(preloadedGlobal);
-      if (MOVELIST_CACHE[id]) {
-        return MOVELIST_CACHE[id];
-      }
-    }
-
+    if (MOVELIST_CACHE[id]) return MOVELIST_CACHE[id];
     try {
-      if (!movesDataFetchPromise) {
-        movesDataFetchPromise = fetch(MOVES_DATA_PATH)
-          .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-          })
-          .then(json => {
-            hydrateMovelistCache(json);
-            return json;
-          })
-          .catch(err => {
-            movesDataFetchPromise = null;
-            throw err;
-          });
-      }
-
-      await movesDataFetchPromise;
+      movesFetch = movesFetch || fetch('data/moves.json')
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(data => Object.assign(MOVELIST_CACHE, data.movelists || data))
+        .catch(err => { movesFetch = null; throw err; });
+      await movesFetch;
       return MOVELIST_CACHE[id] || null;
     } catch (err) {
-      console.warn(`Failed to load movelists from ${MOVES_DATA_PATH}:`, err);
+      console.warn('Failed to load data/moves.json:', err);
       return null;
     }
   }
 
-  /** Preloads data/moves.json in the background so movelist modal clicks feel instant. */
-  function preloadAllMovelists() {
-    loadRiderMovelist('ichigo');
+  /** Fetches and caches trilingual credits from data/credits.json. */
+  async function loadCreditsText() {
+    const dict = t();
+    const lang = normalizeLang(window.gameLang);
+    if (!creditsCache) {
+      try {
+        creditsFetch = creditsFetch || fetch('data/credits.json')
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(data => { creditsCache = data; return data; })
+          .catch(err => { creditsFetch = null; throw err; });
+        await creditsFetch;
+      } catch (err) {
+        console.warn('Failed to load data/credits.json:', err);
+        return dict.creditsError;
+      }
+    }
+    const raw = creditsCache && (creditsCache[lang] || creditsCache.en);
+    if (!raw) return dict.creditsError;
+    return Array.isArray(raw) ? raw.join('\n') : String(raw);
   }
 
   /** Permanently disables and removes any portrait-rotation blocker overlay (fixes PLiCy/browser iframe lock). */
@@ -147,6 +124,8 @@
       movelistBtn: '📋 MOVELIST',
       movelistLoading: 'Loading movelist...',
       movelistError: 'Unable to load movelist file.',
+      creditsLoading: 'Loading credits...',
+      creditsError: 'Unable to load credits file.',
       dockStep1: 'QUICK SELECT — CLICK TO ASSIGN PLAYER 1',
       dockStep2: 'QUICK SELECT — CLICK TO ASSIGN PLAYER 2',
       dockStep3: 'MATCHUP LOCKED — READY FOR BATTLE',
@@ -201,48 +180,6 @@
       colDmg: 'Damage',
       colEffect: 'Effect',
       colRemarks: 'Remarks',
-      creditsContent: [
-        'Thank you for playing!! I sincerely wish you a joyful game experience and able to beat all Riders in rider mode!!',
-        '',
-        '========================================',
-        'GAME CREDITS',
-        '========================================',
-        '',
-        'Dedicated to the heroes who taught us the meaning of Henshin!!',
-        '',
-        '[ Kamen Fight ver 6.1]',
-        'A Game By Terence Cheng',
-        '',
-        '----------------------------------------',
-        'CREATED & DEVELOPED BY',
-        '----------------------------------------',
-        'Lead Developer: Terence Cheng',
-        'Game Designer: Terence Cheng',
-        'Programming: Terence Cheng',
-        '',
-        '----------------------------------------',
-        'ART & ANIMATION',
-        '----------------------------------------',
-        'Lead Artist: Terence Cheng',
-        'UI / UX Design: Terence Cheng',
-        'Asset Packs: Terence Cheng',
-        '',
-        '----------------------------------------',
-        'AUDIO & MUSIC',
-        '----------------------------------------',
-        'Composer: Terence Cheng',
-        '',
-        '----------------------------------------',
-        'SPECIAL THANKS',
-        '----------------------------------------',
-        '    Friends of Terence Cheng',
-        '    All of my game testers',
-        '',
-        '========================================',
-        'Thank you for playing!',
-        '© 2026',
-        '========================================'
-      ].join('\n'),
       howtoHtml: `
         <div class="kf-howto-content">
           <h2 class="kf-howto-main-title">HOW TO PLAY</h2>
@@ -323,6 +260,8 @@
       movelistBtn: '📋 技表',
       movelistLoading: '技表を読み込み中...',
       movelistError: '技表ファイルを読み込めませんでした。',
+      creditsLoading: 'クレジットを読み込み中...',
+      creditsError: 'クレジットファイルを読み込めませんでした。',
       dockStep1: 'クイック選択 ― クリックしてプレイヤー1を決定',
       dockStep2: 'クイック選択 ― クリックしてプレイヤー2を決定',
       dockStep3: '対戦カード決定 ― バトル開始可能',
@@ -377,49 +316,6 @@
       colDmg: 'ダメージ',
       colEffect: '効果',
       colRemarks: '備考',
-      creditsContent: [
-        'プレイしていただきありがとうございます！！',
-        '「ライダー」難易度の全制覇を目指して、熱い戦いをお楽しみください！！',
-        '',
-        '========================================',
-        'ゲームクレジット',
-        '========================================',
-        '',
-        '「変身」の意味を教えてくれた全てのヒーローたちに捧ぐ！！',
-        '',
-        '[ Kamen Fight ver 6.1 ]',
-        '制作：Terence Cheng',
-        '',
-        '----------------------------------------',
-        '企画・開発・プログラミング',
-        '----------------------------------------',
-        'リード開発者: Terence Cheng',
-        'ゲームデザイン: Terence Cheng',
-        'プログラミング: Terence Cheng',
-        '',
-        '----------------------------------------',
-        'アート＆アニメーション',
-        '----------------------------------------',
-        'リードアーティスト: Terence Cheng',
-        'UI / UX デザイン: Terence Cheng',
-        'アセット制作: Terence Cheng',
-        '',
-        '----------------------------------------',
-        'オーディオ＆ミュージック',
-        '----------------------------------------',
-        '作曲・音響: Terence Cheng',
-        '',
-        '----------------------------------------',
-        'スペシャルサンクス',
-        '----------------------------------------',
-        '    Terence Cheng の友人一同',
-        '    すべてのテストプレイヤーの皆様',
-        '',
-        '========================================',
-        'Thank you for playing!',
-        '© 2026',
-        '========================================'
-      ].join('\n'),
       howtoHtml: `
         <div class="kf-howto-content">
           <h2 class="kf-howto-main-title">遊び方（HOW TO PLAY）</h2>
@@ -500,6 +396,8 @@
       movelistBtn: '📋 出招表',
       movelistLoading: '正在載入出招表...',
       movelistError: '無法載入出招表檔案。',
+      creditsLoading: '正在載入製作名單...',
+      creditsError: '無法載入製作名單檔案。',
       dockStep1: '快速選擇 — 點擊指派玩家 1',
       dockStep2: '快速選擇 — 點擊指派玩家 2',
       dockStep3: '對戰陣容已鎖定 — 準備開戰',
@@ -554,48 +452,6 @@
       colDmg: '傷害',
       colEffect: '效果',
       colRemarks: '備註',
-      creditsContent: [
-        '感謝您的遊玩！！衷心祝您享受熱血的戰鬥體驗，並在騎士難度擊敗所有假面騎士！！',
-        '',
-        '========================================',
-        '遊戲製作名單',
-        '========================================',
-        '',
-        '獻給所有教會我們「變身」意義的英雄們！！',
-        '',
-        '[ Kamen Fight ver 6.1 ]',
-        '製作：Terence Cheng',
-        '',
-        '----------------------------------------',
-        '企劃・開發・程式設計',
-        '----------------------------------------',
-        '首席開發者: Terence Cheng',
-        '遊戲設計: Terence Cheng',
-        '程式設計: Terence Cheng',
-        '',
-        '----------------------------------------',
-        '美術與動畫',
-        '----------------------------------------',
-        '首席美術: Terence Cheng',
-        'UI / UX 設計: Terence Cheng',
-        '素材製作: Terence Cheng',
-        '',
-        '----------------------------------------',
-        '音效與音樂',
-        '----------------------------------------',
-        '作曲與音效: Terence Cheng',
-        '',
-        '----------------------------------------',
-        '特別鳴謝',
-        '----------------------------------------',
-        '    Terence Cheng 的朋友們',
-        '    所有參與測試的玩家們',
-        '',
-        '========================================',
-        'Thank you for playing!',
-        '© 2026',
-        '========================================'
-      ].join('\n'),
       howtoHtml: `
         <div class="kf-howto-content">
           <h2 class="kf-howto-main-title">遊戲說明（HOW TO PLAY）</h2>
@@ -703,10 +559,12 @@
 
     const creditsModal = document.getElementById('kf-credits-modal');
     if (creditsModal) {
-      const pre = creditsModal.querySelector('.kf-credits-pre');
-      if (pre) pre.textContent = dict.creditsContent;
       const okBtn = document.getElementById('kf-credits-ok-btn');
       if (okBtn) okBtn.textContent = dict.creditsCloseBtn;
+      if (!creditsModal.hidden) {
+        const pre = creditsModal.querySelector('.kf-credits-pre');
+        if (pre) loadCreditsText().then(text => { pre.textContent = text; });
+      }
     }
 
     const movelistCloseBtn = document.getElementById('kf-movelist-close-btn');
@@ -2314,7 +2172,12 @@
 
     const dict = t();
     const pre = modal.querySelector('.kf-credits-pre');
-    if (pre) pre.textContent = dict.creditsContent;
+    if (pre) {
+      if (!creditsCache) pre.textContent = dict.creditsLoading;
+      loadCreditsText().then(text => {
+        pre.textContent = text;
+      });
+    }
     const okBtn = document.getElementById('kf-credits-ok-btn');
     if (okBtn) okBtn.textContent = dict.creditsCloseBtn;
 
@@ -2439,7 +2302,7 @@
 
       const pre = document.createElement('pre');
       pre.className = 'kf-credits-pre';
-      pre.textContent = dict.creditsContent;
+      pre.textContent = dict.creditsLoading;
 
       body.appendChild(qrWrap);
       body.appendChild(pre);
@@ -3219,7 +3082,8 @@
       console.warn("Could not load riders.json, defaulting to fallback roster.");
     }
 
-    preloadAllMovelists();
+    loadRiderMovelist('ichigo');
+    loadCreditsText();
     window.updateSelectionUI();
 
     const unlockAudio = () => {

@@ -1,7 +1,7 @@
 /* js/ui.js
- * Battle HUD and status presentation (Bilingual EN / JA).
+ * Battle HUD and status presentation (Trilingual EN / JA / ZH-Hant, synced with data/moves.json).
  *
- * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja + orientation-unlock + 5-insect-tiers + stronger-dynamo + movelist-riders-sync + movelist-label-hud-sync + dual-battle-scoreboard
+ * Patch: numeric-status-hud-2 + cyber-tokusatsu-jp-hud + glass-shatter-dmg-fx + i18n-ja-zh + orientation-unlock + 5-insect-tiers + stronger-dynamo + movelist-riders-sync + movelist-label-hud-sync + dual-battle-scoreboard
  */
 (function (g) {
   "use strict";
@@ -11,72 +11,93 @@
       id: "ichigo",
       nameEn: "Kamen Rider Ichigo",
       nameJa: "仮面ライダー1号",
+      nameZh: "假面騎士1號",
       maxLp: 3000,
       archetypeEn: "Balanced All-Rounder",
       archetypeJa: "バランス型オールラウンダー",
+      archetypeZh: "均衡全能型",
       finisherEn: "Kirimomi Kick / Rider Kick",
-      finisherJa: "ライダーきりもみキック / ライダーキック"
+      finisherJa: "ライダーきりもみキック / ライダーキック",
+      finisherZh: "騎士螺旋踢 / 騎士踢"
     },
     nigo: {
       id: "nigo",
       nameEn: "Kamen Rider Nigo",
       nameJa: "仮面ライダー2号",
+      nameZh: "假面騎士2號",
       maxLp: 3300,
       archetypeEn: "Heavy Power",
       archetypeJa: "ヘビーパワー",
+      archetypeZh: "重裝力量型",
       finisherEn: "Typhoon Power Break / Rider Punch",
-      finisherJa: "タイフーン・パワーブレイク / ライダーパンチ"
+      finisherJa: "タイフーン・パワーブレイク / ライダーパンチ",
+      finisherZh: "颱風強力破壞 / 騎士拳"
     },
     v3: {
       id: "v3",
       nameEn: "Kamen Rider V3",
       nameJa: "仮面ライダーV3",
+      nameZh: "假面騎士V3",
       maxLp: 3150,
       archetypeEn: "Faint-Lock Speed Demon",
       archetypeJa: "気絶ロック・スピードスター",
+      archetypeZh: "暈眩壓制・極速型",
       finisherEn: "V3 Triple Kick",
-      finisherJa: "V3トリプルキック"
+      finisherJa: "V3トリプルキック",
+      finisherZh: "V3三重踢"
     },
     riderman: {
       id: "riderman",
       nameEn: "Riderman",
       nameJa: "ライダーマン",
+      nameZh: "騎士人",
       maxLp: 2800,
       archetypeEn: "Low Cost Utility",
       archetypeJa: "低コスト・テクニカル",
+      archetypeZh: "低消耗・技巧型",
       finisherEn: "Hook Finisher",
-      finisherJa: "スイングアーム・フィニッシャー"
+      finisherJa: "スイングアーム・フィニッシャー",
+      finisherZh: "繩鉤終結技"
     },
     x: {
       id: "x",
       nameEn: "Kamen Rider X",
       nameJa: "仮面ライダーX",
+      nameZh: "假面騎士X",
       maxLp: 2960,
       archetypeEn: "Ridol Weapon Specialist",
       archetypeJa: "ライドル武器スペシャリスト",
+      archetypeZh: "萊多爾武器專家",
       finisherEn: "Vacuum Hell Wheel",
-      finisherJa: "真空地獄車"
+      finisherJa: "真空地獄車",
+      finisherZh: "真空地獄車"
     },
     amazon: {
       id: "amazon",
       nameEn: "Kamen Rider Amazon",
       nameJa: "仮面ライダーアマゾン",
+      nameZh: "假面騎士亞馬遜",
       maxLp: 2700,
       evasionRate: 0.10,
       archetypeEn: "Rushdown / Glass Cannon",
       archetypeJa: "ラッシュダウン / 超火力紙装甲",
+      archetypeZh: "猛攻突進 / 高爆發脆皮",
       finisherEn: "Daisetsudan / Amazon Kick",
-      finisherJa: "大切断 / アマゾンキック"
+      finisherJa: "大切断 / アマゾンキック",
+      finisherZh: "大切斷 / 亞馬遜踢"
     },
     stronger: {
       id: "stronger",
       nameEn: "Kamen Rider Stronger",
       nameJa: "仮面ライダーストロンガー",
+      nameZh: "假面騎士強人",
       maxLp: 3200,
       archetypeEn: "Electro-Cyborg / High Voltage Burst",
       archetypeJa: "電気人間 / 超高圧バースト",
+      archetypeZh: "電氣改造人 / 超高壓爆發",
       finisherEn: "Super Electron Drill Kick / Stronger Electro Kick",
-      finisherJa: "超電子ドリルキック / ストロンガー電キック"
+      finisherJa: "超電子ドリルキック / ストロンガー電キック",
+      finisherZh: "超電子鑽頭踢 / 強人電踢"
     }
   });
 
@@ -179,15 +200,6 @@
         soul: "Bullet Ant",
         rider: "Rider"
       },
-      riderNames: {
-        ichigo: "Kamen Rider Ichigo",
-        nigo: "Kamen Rider Nigo",
-        v3: "Kamen Rider V3",
-        riderman: "Riderman",
-        x: "Kamen Rider X",
-        amazon: "Kamen Rider Amazon",
-        stronger: "Kamen Rider Stronger"
-      },
       statLabels: {
         attack: "ATK",
         dAttack: "D-ATK",
@@ -256,76 +268,9 @@
 
     ja: {
       statusNames: {
-        // Ichigo
-        typhoon_speed: "タイフーンチャージ",
-        charge_speed: "タイフーンチャージ",
-        charge: "タイフーンチャージ",
-        focus: "タイフーン集中",
-        typhoon_focus: "タイフーン集中",
-        typhoon_bless: "タイフーンの加護",
-        rider_high_jump: "ライダー大ジャンプ",
-
-        // Nigo
-        red_shutter: "タイフーン・レッドシャッター",
-        typhoon_red_shutter: "タイフーン・レッドシャッター",
-        shutter: "タイフーン・レッドシャッター",
-        power_focus: "パワー集中",
-        "power focus": "パワー集中",
-        rider_power_jump: "ライダーパワージャンプ",
-        battle_cry: "気合の咆哮",
-
-        // V3
-        double_typhoon_speed: "アクセラレーター",
-        double_typhoon: "アクセラレーター",
-        "double typhoon": "アクセラレーター",
-        accelerator: "アクセラレーター",
-        red_lamp_boost: "レッドランプ集中",
-        red_lamp_focus: "レッドランプ集中",
-        red_lamp: "レッドランプ集中",
-        "red lamp": "レッドランプ集中",
-        v3_focus: "レッドランプ集中",
-        leap: "V3大ジャンプ",
-
-        // Riderman
-        accuracy_focus: "ターゲットロック",
-        target_lock: "ターゲットロック",
-        arm_calibration: "ターゲットロック",
-        rope_bind: "ロープアーム拘束",
-        rope_tie_up: "ロープアーム拘束",
-        bind: "ロープアーム拘束",
-        high_leap: "ハイジャンプ",
-        airborne_evasion: "空中回避",
-
-        // X
-        mercury_atk: "マーキュリー・オーバードライブ",
-        "mercury atk": "マーキュリー・オーバードライブ",
-        mercury_overdrive: "マーキュリー・オーバードライブ",
-        mercury_def: "マーキュリー装甲強化",
-        "mercury def": "マーキュリー装甲強化",
-        mercury_fortification: "マーキュリー装甲強化",
-        kaizorg_vitality: "カイゾーグ活性",
-
-        // Amazon
-        inca_blessing: "インカの秘術",
-        "inca blessing": "インカの秘術",
-        gigi_focus: "ギギの腕輪・集中",
-        "gigi focus": "ギギの腕輪・集中",
-        wild_leap: "野生の大跳躍",
-        wild_instinct: "野生の本能",
         bleeding: "出血",
-
-        // Stronger
-        electro_coat: "電磁フィールド",
-        electro_magnetic_field: "電磁フィールド",
-        electro: "電磁フィールド",
-        electro_dynamo: "エレクトロダイナモ",
-        dynamo: "エレクトロダイナモ",
         paralyze_shock: "電撃麻痺",
         shock: "電撃麻痺",
-        war_cry: "電撃の咆哮",
-
-        // Shared / Generic
-        jump: "ジャンプ",
         airborne_boost: "空中強化",
         air: "空中強化",
         lprecover: "LP回復",
@@ -339,15 +284,6 @@
         master: "パラポネラ",
         soul: "パラポネラ",
         rider: "ライダー"
-      },
-      riderNames: {
-        ichigo: "仮面ライダー1号",
-        nigo: "仮面ライダー2号",
-        v3: "仮面ライダーV3",
-        riderman: "ライダーマン",
-        x: "仮面ライダーX",
-        amazon: "仮面ライダーアマゾン",
-        stronger: "仮面ライダーストロンガー"
       },
       statLabels: {
         attack: "攻撃力",
@@ -413,6 +349,91 @@
         total: "総合スコア",
         closeAria: "スコア表示を閉じる"
       }
+    },
+
+    zh: {
+      statusNames: {
+        bleeding: "出血",
+        paralyze_shock: "電擊麻痺",
+        shock: "電擊麻痺",
+        airborne_boost: "空中強化",
+        air: "空中強化",
+        lprecover: "LP回復",
+        lpRecovery: "LP回復",
+        lp_recovery: "LP回復"
+      },
+      diffLabels: {
+        easy: "角蟬",
+        balanced: "蟋蟀",
+        defensive: "獨角仙",
+        master: "子彈蟻",
+        soul: "子彈蟻",
+        rider: "騎士"
+      },
+      statLabels: {
+        attack: "攻擊力",
+        dAttack: "普通攻擊",
+        sAttack: "必殺技",
+        armor: "受到傷害",
+        speed: "蓄力速度",
+        hit: "命中",
+        evs: "迴避",
+        hitUnit: "%",
+        evsUnit: "%",
+        lpPerTurn: "LP/回合",
+        breaksOnDmg: "受LP傷害時解除",
+        enableSpecials: "必殺技已解鎖",
+        turnShort: "回合",
+        durationDetail: (t) => `剩餘持續回合：${t} 回合`,
+        periodicDue: "本回合將觸發持續效果。",
+        periodicInitial: "賦予效果的首回合不會觸發持續結算。",
+        periodicRule:
+          "回復效果會在出血傷害之前結算。LP歸零的騎士無法透過回復復活。"
+      },
+      hud: {
+        lp: "LP",
+        chi: "氣",
+        faint: "暈眩",
+        faintAria: "暈眩值",
+        faintedOverlay: "暈眩中！",
+        ko: "KO",
+        faintedState: "暈眩中 — 強制恢復回合",
+        airborneState: (t) => `滯空狀態 · ${t}回合`,
+        lowChiText: "氣力不足 · 受到傷害 +25% · 迴避 -25%",
+        lowChiTitle:
+          "氣低於 5：受到的 LP 傷害乘以 1.25 倍，迴避率降低 25%，且更容易累積暈眩值。",
+        highChiText: "氣力充盈 · 攻擊力 +20% · 命中 +20%",
+        highChiTitle:
+          "氣高於 14：攻擊判定時可獲得 +20% 傷害與 +20% 命中率加成（在扣除招式氣消耗後判定）。",
+        specialsLockedText: "必殺技鎖定中 · 使用電子發電機 (W+K) 解鎖",
+        specialsLockedTitle:
+          "強人的 S 系統必殺技需要先啟動電子發電機（W+K）才能使用。",
+        p1PadLabel: "玩家 1 [W-A-S-D + I-J-K-L]",
+        p2PadLabel: "玩家 2 [方向鍵 + 1-2-3-5]",
+        lockedFlag: "已鎖定！",
+        readyText: "準備就緒",
+        tapToCharge: "點擊方向鍵蓄力"
+      },
+      score: {
+        title: "戰鬥積分",
+        p1Tag: "P1",
+        p2Tag: "P2",
+        win: "勝利",
+        loss: "敗北",
+        draw: "平手",
+        damageBase: "輸出傷害・超殺",
+        remainingLp: "剩餘 LP",
+        perfectBonus: "滿血完勝獎勵",
+        roundBonus: "速勝回合獎勵",
+        chiScore: "剩餘氣力",
+        executionScore: "D・S 招式命中",
+        defenseScore: "防禦減傷",
+        dizzyScore: "造成暈眩",
+        subtotal: "小計",
+        multiplier: "難度倍率",
+        total: "總積分",
+        closeAria: "隱藏積分面板"
+      }
     }
   });
 
@@ -426,142 +447,118 @@
     ["Standard Guard", "Guard"]
   ]);
 
-  // Sorted longest-first so shorter terms (e.g., "Riderman", "Chop", "Jump", "Leap")
-  // never partially overwrite longer move names (e.g., "Riderman Kick", "Chop Combo").
-  const EN_TO_JA_TERMS = Object.freeze(
-    [
-      // Rider Names
-      ["Kamen Rider Stronger", "仮面ライダーストロンガー"],
-      ["Kamen Rider Ichigo", "仮面ライダー1号"],
-      ["Kamen Rider Nigo", "仮面ライダー2号"],
-      ["Kamen Rider Amazon", "仮面ライダーアマゾン"],
-      ["Kamen Rider V3", "仮面ライダーV3"],
-      ["Kamen Rider X", "仮面ライダーX"],
-      ["Riderman", "ライダーマン"],
-
-      // Rider Archetypes
-      ["Electro-Cyborg / High Voltage Burst", "電気人間 / 超高圧バースト"],
-      ["Rushdown / Glass Cannon", "ラッシュダウン / 超火力紙装甲"],
-      ["Ridol Weapon Specialist", "ライドル武器スペシャリスト"],
-      ["Faint-Lock Speed Demon", "気絶ロック・スピードスター"],
-      ["Balanced All-Rounder", "バランス型オールラウンダー"],
-      ["Low Cost Utility", "低コスト・テクニカル"],
-      ["Heavy Power", "ヘビーパワー"],
-
-      // Moves & Status Names (All 7 Riders)
-      ["Super Electronic Drill Kick", "超電子ドリルキック"],
-      ["Super Electron Drill Kick", "超電子ドリルキック"],
-      ["Kabuto Protector Tackle", "カブトプロテクター・タックル"],
-      ["Electro-Magnetic Field", "電磁フィールド"],
-      ["Stronger Electro Kick", "ストロンガー電キック"],
-      ["Mercury Fortification", "マーキュリー装甲強化"],
-      ["Typhoon Power Break", "タイフーン・パワーブレイク"],
-      ["Typhoon Red Shutter", "タイフーン・レッドシャッター"],
-      ["Double Typhoon Blow", "ダブルタイフーン・ブロー"],
-      ["Electro Shock Chop", "エレクトロショック・チョップ"],
-      ["Electro Waterfall", "エレクトロウォーターフォール"],
-      ["Mercury Overdrive", "マーキュリー・オーバードライブ"],
-      ["Rider Head Crusher", "ライダー頭突き"],
-      ["Rider Power Chop", "ライダーチョップ"],
-      ["Rider High Jump", "ライダー大ジャンプ"],
-      ["Rider Flying Knee", "ライダー飛び膝蹴り"],
-      ["Rider Power Kick", "ライダーパワーキック"],
-      ["Rider Power Jump", "ライダーパワージャンプ"],
-      ["Vacuum Hell Wheel", "真空地獄車"],
-      ["Ridol Crown Split", "ライドル脳天割り"],
-      ["Ridol Rod Strike", "ライドルスティック連撃"],
-      ["Ridol Whip Lash", "ライドルホイップ斬り"],
-      ["Power Arm Strike", "パワーアーム・ストライク"],
-      ["Drill Arm Break", "ドリルアーム・ブレイク"],
-      ["Airborne Evasion", "空中回避"],
-      ["Airborne Boost", "空中強化"],
-      ["Arm Calibration", "ターゲットロック"],
-      ["Mercury Defense", "マーキュリー装甲強化"],
-      ["Mercury Attack", "マーキュリー・オーバードライブ"],
-      ["Electro Barrier", "エレクトロバリア"],
-      ["Electro Dynamo", "エレクトロダイナモ"],
-      ["Hook Finisher", "スイングアーム・フィニッシャー"],
-      ["Rope Arm Tie-Up", "ロープアーム拘束"],
-      ["Rope Arm Hook", "ロープアーム・フック"],
-      ["Cassette Combo", "ロープアーム・フック"],
-      ["Kirimomi Kick", "ライダーきりもみキック"],
-      ["V3 Triple Kick", "V3トリプルキック"],
-      ["V3 Screw Kick", "V3きりもみキック"],
-      ["V3 Return Kick", "V3反転キック"],
-      ["Windmill Guard", "風車ガード"],
-      ["Standard Guard", "ガード"],
-      ["Standard Punch", "通常パンチ"],
-      ["Standard Kick", "通常キック"],
-      ["Standing Kick", "立ちキック"],
-      ["Red Lamp Focus", "レッドランプ集中"],
-      ["Typhoon Charge", "タイフーンチャージ"],
-      ["Typhoon Focus", "タイフーン集中"],
-      ["Typhoon Bless", "タイフーンの加護"],
-      ["Kaizorg Vitality", "カイゾーグ活性"],
-      ["Inca Blessing", "インカの秘術"],
-      ["Jaguar Shock", "ジャガーショック"],
-      ["Riderman Kick", "ライダーマンキック"],
-      ["Wild Instinct", "野生の本能"],
-      ["Wild Tackle", "ワイルドタックル"],
-      ["Classic Combo", "連続コンビネーション"],
-      ["Electro Punch", "エレクトロパンチ"],
-      ["Electro Kick", "エレクトロキック"],
-      ["Electro Fire", "エレクトロファイヤー"],
-      ["Paralyze Shock", "電撃麻痺"],
-      ["Double Typhoon", "アクセラレーター"],
-      ["Red Shutter", "タイフーン・レッドシャッター"],
-      ["Mercury Atk", "マーキュリー・オーバードライブ"],
-      ["Mercury Def", "マーキュリー装甲強化"],
-      ["LP Recovery", "LP回復"],
-      ["Charge Speed", "タイフーンチャージ"],
-      ["Amazon Kick", "アマゾンキック"],
-      ["Mystic Kick", "ミスティックキック"],
-      ["Claw Attack", "コンドルクローひっかき"],
-      ["Claw Combo", "ワイルドクロー連撃"],
-      ["Daisetsudan", "大切断"],
-      ["Mixed Combo", "コンビネーション攻撃"],
-      ["Mixed Hits", "連続コンビネーション"],
-      ["Combo Punch", "連続パンチ"],
-      ["Punch Combo", "連続パンチ"],
-      ["Combo Kick", "連続キック"],
-      ["Kick Combo", "連続キック"],
-      ["Chop Combo", "連続チョップ"],
-      ["Rider Punch", "ライダーパンチ"],
-      ["Rider Kick", "ライダーキック"],
-      ["Power Focus", "パワー集中"],
-      ["Accelerator", "アクセラレーター"],
-      ["Target Lock", "ターゲットロック"],
-      ["Gigi Focus", "ギギの腕輪・集中"],
-      ["Battle Cry", "気合の咆哮"],
-      ["Rope Bind", "ロープアーム拘束"],
-      ["Red Lamp", "レッドランプ集中"],
-      ["V3 Focus", "レッドランプ集中"],
-      ["Bleeding", "出血"],
-      ["War Cry", "電撃の咆哮"],
-      ["Wild Leap", "野生の大跳躍"],
-      ["High Leap", "ハイジャンプ"],
-      ["High Kick", "ハイキック"],
-      ["V3 Kick", "V3キック"],
-      ["X-Kick", "Xキック"],
-      ["Punches", "連続パンチ"],
-      ["Shutter", "タイフーン・レッドシャッター"],
-      ["Dynamo", "エレクトロダイナモ"],
-      ["Electro", "電磁フィールド"],
-      ["Chop", "V3チョップ"],
-      ["Leap", "V3大ジャンプ"],
-      ["Jump", "ジャンプ"]
-    ].sort((a, b) => b[0].length - a[0].length)
-  );
+  // Fallback & legacy alias tuples: [enTerm, jaTerm, zhHantTerm]
+  // (Canonical move & rider names auto-merge from data/moves.json)
+  const BASE_TRANSLATION_TERMS = [
+    ...Object.values(RIDER_META).flatMap(r => [
+      [r.nameEn, r.nameJa, r.nameZh],
+      [r.archetypeEn, r.archetypeJa, r.archetypeZh]
+    ]),
+    ["Typhoon Charge", "タイフーンチャージ", "颱風充能"],
+    ["Typhoon Focus", "タイフーン集中", "颱風集中"],
+    ["Typhoon Bless", "タイフーンの加護", "颱風祝福"],
+    ["Rider High Jump", "ライダー大ジャンプ", "騎士高躍"],
+    ["Typhoon Red Shutter", "タイフーン・レッドシャッター", "颱風紅快門"],
+    ["Power Focus", "パワー集中", "力量集中"],
+    ["Rider Power Jump", "ライダーパワージャンプ", "騎士強力跳躍"],
+    ["Battle Cry", "バトルクライ", "戰吼"],
+    ["Accelerator", "アクセラレーター", "加速器"],
+    ["Red Lamp Focus", "レッドランプ集中", "紅燈集中"],
+    ["Target Lock", "ターゲットロック", "目標鎖定"],
+    ["Rope Arm Tie-Up", "ロープアーム拘束", "繩索臂束縛"],
+    ["Rope Arm Hook", "ロープアーム・フック", "繩索臂鉤擊"],
+    ["High Leap", "ハイジャンプ", "高跳躍"],
+    ["Airborne Evasion", "空中回避", "空中迴避"],
+    ["Mercury Overdrive", "マーキュリー・オーバードライブ", "水銀超載"],
+    ["Mercury Fortification", "マーキュリー装甲強化", "水銀裝甲強化"],
+    ["Kaizorg Vitality", "カイゾーグの活力", "改造人活力"],
+    ["Inca Blessing", "インカの祝福", "印加祝福"],
+    ["Gigi Focus", "ギギ集中", "基基集中"],
+    ["Wild Leap", "野生の大跳躍", "野性飛躍"],
+    ["Wild Instinct", "野生の本能", "野性本能"],
+    ["Electro-Magnetic Field", "電磁フィールド", "電磁力場"],
+    ["Electro Dynamo", "エレクトロダイナモ", "電子發電機"],
+    ["War Cry", "ウォークライ", "戰吼"],
+    ["Super Electron Drill Kick", "超電子ドリルキック", "超電子鑽頭踢"],
+    ["Airborne Boost", "空中強化", "空中強化"],
+    ["Arm Calibration", "ターゲットロック", "目標鎖定"],
+    ["Mercury Defense", "マーキュリー装甲強化", "水銀裝甲強化"],
+    ["Mercury Attack", "マーキュリー・オーバードライブ", "水銀超載"],
+    ["Cassette Combo", "ロープアーム・フック", "繩索臂鉤擊"],
+    ["Standard Guard", "ガード", "防禦"],
+    ["Paralyze Shock", "電撃麻痺", "電擊麻痺"],
+    ["Double Typhoon", "アクセラレーター", "加速器"],
+    ["Red Shutter", "タイフーン・レッドシャッター", "颱風紅快門"],
+    ["Mercury Atk", "マーキュリー・オーバードライブ", "水銀超載"],
+    ["Mercury Def", "マーキュリー装甲強化", "水銀裝甲強化"],
+    ["LP Recovery", "LP回復", "LP回復"],
+    ["Charge Speed", "タイフーンチャージ", "颱風充能"],
+    ["Rope Bind", "ロープアーム拘束", "繩索臂束縛"],
+    ["Red Lamp", "レッドランプ集中", "紅燈集中"],
+    ["V3 Focus", "レッドランプ集中", "紅燈集中"],
+    ["Bleeding", "出血", "出血"],
+    ["Punches", "連続パンチ", "連續拳"],
+    ["Shutter", "タイフーン・レッドシャッター", "颱風紅快門"],
+    ["Dynamo", "エレクトロダイナモ", "電子發電機"],
+    ["Electro", "電磁フィールド", "電磁力場"],
+    ["Chop", "V3チョップ", "V3手刀"],
+    ["Leap", "V3大ジャンプ", "V3大跳躍"],
+    ["Jump", "ジャンプ", "跳躍"]
+  ];
 
   // Maps riderId + airborne/jump status IDs to their canonical Jump move names in the Movelist
   const RIDER_AIRBORNE_MOVE_ALIASES = Object.freeze({
-    ichigo: ["Rider High Jump", "ライダー大ジャンプ", "Airborne Boost", "空中強化"],
-    nigo: ["Rider Power Jump", "ライダーパワージャンプ", "Airborne Boost", "空中強化"],
-    v3: ["Leap", "V3大ジャンプ", "Airborne Boost", "空中強化"],
-    riderman: ["High Leap", "ハイジャンプ", "Airborne Evasion", "空中回避", "Airborne Boost"],
-    x: ["Jump", "ジャンプ", "Airborne Boost", "空中強化"],
-    amazon: ["Wild Leap", "野生の大跳躍", "Airborne Boost", "空中強化"],
-    stronger: ["Jump", "ジャンプ", "Airborne Boost", "空中強化"]
+    ichigo: [
+      "Rider High Jump",
+      "ライダー大ジャンプ",
+      "騎士高躍",
+      "Airborne Boost",
+      "空中強化"
+    ],
+    nigo: [
+      "Rider Power Jump",
+      "ライダーパワージャンプ",
+      "騎士強力跳躍",
+      "Airborne Boost",
+      "空中強化"
+    ],
+    v3: [
+      "Leap",
+      "V3大ジャンプ",
+      "V3大跳躍",
+      "Airborne Boost",
+      "空中強化"
+    ],
+    riderman: [
+      "High Leap",
+      "ハイジャンプ",
+      "高跳躍",
+      "Airborne Evasion",
+      "空中回避",
+      "空中迴避",
+      "Airborne Boost"
+    ],
+    x: [
+      "Jump",
+      "ジャンプ",
+      "跳躍",
+      "Airborne Boost",
+      "空中強化"
+    ],
+    amazon: [
+      "Wild Leap",
+      "野生の大跳躍",
+      "野性飛躍",
+      "Airborne Boost",
+      "空中強化"
+    ],
+    stronger: [
+      "Jump",
+      "ジャンプ",
+      "跳躍",
+      "Airborne Boost",
+      "空中強化"
+    ]
   });
 
   const renderedTags = new WeakMap();
@@ -569,6 +566,10 @@
   let lastTrackedRound = null;
   let lastScoreboardSignature = "";
   let dismissedScoreboardSignature = "";
+  let translationRegexRules = {
+    ja: [],
+    zh: []
+  };
 
   const byId = id => document.getElementById(id);
 
@@ -589,22 +590,126 @@
     return Math.round(number(val)).toLocaleString("en-US");
   }
 
-  const EN_TO_JA_REGEX_RULES = Object.freeze(
-    EN_TO_JA_TERMS.map(([enTerm, jaTerm]) => {
-      const escaped = escapeRegExp(enTerm);
-      const startsWord = /^[A-Za-z0-9]/.test(enTerm);
-      const endsWord = /[A-Za-z0-9]$/.test(enTerm);
-      const pattern = `${startsWord ? "\\b" : ""}${escaped}${endsWord ? "\\b" : ""}`;
-      return [new RegExp(pattern, "gi"), jaTerm];
-    })
-  );
-
   const EN_LEGACY_REGEX_RULES = Object.freeze(
     EN_LEGACY_NORMALIZATIONS.map(([oldTerm, newTerm]) => [
       new RegExp(`\\b${escapeRegExp(oldTerm)}\\b`, "g"),
       newTerm
     ])
   );
+
+  function compileTermRules(termMap) {
+    const sorted = Array.from(termMap.entries()).sort(
+      (a, b) => b[0].length - a[0].length
+    );
+    return sorted.map(([enTerm, targetTerm]) => {
+      const escaped = escapeRegExp(enTerm);
+      const startsWord = /^[A-Za-z0-9]/.test(enTerm);
+      const endsWord = /[A-Za-z0-9]$/.test(enTerm);
+      const pattern = `${startsWord ? "\\b" : ""}${escaped}${endsWord ? "\\b" : ""}`;
+      return [new RegExp(pattern, "gi"), targetTerm];
+    });
+  }
+
+  function getMovesLangBlock(riderEntry, lang) {
+    if (!riderEntry || typeof riderEntry !== "object") return null;
+    if (lang === "ja") return riderEntry.ja || null;
+    if (lang === "zh") {
+      return (
+        riderEntry.zh ||
+        riderEntry["zh-Hant"] ||
+        riderEntry["zh-HK"] ||
+        riderEntry["zh-TW"] ||
+        null
+      );
+    }
+    return riderEntry.en || null;
+  }
+
+  /** Compiles EN -> JA / ZH-Hant regex rules sorted longest-first from base aliases + data/moves.json. */
+  function rebuildTranslationRules(movesData) {
+    const maps = {
+      ja: new Map(),
+      zh: new Map()
+    };
+
+    for (const [enTerm, jaTerm, zhTerm] of BASE_TRANSLATION_TERMS) {
+      if (!enTerm) continue;
+      if (jaTerm) maps.ja.set(enTerm, jaTerm);
+      if (zhTerm) maps.zh.set(enTerm, zhTerm);
+    }
+
+    if (movesData && typeof movesData === "object") {
+      const categories = ["basic", "special", "utilities", "defense"];
+      for (const riderEntry of Object.values(movesData)) {
+        const enObj = riderEntry?.en;
+        if (!enObj) continue;
+
+        for (const lang of ["ja", "zh"]) {
+          const targetObj = getMovesLangBlock(riderEntry, lang);
+          if (!targetObj) continue;
+
+          if (enObj.name && targetObj.name) {
+            maps[lang].set(String(enObj.name).trim(), String(targetObj.name).trim());
+          }
+
+          for (const cat of categories) {
+            const enMoves = Array.isArray(enObj[cat]) ? enObj[cat] : [];
+            const targetMoves = Array.isArray(targetObj[cat]) ? targetObj[cat] : [];
+            const len = Math.min(enMoves.length, targetMoves.length);
+            for (let i = 0; i < len; i++) {
+              const enName = String(enMoves[i]?.name || "").trim();
+              const targetName = String(targetMoves[i]?.name || "").trim();
+              if (enName && targetName && enName !== targetName) {
+                maps[lang].set(enName, targetName);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    translationRegexRules = {
+      ja: compileTermRules(maps.ja),
+      zh: compileTermRules(maps.zh)
+    };
+  }
+
+  // Initialize immediately with base terms, then enrich asynchronously from data/moves.json
+  rebuildTranslationRules(g.__kfMovesData || null);
+
+  function loadMovesData() {
+    if (g.__kfMovesData) return Promise.resolve(g.__kfMovesData);
+    if (!g.__kfMovesFetch) {
+      g.__kfMovesFetch = fetch("data/moves.json")
+        .then(r => {
+          if (!r.ok) throw new Error(r.status);
+          return r.json();
+        })
+        .then(raw => {
+          const data = raw.movelists || raw;
+          g.__kfMovesData = data;
+          rebuildTranslationRules(data);
+          if (typeof document !== "undefined") syncBattleStaticDOM();
+          return data;
+        })
+        .catch(err => {
+          g.__kfMovesFetch = null;
+          console.warn("Failed to load data/moves.json in ui.js:", err);
+          return null;
+        });
+    } else {
+      g.__kfMovesFetch.then(data => {
+        if (data) {
+          g.__kfMovesData = data;
+          rebuildTranslationRules(data);
+          if (typeof document !== "undefined") syncBattleStaticDOM();
+        }
+      });
+    }
+    return g.__kfMovesFetch;
+  }
+
+  loadMovesData();
 
   /** Permanently disables and removes any portrait-rotation blocker overlay (fixes PLiCy/browser iframe lock). */
   function disablePortraitOrientationOverlay() {
@@ -635,11 +740,18 @@
       g.gameState?.lang ||
       document.documentElement?.lang ||
       "en";
-    return String(raw).toLowerCase().startsWith("ja") ? "ja" : "en";
+    const lower = String(raw).trim().toLowerCase();
+    if (lower.startsWith("ja")) return "ja";
+    if (lower.startsWith("zh")) return "zh";
+    return "en";
   }
 
   function isJa() {
     return getLang() === "ja";
+  }
+
+  function isZh() {
+    return getLang() === "zh";
   }
 
   function dict() {
@@ -675,33 +787,48 @@
     riderHitCounters.clear();
   }
 
+  function translateEnToTarget(text, lang = getLang()) {
+    let out = String(text ?? "");
+    const rules = translationRegexRules[lang];
+    if (!rules) return out;
+    for (const [regex, targetTerm] of rules) {
+      out = out.replace(regex, targetTerm);
+    }
+    return out;
+  }
+
   function statusName(id, langOverride = null) {
-    const d = langOverride ? (I18N_UI[langOverride] || I18N_UI.en) : dict();
+    const lang = langOverride || getLang();
     const raw = String(id || "").trim();
     const key = raw.toLowerCase();
     const snakeKey = key.replace(/[\s-]+/g, "_");
 
-    if (d.statusNames[raw]) return d.statusNames[raw];
-    if (d.statusNames[key]) return d.statusNames[key];
-    if (d.statusNames[snakeKey]) return d.statusNames[snakeKey];
+    if (lang !== "en" && I18N_UI[lang]?.statusNames) {
+      const direct =
+        I18N_UI[lang].statusNames[raw] ||
+        I18N_UI[lang].statusNames[key] ||
+        I18N_UI[lang].statusNames[snakeKey];
+      if (direct) return direct;
+    }
 
-    if (I18N_UI.en.statusNames[raw]) return I18N_UI.en.statusNames[raw];
-    if (I18N_UI.en.statusNames[key]) return I18N_UI.en.statusNames[key];
-    if (I18N_UI.en.statusNames[snakeKey]) return I18N_UI.en.statusNames[snakeKey];
+    const enName =
+      I18N_UI.en.statusNames[raw] ||
+      I18N_UI.en.statusNames[key] ||
+      I18N_UI.en.statusNames[snakeKey] ||
+      String(raw || (lang === "en" ? "Status" : "状態"))
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, letter => letter.toUpperCase());
 
-    return String(raw || (isJa() ? "状態" : "Status"))
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, letter => letter.toUpperCase());
+    return lang === "en" ? enName : translateEnToTarget(enName, lang);
   }
 
   /**
    * Collects candidate movelist text snippets for a specific Rider & buff/move
-   * from global rider/movelist definitions AND any rendered Movelist DOM nodes.
+   * directly from data/moves.json (plus any direct buff description properties).
    */
-  function findMovelistSnippetForBuff(riderId, buff, player) {
+  function findMovelistSnippetForBuff(riderId, buff) {
     const snippets = [];
 
-    // 1. Direct text attached to the buff object itself
     const directText =
       buff?.movelistText ||
       buff?.hudLabel ||
@@ -718,6 +845,7 @@
 
     const enName = statusName(rawId, "en");
     const jaName = statusName(rawId, "ja");
+    const zhName = statusName(rawId, "zh");
     const snakeId = rawId.toLowerCase().replace(/[\s-]+/g, "_");
 
     const isAirborneBuff =
@@ -731,6 +859,7 @@
         rawId,
         enName,
         jaName,
+        zhName,
         ...(isAirborneBuff && RIDER_AIRBORNE_MOVE_ALIASES[riderId]
           ? RIDER_AIRBORNE_MOVE_ALIASES[riderId]
           : [])
@@ -739,89 +868,22 @@
         .filter(Boolean)
     );
 
-    // 2. Check global JS Rider / Movelist registries
-    const candidatePools = [
-      player?.moves,
-      player?.movelist,
-      g.RIDERS?.[riderId]?.moves,
-      g.RIDERS?.[riderId]?.movelist,
-      g.RIDER_DATA?.[riderId]?.moves,
-      g.RIDER_DATA?.[riderId]?.movelist,
-      g.MOVELIST?.[riderId],
-      g.RIDER_MOVELIST?.[riderId]
-    ];
-
-    for (const pool of candidatePools) {
-      if (!pool) continue;
-      const entries = Array.isArray(pool)
-        ? pool
-        : typeof pool === "object"
-        ? Object.values(pool)
-        : [];
-
-      for (const entry of entries) {
-        if (!entry || typeof entry !== "object") continue;
-        const entryTitles = [
-          entry.id,
-          entry.key,
-          entry.name,
-          entry.nameEn,
-          entry.nameJa,
-          entry.title,
-          entry.move,
-          entry.buffId,
-          entry.statusId
-        ]
-          .map(v => String(v || "").trim().toLowerCase())
-          .filter(Boolean);
-
-        const matches = entryTitles.some(t => searchNames.has(t));
-        if (matches) {
-          const desc = [
-            entry.desc,
-            entry.description,
-            entry.effect,
-            entry.effectText,
-            entry.notes,
-            entry.summary,
-            entry.descEn,
-            entry.descJa
-          ]
-            .filter(v => typeof v === "string" && v.trim())
-            .join(" | ");
-          if (desc) snippets.push(desc);
-        }
-      }
-    }
-
-    // 3. Check Movelist DOM elements (if present in index.html)
-    if (typeof document !== "undefined" && riderId) {
-      const riderSelectors = [
-        `[data-rider="${riderId}"]`,
-        `[data-rider-id="${riderId}"]`,
-        `#movelist-${riderId}`,
-        `.movelist-${riderId}`
-      ];
-      const scopedRoots = document.querySelectorAll(riderSelectors.join(", "));
-      const roots =
-        scopedRoots.length > 0
-          ? Array.from(scopedRoots)
-          : Array.from(
-              document.querySelectorAll(
-                "#movelist-modal, #movelist-content, .movelist-container, .movelist-body"
-              )
-            );
-
-      for (const root of roots) {
-        const rows = root.querySelectorAll("tr, li, .move-row, .move-card, .movelist-item");
-        for (const row of rows) {
-          const text = String(row.textContent || "").trim();
-          if (!text) continue;
-          const lower = text.toLowerCase();
-          for (const target of searchNames) {
-            if (target.length >= 3 && lower.includes(target)) {
-              snippets.push(text);
-              break;
+    const riderMoves = g.__kfMovesData?.[riderId];
+    if (riderMoves && typeof riderMoves === "object") {
+      const categories = ["utilities", "defense", "basic", "special"];
+      for (const langKey of Object.keys(riderMoves)) {
+        const langBlock = riderMoves[langKey];
+        if (!langBlock || typeof langBlock !== "object") continue;
+        for (const cat of categories) {
+          const list = Array.isArray(langBlock[cat]) ? langBlock[cat] : [];
+          for (const move of list) {
+            if (!move || typeof move !== "object") continue;
+            const moveName = String(move.name || "").trim().toLowerCase();
+            if (moveName && searchNames.has(moveName)) {
+              const info = [move.effect, move.remarks]
+                .filter(v => typeof v === "string" && v.trim())
+                .join(" | ");
+              if (info) snippets.push(info);
             }
           }
         }
@@ -843,31 +905,31 @@
 
     // D-ATK / Normal Attack %
     const dAtkMatch = text.match(
-      /(?:\bD-ATK\b|\bD-Attack\b|\bNormal\s+Attack\b|通常攻撃)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
+      /(?:\bD-ATK\b|\bD-Attack\b|\bNormal\s+Attack\b|通常攻撃|普通攻擊|D技攻擊)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
     );
     if (dAtkMatch) overrides.dAttackPercent = Number(dAtkMatch[1]);
 
     // S-ATK / Special Attack %
     const sAtkMatch = text.match(
-      /(?:\bS-ATK\b|\bS-Attack\b|\bSpecial\s+Attack\b|\bFinisher\s+Attack\b|必殺技(?:攻撃力|威力)?)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
+      /(?:\bS-ATK\b|\bS-Attack\b|\bSpecial\s+Attack\b|\bFinisher\s+Attack\b|必殺技(?:攻撃力|威力|攻擊力)?|S技攻擊)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
     );
     if (sAtkMatch) overrides.sAttackPercent = Number(sAtkMatch[1]);
 
     // General ATK / Attack % (exclude D-ATK and S-ATK prefixes)
     const atkMatch = text.match(
-      /(?:^|[^A-Za-z-])(?:\bATK\b|\bAttack\b|攻撃力)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
+      /(?:^|[^A-Za-z-])(?:\bATK\b|\bAttack\b|攻撃力|攻擊力)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
     );
     if (atkMatch) overrides.attackPercent = Number(atkMatch[1]);
 
     // Damage Taken / Armor %
     const armorMatch = text.match(
-      /(?:\bdamage\s+taken\b|\bincoming\s+damage\b|被ダメージ)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
+      /(?:\bdamage\s+taken\b|\bincoming\s+damage\b|被ダメージ|受到傷害|被傷害)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
     );
     if (armorMatch) overrides.armorPercent = Number(armorMatch[1]);
 
     // Charge Speed %
     const speedMatch = text.match(
-      /(?:\bcharge\s+speed\b|\bspeed\b|チャージ速度)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
+      /(?:\bcharge\s+speed\b|\bspeed\b|チャージ速度|蓄力速度)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*%/i
     );
     if (speedMatch) overrides.speedPercent = Number(speedMatch[1]);
 
@@ -879,7 +941,7 @@
 
     // EVS / Evasion (pp or %)
     const evsMatch = text.match(
-      /(?:\bEVS\b|\bEvasion\b|回避(?:率)?)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*(?:pp|%)/i
+      /(?:\bEVS\b|\bEvasion\b|回避(?:率)?|迴避(?:率)?)[^+\-\d%]{0,16}([+-]\d+(?:\.\d+)?)\s*(?:pp|%)/i
     );
     if (evsMatch) overrides.evasionValue = Number(evsMatch[1]);
 
@@ -888,20 +950,28 @@
 
   function resolveLocalizedRiderName(player, fallbackSlot) {
     if (!player) return fallbackSlot.toUpperCase();
-    const d = dict();
+    const lang = getLang();
     const id = String(player.id || player.riderId || "").toLowerCase();
-    if (id && d.riderNames[id]) {
-      return d.riderNames[id];
+    const movesEntry = id && g.__kfMovesData?.[id];
+    const meta = id && RIDER_META[id];
+
+    const movesLangBlock = movesEntry && getMovesLangBlock(movesEntry, lang);
+    if (movesLangBlock?.name) return movesLangBlock.name;
+
+    if (meta) {
+      if (lang === "ja" && meta.nameJa) return meta.nameJa;
+      if (lang === "zh" && meta.nameZh) return meta.nameZh;
+      if (lang === "en" && meta.nameEn) return meta.nameEn;
     }
 
     const rawName = String(player.name || fallbackSlot.toUpperCase());
-    if (!isJa()) return rawName;
+    if (lang === "en") return rawName;
 
     const lower = rawName.toLowerCase();
-    for (const [key, jaName] of Object.entries(d.riderNames)) {
-      const enName = I18N_UI.en.riderNames[key];
-      if (enName && lower === enName.toLowerCase()) {
-        return jaName;
+    for (const r of Object.values(RIDER_META)) {
+      if (r.nameEn.toLowerCase() === lower) {
+        if (lang === "ja") return r.nameJa;
+        if (lang === "zh") return r.nameZh;
       }
     }
     return localizeBattleText(rawName);
@@ -911,7 +981,9 @@
     const raw = String(input ?? "");
     if (!raw) return raw;
 
-    if (!isJa()) {
+    const lang = getLang();
+
+    if (lang === "en") {
       let enOut = raw;
       for (const [regex, replacement] of EN_LEGACY_REGEX_RULES) {
         enOut = enOut.replace(regex, replacement);
@@ -921,50 +993,115 @@
 
     let out = raw;
 
-    // Handle standalone short uppercase buff popup tags first (e.g., "+AIR", "+BIND", "+SHOCK")
-    out = out
-      .replace(/^(\+?)\s*AIR$/i, "$1空中強化")
-      .replace(/^(\+?)\s*CHARGE$/i, "$1タイフーンチャージ")
-      .replace(/^(\+?)\s*FOCUS$/i, "$1集中")
-      .replace(/^(\+?)\s*SHUTTER$/i, "$1タイフーン・レッドシャッター")
-      .replace(/^(\+?)\s*BIND$/i, "$1ロープアーム拘束")
-      .replace(/^(\+?)\s*SHOCK$/i, "$1電撃麻痺")
-      .replace(/^(\+?)\s*ELECTRO$/i, "$1電磁フィールド")
-      .replace(/^(\+?)\s*DYNAMO$/i, "$1エレクトロダイナモ");
+    if (lang === "ja") {
+      out = out
+        .replace(/^(\+?)\s*AIR$/i, "$1空中強化")
+        .replace(/^(\+?)\s*CHARGE$/i, "$1タイフーンチャージ")
+        .replace(/^(\+?)\s*FOCUS$/i, "$1集中")
+        .replace(/^(\+?)\s*SHUTTER$/i, "$1タイフーン・レッドシャッター")
+        .replace(/^(\+?)\s*BIND$/i, "$1ロープアーム拘束")
+        .replace(/^(\+?)\s*SHOCK$/i, "$1電撃麻痺")
+        .replace(/^(\+?)\s*ELECTRO$/i, "$1電磁フィールド")
+        .replace(/^(\+?)\s*DYNAMO$/i, "$1エレクトロダイナモ");
 
-    for (const [regex, jaTerm] of EN_TO_JA_REGEX_RULES) {
-      out = out.replace(regex, jaTerm);
+      out = translateEnToTarget(out, "ja");
+
+      out = out
+        .replace(/\bGET READY!\b/gi, "バトル開始！")
+        .replace(/\bREADY FOR BATTLE!\b/gi, "バトル準備完了！")
+        .replace(/\bINTERRUPTED!\b/gi, "中断！")
+        .replace(/\bINTERRUPTED\b/gi, "中断！")
+        .replace(/\bINTERRUPT!\b/gi, "中断！")
+        .replace(/\bINTERRUPT\b/gi, "中断！")
+        .replace(/\bTAP DIRECTION TO CHARGE\b/gi, "方向キーでチャージ")
+        .replace(/\bHOLD DIRECTION TO CHARGE\b/gi, "方向キー長押しでチャージ")
+        .replace(/\bPRESS ACTION KEY\b/gi, "アクションキーで決定")
+        .replace(/\bLOCKED!\b/gi, "確定！")
+        .replace(/\bLOCKED\b/gi, "確定")
+        .replace(/\bFAINTED!\b/gi, "気絶中！")
+        .replace(/\bGLANCING HIT\b/gi, "かすりヒット")
+        .replace(/\bCOUNTER HIT\b/gi, "カウンター")
+        .replace(/\bCRITICAL HIT\b/gi, "クリティカル")
+        .replace(/\bGUARD BREAK\b/gi, "ガードブレイク")
+        .replace(/\bSCRATCH\b/gi, "かすり傷")
+        .replace(/\bBLOCKED\b/gi, "ガード")
+        .replace(/\bBLOCK\b/gi, "ガード")
+        .replace(/\bGUARD\b/gi, "ガード")
+        .replace(/\bEVADED\b/gi, "回避")
+        .replace(/\bDODGED\b/gi, "回避")
+        .replace(/\bMISSED\b/gi, "ミス")
+        .replace(/\bMISS\b/gi, "ミス")
+        .replace(/\bHEAL\b/gi, "回復")
+        .replace(/\bDRAW GAME\b/gi, "引き分け")
+        .replace(/\bDOUBLE KO\b/gi, "ダブルKO")
+        .replace(/\bTIME OVER\b/gi, "タイムアップ")
+        .replace(/\bYOU WIN!\b/gi, "勝利！")
+        .replace(/\bYOU LOSE!\b/gi, "敗北…")
+        .replace(/\bVICTORY!\b/gi, "勝利！")
+        .replace(/\bVICTORY\b/gi, "勝利！")
+        .replace(/\bDEFEAT\.\.\./gi, "敗北…")
+        .replace(/\bDEFEAT!\b/gi, "敗北…")
+        .replace(/\bDEFEAT\b/gi, "敗北…");
+
+      out = out
+        .replace(/\bROUND\s+(\d+)\b/gi, "ラウンド $1")
+        .replace(/\bTIME:\s*([0-9.]+)s\b/gi, "残り時間: $1秒")
+        .replace(/\bPLAYER\s*1\s+WINS!\b/gi, "プレイヤー1の勝利！")
+        .replace(/\bPLAYER\s*2\s+WINS!\b/gi, "プレイヤー2の勝利！")
+        .replace(/([^\n\r]+?)\s+WINS!\b/gi, "$1 の勝利！")
+        .replace(/\bREADY\b/g, "準備完了");
+
+      out = out
+        .replace(/\s+uses\s+/gi, " の ")
+        .replace(/\s+used\s+/gi, " の ")
+        .replace(/\bCHI\b/g, "氣")
+        .replace(/\bFAINT\b/g, "気絶");
+
+      return out;
     }
 
+    // Traditional Chinese ("zh")
     out = out
-      .replace(/\bGET READY!\b/gi, "バトル開始！")
-      .replace(/\bREADY FOR BATTLE!\b/gi, "バトル準備完了！")
-      .replace(/\bINTERRUPTED!\b/gi, "中断！")
-      .replace(/\bINTERRUPTED\b/gi, "中断！")
-      .replace(/\bINTERRUPT!\b/gi, "中断！")
-      .replace(/\bINTERRUPT\b/gi, "中断！")
-      .replace(/\bTAP DIRECTION TO CHARGE\b/gi, "方向キーでチャージ")
-      .replace(/\bHOLD DIRECTION TO CHARGE\b/gi, "方向キー長押しでチャージ")
-      .replace(/\bPRESS ACTION KEY\b/gi, "アクションキーで決定")
-      .replace(/\bLOCKED!\b/gi, "確定！")
-      .replace(/\bLOCKED\b/gi, "確定")
-      .replace(/\bFAINTED!\b/gi, "気絶中！")
-      .replace(/\bGLANCING HIT\b/gi, "かすりヒット")
-      .replace(/\bCOUNTER HIT\b/gi, "カウンター")
-      .replace(/\bCRITICAL HIT\b/gi, "クリティカル")
-      .replace(/\bGUARD BREAK\b/gi, "ガードブレイク")
-      .replace(/\bSCRATCH\b/gi, "かすり傷")
-      .replace(/\bBLOCKED\b/gi, "ガード")
-      .replace(/\bBLOCK\b/gi, "ガード")
-      .replace(/\bGUARD\b/gi, "ガード")
-      .replace(/\bEVADED\b/gi, "回避")
-      .replace(/\bDODGED\b/gi, "回避")
-      .replace(/\bMISSED\b/gi, "ミス")
-      .replace(/\bMISS\b/gi, "ミス")
+      .replace(/^(\+?)\s*AIR$/i, "$1空中強化")
+      .replace(/^(\+?)\s*CHARGE$/i, "$1颱風充能")
+      .replace(/^(\+?)\s*FOCUS$/i, "$1集中")
+      .replace(/^(\+?)\s*SHUTTER$/i, "$1颱風紅快門")
+      .replace(/^(\+?)\s*BIND$/i, "$1繩索臂束縛")
+      .replace(/^(\+?)\s*SHOCK$/i, "$1電擊麻痺")
+      .replace(/^(\+?)\s*ELECTRO$/i, "$1電磁力場")
+      .replace(/^(\+?)\s*DYNAMO$/i, "$1電子發電機");
+
+    out = translateEnToTarget(out, "zh");
+
+    out = out
+      .replace(/\bGET READY!\b/gi, "準備戰鬥！")
+      .replace(/\bREADY FOR BATTLE!\b/gi, "戰鬥準備就緒！")
+      .replace(/\bINTERRUPTED!\b/gi, "被打斷！")
+      .replace(/\bINTERRUPTED\b/gi, "被打斷！")
+      .replace(/\bINTERRUPT!\b/gi, "打斷！")
+      .replace(/\bINTERRUPT\b/gi, "打斷！")
+      .replace(/\bTAP DIRECTION TO CHARGE\b/gi, "點擊方向鍵蓄力")
+      .replace(/\bHOLD DIRECTION TO CHARGE\b/gi, "按住方向鍵蓄力")
+      .replace(/\bPRESS ACTION KEY\b/gi, "按行動鍵確認")
+      .replace(/\bLOCKED!\b/gi, "已鎖定！")
+      .replace(/\bLOCKED\b/gi, "已鎖定")
+      .replace(/\bFAINTED!\b/gi, "暈眩中！")
+      .replace(/\bGLANCING HIT\b/gi, "擦傷命中")
+      .replace(/\bCOUNTER HIT\b/gi, "反擊命中")
+      .replace(/\bCRITICAL HIT\b/gi, "暴擊")
+      .replace(/\bGUARD BREAK\b/gi, "破防")
+      .replace(/\bSCRATCH\b/gi, "擦傷")
+      .replace(/\bBLOCKED\b/gi, "防禦")
+      .replace(/\bBLOCK\b/gi, "防禦")
+      .replace(/\bGUARD\b/gi, "防禦")
+      .replace(/\bEVADED\b/gi, "迴避")
+      .replace(/\bDODGED\b/gi, "迴避")
+      .replace(/\bMISSED\b/gi, "未命中")
+      .replace(/\bMISS\b/gi, "未命中")
       .replace(/\bHEAL\b/gi, "回復")
-      .replace(/\bDRAW GAME\b/gi, "引き分け")
-      .replace(/\bDOUBLE KO\b/gi, "ダブルKO")
-      .replace(/\bTIME OVER\b/gi, "タイムアップ")
+      .replace(/\bDRAW GAME\b/gi, "平手")
+      .replace(/\bDOUBLE KO\b/gi, "雙重KO")
+      .replace(/\bTIME OVER\b/gi, "時間到")
       .replace(/\bYOU WIN!\b/gi, "勝利！")
       .replace(/\bYOU LOSE!\b/gi, "敗北…")
       .replace(/\bVICTORY!\b/gi, "勝利！")
@@ -974,18 +1111,18 @@
       .replace(/\bDEFEAT\b/gi, "敗北…");
 
     out = out
-      .replace(/\bROUND\s+(\d+)\b/gi, "ラウンド $1")
-      .replace(/\bTIME:\s*([0-9.]+)s\b/gi, "残り時間: $1秒")
-      .replace(/\bPLAYER\s*1\s+WINS!\b/gi, "プレイヤー1の勝利！")
-      .replace(/\bPLAYER\s*2\s+WINS!\b/gi, "プレイヤー2の勝利！")
-      .replace(/([^\n\r]+?)\s+WINS!\b/gi, "$1 の勝利！")
-      .replace(/\bREADY\b/g, "準備完了");
+      .replace(/\bROUND\s+(\d+)\b/gi, "第 $1 回合")
+      .replace(/\bTIME:\s*([0-9.]+)s\b/gi, "剩餘時間: $1秒")
+      .replace(/\bPLAYER\s*1\s+WINS!\b/gi, "玩家 1 獲勝！")
+      .replace(/\bPLAYER\s*2\s+WINS!\b/gi, "玩家 2 獲勝！")
+      .replace(/([^\n\r]+?)\s+WINS!\b/gi, "$1 獲勝！")
+      .replace(/\bREADY\b/g, "準備就緒");
 
     out = out
-      .replace(/\s+uses\s+/gi, " の ")
-      .replace(/\s+used\s+/gi, " の ")
+      .replace(/\s+uses\s+/gi, " 使出 ")
+      .replace(/\s+used\s+/gi, " 使出 ")
       .replace(/\bCHI\b/g, "氣")
-      .replace(/\bFAINT\b/g, "気絶");
+      .replace(/\bFAINT\b/g, "暈眩");
 
     return out;
   }
@@ -994,6 +1131,7 @@
     disablePortraitOrientationOverlay();
 
     const d = dict();
+    const lang = getLang();
 
     const p1PadLabel = document.querySelector("#p1-controls .pad-label");
     if (p1PadLabel) p1PadLabel.textContent = d.hud.p1PadLabel;
@@ -1001,12 +1139,21 @@
     const p2PadLabel = document.querySelector("#p2-controls .pad-label");
     if (p2PadLabel) p2PadLabel.textContent = d.hud.p2PadLabel;
 
+    const allLockedFlags = new Set(
+      Object.values(I18N_UI).map(entry => entry.hud.lockedFlag)
+    );
+    const nonEnTapToCharge = new Set(
+      Object.entries(I18N_UI)
+        .filter(([k]) => k !== "en")
+        .map(([, entry]) => entry.hud.tapToCharge)
+    );
+
     ["p1", "p2"].forEach(slot => {
       const stunEl = byId(`${slot}-stun-overlay`);
       if (stunEl) stunEl.textContent = d.hud.faintedOverlay;
 
       const flagEl = byId(`${slot}-action-flag`);
-      if (flagEl && (flagEl.textContent === "LOCKED!" || flagEl.textContent === "確定！")) {
+      if (flagEl && allLockedFlags.has(flagEl.textContent.trim())) {
         flagEl.textContent = d.hud.lockedFlag;
       }
 
@@ -1022,7 +1169,7 @@
     ["charge-status-display", "p2-charge-status-display"].forEach(id => {
       const el = byId(id);
       if (!el) return;
-      if (!isJa() && el.textContent === I18N_UI.ja.hud.tapToCharge) {
+      if (lang === "en" && nonEnTapToCharge.has(el.textContent.trim())) {
         el.textContent = I18N_UI.en.hud.tapToCharge;
       } else {
         const localized = localizeBattleText(el.textContent);
@@ -1062,7 +1209,7 @@
     );
   }
 
-  function describeStatus(buff, round = currentRound(), riderId = "", player = null) {
+  function describeStatus(buff, round = currentRound(), riderId = "") {
     const d = dict();
     const s = d.statLabels;
     const effects = buff?.effects || {};
@@ -1070,7 +1217,7 @@
     const parts = [];
     let harmful = false;
 
-    const movelistSnippet = findMovelistSnippetForBuff(riderId, buff, player);
+    const movelistSnippet = findMovelistSnippetForBuff(riderId, buff);
     const movelistOverrides = parseMovelistStatOverrides(movelistSnippet);
 
     const multiplicative = [
@@ -1310,7 +1457,7 @@
     const roundBonus = outcome === "win"
       ? Math.round(clamp((maxRounds - currentRoundNum) / (maxRounds - 1), 0, 1) * 3000)
       : 0;
-    const maxChi = Math.max(1, number(self.maxChi, g.COMBAT_RULES?.MAX_CHI || 20));
+    const maxChi = Math.max(1, number(self.maxChi, g.COMBAT_RULES?.MAX_CHI || 16));
     const remChi = clamp(number(self.chi), 0, maxChi);
     const chiScore = Math.round(remChi * (1 + remChi / maxChi) * 25);
     const executionScore = Math.round(number(stats.dsExecutionPts));
@@ -1684,7 +1831,7 @@
         hasEnableSpecialsBuff = true;
       }
 
-      const description = describeStatus(buff, cRound, riderId, player);
+      const description = describeStatus(buff, cRound, riderId);
 
       tags.push({
         text: description.text,
@@ -1975,7 +2122,7 @@
       fontLink.id = "kf-jp-hud-fonts";
       fontLink.rel = "stylesheet";
       fontLink.href =
-        "https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,600;0,700;1,700&family=M+PLUS+1p:wght@700;800;900&family=Noto+Sans+JP:wght@700;900&family=Orbitron:wght@700;800;900&display=swap";
+        "https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,600;0,700;1,700&family=M+PLUS+1p:wght@700;800;900&family=Noto+Sans+JP:wght@700;900&family=Noto+Sans+TC:wght@700;900&family=Orbitron:wght@700;800;900&display=swap";
       (document.head || document.documentElement).appendChild(fontLink);
     }
 
@@ -1984,8 +2131,8 @@
 
     style.textContent = `
       :root {
-        --kf-hud-font-display: 'Orbitron', 'Chakra Petch', 'M PLUS 1p', 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', sans-serif;
-        --kf-hud-font-ui: 'Chakra Petch', 'M PLUS 1p', 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', sans-serif;
+        --kf-hud-font-display: 'Orbitron', 'Chakra Petch', 'M PLUS 1p', 'Noto Sans TC', 'Noto Sans JP', 'PingFang TC', 'Microsoft JhengHei', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', sans-serif;
+        --kf-hud-font-ui: 'Chakra Petch', 'M PLUS 1p', 'Noto Sans TC', 'Noto Sans JP', 'PingFang TC', 'Microsoft JhengHei', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', sans-serif;
         --kf-p1-cyan: #00f0ff;
         --kf-p2-pink: #ff2a6d;
         --kf-gold: #ffd166;
@@ -2889,7 +3036,7 @@
 
   g.UI = {
     ...(g.UI || {}),
-    PATCH: "numeric-status-hud-2-i18n-5tiers-stronger-movelist-label-sync-dual-scoreboard",
+    PATCH: "numeric-status-hud-2-i18n-ja-zh-5tiers-stronger-movelist-label-sync-dual-scoreboard",
     RIDER_META,
     updatePlayerHUD,
     showDamagePopup,

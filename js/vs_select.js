@@ -8,7 +8,9 @@
 
   window.selectionBGM = window.selectionBGM || null;
   window.battleBGM = window.battleBGM || null;
-  window.currentVolume = 0.3;
+  window.currentVolume = typeof window.currentVolume === 'number' && Number.isFinite(window.currentVolume)
+    ? Math.min(1, Math.max(0, window.currentVolume))
+    : 0.3;
   window.gameLang = window.gameLang || 'en';
 
   const SELECTION_BGM_TRACKS = [
@@ -37,9 +39,27 @@
   let movesFetch = null;
   let creditsCache = null;
   let creditsFetch = null;
+  let movelistRenderSeq = 0;
+  let lastPlayedTrack = null;
 
   function normalizeLang(lang) {
     return (lang === 'ja' || lang === 'zh') ? lang : 'en';
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function normalizeIndex(index, length) {
+    if (!length || length <= 0) return 0;
+    const n = parseInt(index, 10);
+    if (!Number.isFinite(n)) return 0;
+    return ((n % length) + length) % length;
   }
 
   /** Fetches and caches trilingual movelists from data/moves.json. */
@@ -49,10 +69,29 @@
     try {
       movesFetch = movesFetch || fetch('data/moves.json')
         .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(data => Object.assign(MOVELIST_CACHE, data.movelists || data))
+        .then(data => {
+          const root = data && typeof data === 'object' ? (data.movelists || data) : {};
+          Object.assign(MOVELIST_CACHE, root);
+          return MOVELIST_CACHE;
+        })
         .catch(err => { movesFetch = null; throw err; });
       await movesFetch;
-      return MOVELIST_CACHE[id] || null;
+      if (MOVELIST_CACHE[id]) return MOVELIST_CACHE[id];
+
+      // Support language-first JSON structure fallback: { en: { ichigo: ... }, ja: ..., zh: ... }
+      if (MOVELIST_CACHE.en || MOVELIST_CACHE.ja || MOVELIST_CACHE.zh) {
+        const byLang = {};
+        ['en', 'ja', 'zh'].forEach(l => {
+          if (MOVELIST_CACHE[l] && MOVELIST_CACHE[l][id]) {
+            byLang[l] = MOVELIST_CACHE[l][id];
+          }
+        });
+        if (Object.keys(byLang).length > 0) {
+          MOVELIST_CACHE[id] = byLang;
+          return byLang;
+        }
+      }
+      return null;
     } catch (err) {
       console.warn('Failed to load data/moves.json:', err);
       return null;
@@ -572,16 +611,23 @@
       movelistCloseBtn.textContent = dict.movelistCloseBtn;
     }
 
-    window.refreshVsSelectLanguage();
+    if (typeof window.refreshVsSelectLanguage === 'function') {
+      window.refreshVsSelectLanguage();
+    } else if (typeof window.updateSelectionUI === 'function') {
+      window.updateSelectionUI();
+    }
 
     // Ensure transition from loading screen to vs-select-screen happens smoothly
     const loadingScreen = document.getElementById('loading-screen');
     const selectScreen = document.getElementById('vs-select-screen');
-    if (loadingScreen && !loadingScreen.hidden && selectScreen) {
+    const loadingVisible = loadingScreen && (!loadingScreen.hidden && loadingScreen.style.display !== 'none');
+    if (loadingVisible && selectScreen) {
       setTimeout(() => {
-        if (!loadingScreen.hidden) {
+        if (!loadingScreen.hidden && loadingScreen.style.display !== 'none') {
           loadingScreen.hidden = true;
+          loadingScreen.style.display = 'none';
           selectScreen.hidden = false;
+          selectScreen.style.display = '';
           window.playSelectionBGM();
           window.updateSelectionUI();
         }
@@ -1038,12 +1084,12 @@
         transition: all 0.15s ease !important;
       }
 
-      #p1-card.active-slot #p1-type-display:hover {
+      #p1-card.active-slot #p1-type-display:hover:not(:disabled) {
         border-color: var(--kf-p1-accent) !important;
         background: rgba(0, 240, 255, 0.14) !important;
       }
 
-      #p2-card.active-slot #p2-type-display:hover {
+      #p2-card.active-slot #p2-type-display:hover:not(:disabled) {
         border-color: var(--kf-p2-accent) !important;
         background: rgba(255, 42, 109, 0.14) !important;
       }
@@ -1939,15 +1985,15 @@
     const col4Header = isAttack ? dict.colDmg : dict.colEffect;
     const rowsHtml = (moves || []).map(m => {
       const col4Val = isAttack
-        ? `<td class="kf-dmg-val">${m.dmg ?? '-'}</td>`
-        : `<td class="kf-effect-val">${m.effect || '-'}</td>`;
+        ? `<td class="kf-dmg-val">${escapeHtml(m.dmg ?? '-')}</td>`
+        : `<td class="kf-effect-val">${escapeHtml(m.effect || '-')}</td>`;
       return `
         <tr>
-          <td class="kf-move-name">${m.name}</td>
-          <td><span class="kf-cmd-badge">${m.cmd}</span></td>
-          <td class="kf-chi-val">${m.chi}</td>
+          <td class="kf-move-name">${escapeHtml(m.name)}</td>
+          <td><span class="kf-cmd-badge">${escapeHtml(m.cmd)}</span></td>
+          <td class="kf-chi-val">${escapeHtml(m.chi ?? '-')}</td>
           ${col4Val}
-          <td class="kf-remarks-val">${m.remarks || '-'}</td>
+          <td class="kf-remarks-val">${escapeHtml(m.remarks || '-')}</td>
         </tr>
       `;
     }).join('');
@@ -1955,17 +2001,17 @@
     return `
       <div class="kf-movelist-cat-card ${catClass}">
         <div class="kf-movelist-cat-header">
-          <span>${title}</span>
-          <span style="opacity:0.75;font-size:0.65rem;">${sub}</span>
+          <span>${escapeHtml(title)}</span>
+          <span style="opacity:0.75;font-size:0.65rem;">${escapeHtml(sub)}</span>
         </div>
         <table class="kf-movelist-table">
           <thead>
             <tr>
-              <th>${dict.colName}</th>
-              <th>${dict.colCmd}</th>
-              <th>${dict.colChi}</th>
-              <th>${col4Header}</th>
-              <th>${dict.colRemarks}</th>
+              <th>${escapeHtml(dict.colName)}</th>
+              <th>${escapeHtml(dict.colCmd)}</th>
+              <th>${escapeHtml(dict.colChi)}</th>
+              <th>${escapeHtml(col4Header)}</th>
+              <th>${escapeHtml(dict.colRemarks)}</th>
             </tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
@@ -1976,10 +2022,16 @@
 
   /** Renders the HTML content for a specific Rider's movelist inside #kf-movelist-modal in the active language. */
   async function renderMovelistModalContent(riderId) {
+    const seq = ++movelistRenderSeq;
     const dict = t();
     const langKey = normalizeLang(window.gameLang);
     const riders = window.AVAILABLE_RIDERS || [];
-    const riderObj = riders.find(r => r.id === riderId) || riders[0] || { id: 'ichigo', name: 'Kamen Rider Ichigo', icon: 'assets/images/icons/ichigo.png', maxLp: 3000 };
+    const riderObj = riders.find(r => r.id === riderId) || riders[0] || {
+      id: 'ichigo',
+      name: 'Kamen Rider Ichigo',
+      icon: 'assets/images/icons/ichigo.png',
+      maxLp: 3000
+    };
 
     const watermarkEl = document.getElementById('kf-movelist-watermark');
     const switcherEl = document.getElementById('kf-movelist-switcher');
@@ -1991,11 +2043,11 @@
 
     if (switcherEl) {
       switcherEl.innerHTML = riders.map(r => {
-        const shortName = getLocalizedRiderShortName(r);
+        const shortName = escapeHtml(getLocalizedRiderShortName(r));
         const activeClass = r.id === riderObj.id ? 'is-active' : '';
         return `
-          <button type="button" class="kf-movelist-tab-btn ${activeClass}" data-rider-id="${r.id}">
-            <img src="${r.icon}" alt="">
+          <button type="button" class="kf-movelist-tab-btn ${activeClass}" data-rider-id="${escapeHtml(r.id)}">
+            <img src="${escapeHtml(r.icon)}" alt="">
             <span>${shortName}</span>
           </button>
         `;
@@ -2010,34 +2062,42 @@
 
     if (!bodyEl) return;
 
+    const localizedRiderName = escapeHtml(getLocalizedRiderName(riderObj));
+    const localizedSub = escapeHtml(dict.movelistSheetSub(riderObj.maxLp || 3000));
+    const riderIconSafe = escapeHtml(riderObj.icon);
+
     // Show immediate header + loading indicator if JSON is not cached yet
     if (!MOVELIST_CACHE[riderObj.id]) {
       bodyEl.innerHTML = `
         <div class="kf-movelist-header-banner">
-          <img class="kf-movelist-avatar" src="${riderObj.icon}" alt="${getLocalizedRiderName(riderObj)}">
+          <img class="kf-movelist-avatar" src="${riderIconSafe}" alt="${localizedRiderName}">
           <div class="kf-movelist-title-group">
-            <h2 class="kf-movelist-rider-title">${getLocalizedRiderName(riderObj)}</h2>
-            <div class="kf-movelist-subtitle">${dict.movelistSheetSub(riderObj.maxLp || 3000)}</div>
+            <h2 class="kf-movelist-rider-title">${localizedRiderName}</h2>
+            <div class="kf-movelist-subtitle">${localizedSub}</div>
           </div>
         </div>
-        <div style="padding:24px;color:#94a3b8;font-weight:700;">${dict.movelistLoading}</div>
+        <div style="padding:24px;color:#94a3b8;font-weight:700;">${escapeHtml(dict.movelistLoading)}</div>
       `;
     }
 
     const moveFile = await loadRiderMovelist(riderObj.id);
+    if (seq !== movelistRenderSeq) return;
+
     const data = moveFile && (moveFile[langKey] || moveFile.en);
 
     if (!data) {
-      bodyEl.innerHTML = `<div style="padding:24px;color:#ff8da8;font-weight:700;">${dict.movelistError}</div>`;
+      bodyEl.innerHTML = `<div style="padding:24px;color:#ff8da8;font-weight:700;">${escapeHtml(dict.movelistError)}</div>`;
       return;
     }
 
+    const displayTitle = escapeHtml(data.name || getLocalizedRiderName(riderObj));
+
     bodyEl.innerHTML = `
       <div class="kf-movelist-header-banner">
-        <img class="kf-movelist-avatar" src="${riderObj.icon}" alt="${getLocalizedRiderName(riderObj)}">
+        <img class="kf-movelist-avatar" src="${riderIconSafe}" alt="${localizedRiderName}">
         <div class="kf-movelist-title-group">
-          <h2 class="kf-movelist-rider-title">${data.name || getLocalizedRiderName(riderObj)}</h2>
-          <div class="kf-movelist-subtitle">${dict.movelistSheetSub(riderObj.maxLp || 3000)}</div>
+          <h2 class="kf-movelist-rider-title">${displayTitle}</h2>
+          <div class="kf-movelist-subtitle">${localizedSub}</div>
         </div>
       </div>
       <div class="kf-movelist-grid">
@@ -2456,11 +2516,12 @@
       nameEl.insertAdjacentElement('afterend', strip);
     }
 
-    const lp = rider.maxLp || 3000;
+    const lp = escapeHtml(rider.maxLp || 3000);
+    const riderIdSafe = escapeHtml(rider.id);
 
     strip.innerHTML = `
       <span class="kf-stat-chip">LP <strong>${lp}</strong></span>
-      <button type="button" class="kf-stat-chip kf-movelist-btn" data-rider-id="${rider.id}">${dict.movelistBtn}</button>
+      <button type="button" class="kf-stat-chip kf-movelist-btn" data-rider-id="${riderIdSafe}">${escapeHtml(dict.movelistBtn)}</button>
     `;
 
     const movelistBtn = strip.querySelector('.kf-movelist-btn');
@@ -2517,15 +2578,16 @@
       if (isP1) classes.push('is-p1');
       if (isP2) classes.push('is-p2');
 
-      const shortName = getLocalizedRiderShortName(rider);
+      const shortName = escapeHtml(getLocalizedRiderShortName(rider));
+      const fullName = escapeHtml(getLocalizedRiderName(rider));
 
       return `
-        <div class="${classes.join(' ')}" data-rider-index="${idx}" title="${getLocalizedRiderName(rider)}">
+        <div class="${classes.join(' ')}" data-rider-index="${idx}" title="${fullName}">
           <div class="kf-roster-badges">
             ${isP1 ? '<span class="kf-roster-tag p1">P1</span>' : ''}
             ${isP2 ? '<span class="kf-roster-tag p2">P2</span>' : ''}
           </div>
-          <img class="kf-roster-tile-img" src="${rider.icon}" alt="${shortName}">
+          <img class="kf-roster-tile-img" src="${escapeHtml(rider.icon)}" alt="${shortName}">
           <div class="kf-roster-tile-name">${shortName}</div>
         </div>
       `;
@@ -2548,23 +2610,39 @@
     });
   }
 
-  // Close Credits, How To Play, or Movelist modal on Escape or Enter key
+  // Modal Escape/Enter & VS Select keyboard navigation
   document.addEventListener('keydown', function (event) {
-    if (event.key !== 'Escape' && event.key !== 'Enter') return;
-
     const creditsModal = document.getElementById('kf-credits-modal');
-    if (creditsModal && !creditsModal.hidden) {
-      window.closeCreditsModal(event);
-    }
-
     const howtoModal = document.getElementById('kf-howto-modal');
-    if (howtoModal && !howtoModal.hidden) {
-      window.closeHowToPlayModal(event);
+    const movelistModal = document.getElementById('kf-movelist-modal');
+
+    const anyModalOpen =
+      (creditsModal && !creditsModal.hidden) ||
+      (howtoModal && !howtoModal.hidden) ||
+      (movelistModal && !movelistModal.hidden);
+
+    if (anyModalOpen) {
+      if (event.key === 'Escape' || event.key === 'Enter') {
+        event.preventDefault();
+        if (creditsModal && !creditsModal.hidden) window.closeCreditsModal(event);
+        if (howtoModal && !howtoModal.hidden) window.closeHowToPlayModal(event);
+        if (movelistModal && !movelistModal.hidden) window.closeMovelistModal(event);
+      }
+      return;
     }
 
-    const movelistModal = document.getElementById('kf-movelist-modal');
-    if (movelistModal && !movelistModal.hidden) {
-      window.closeMovelistModal(event);
+    const selectScreen = document.getElementById('vs-select-screen');
+    const battleScreen = document.getElementById('battle-screen');
+    if (!selectScreen || selectScreen.hidden || selectScreen.style.display === 'none') return;
+    if (battleScreen && !battleScreen.hidden && battleScreen.style.display !== 'none') return;
+
+    const currentStep = parseInt(window.vsSelectionState?.step, 10) || 1;
+    if (event.key === 'ArrowLeft') {
+      if (currentStep === 1) window.cycleRider('p1', -1);
+      else if (currentStep === 2) window.cycleRider('p2', -1);
+    } else if (event.key === 'ArrowRight') {
+      if (currentStep === 1) window.cycleRider('p1', 1);
+      else if (currentStep === 2) window.cycleRider('p2', 1);
     }
   });
 
@@ -2643,7 +2721,7 @@
   window.confirmStep = function(e) {
     if (e && e.preventDefault) e.preventDefault();
     const state = window.vsSelectionState;
-    let currentStep = parseInt(state.step, 10) || 1;
+    const currentStep = parseInt(state.step, 10) || 1;
 
     if (currentStep === 1) {
       state.step = 2;
@@ -2657,7 +2735,7 @@
   window.goBackStep = function(e) {
     if (e && e.preventDefault) e.preventDefault();
     const state = window.vsSelectionState;
-    let currentStep = parseInt(state.step, 10) || 1;
+    const currentStep = parseInt(state.step, 10) || 1;
 
     if (currentStep === 2) {
       state.step = 1;
@@ -2671,8 +2749,16 @@
   window.handleConfirmStep = window.confirmStep;
   window.handleBackStep = window.goBackStep;
 
-  window.confirmP1 = function(e) { window.vsSelectionState.step = 2; window.updateSelectionUI(); };
-  window.confirmP2 = function(e) { window.vsSelectionState.step = 3; window.updateSelectionUI(); };
+  window.confirmP1 = function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    window.vsSelectionState.step = 2;
+    window.updateSelectionUI();
+  };
+  window.confirmP2 = function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    window.vsSelectionState.step = 3;
+    window.updateSelectionUI();
+  };
   window.confirmSelection = window.confirmStep;
   window.nextStep = window.confirmStep;
   window.confirmP1Selection = window.confirmP1;
@@ -2680,25 +2766,42 @@
 
   /** Updates audio background track volume. */
   window.changeBGMVolume = function(val) {
-    window.currentVolume = parseFloat(val);
+    const parsed = parseFloat(val);
+    if (!Number.isFinite(parsed)) return;
+    window.currentVolume = Math.min(1, Math.max(0, parsed));
     if (window.selectionBGM) window.selectionBGM.volume = window.currentVolume;
     if (window.battleBGM) window.battleBGM.volume = window.currentVolume;
   };
 
+  function pickBgmTrack(tracks) {
+    if (!tracks || tracks.length === 0) return '';
+    if (tracks.length === 1) return tracks[0];
+    const candidates = tracks.filter(tr => tr !== lastPlayedTrack);
+    const pool = candidates.length > 0 ? candidates : tracks;
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    lastPlayedTrack = chosen;
+    return chosen;
+  }
+
   /** Plays randomized background music for character selection screen. */
   window.playSelectionBGM = function() {
-    if (window.selectionBGM) return;
+    if (window.selectionBGM) {
+      window.selectionBGM.volume = window.currentVolume;
+      if (window.selectionBGM.paused) {
+        const resumePromise = window.selectionBGM.play();
+        if (resumePromise !== undefined) resumePromise.catch(() => {});
+      }
+      return;
+    }
     try {
-      const randomIndex = Math.floor(Math.random() * SELECTION_BGM_TRACKS.length);
-      const randomTrack = SELECTION_BGM_TRACKS[randomIndex];
-
+      const randomTrack = pickBgmTrack(SELECTION_BGM_TRACKS);
       window.selectionBGM = new Audio(randomTrack);
       window.selectionBGM.loop = true;
       window.selectionBGM.volume = window.currentVolume;
       const playPromise = window.selectionBGM.play();
       if (playPromise !== undefined) playPromise.catch(() => {});
     } catch (e) {
-      console.warn("Audio load error:", e);
+      console.warn('Audio load error:', e);
     }
   };
 
@@ -2715,18 +2818,23 @@
 
   /** Plays randomized background music for live battle screen. */
   window.playBattleBGM = function() {
-    if (window.battleBGM) return;
+    if (window.battleBGM) {
+      window.battleBGM.volume = window.currentVolume;
+      if (window.battleBGM.paused) {
+        const resumePromise = window.battleBGM.play();
+        if (resumePromise !== undefined) resumePromise.catch(() => {});
+      }
+      return;
+    }
     try {
-      const randomIndex = Math.floor(Math.random() * BATTLE_BGM_TRACKS.length);
-      const randomTrack = BATTLE_BGM_TRACKS[randomIndex];
-
+      const randomTrack = pickBgmTrack(BATTLE_BGM_TRACKS);
       window.battleBGM = new Audio(randomTrack);
       window.battleBGM.loop = true;
       window.battleBGM.volume = window.currentVolume;
       const playPromise = window.battleBGM.play();
       if (playPromise !== undefined) playPromise.catch(() => {});
     } catch (e) {
-      console.warn("Audio load error:", e);
+      console.warn('Audio load error:', e);
     }
   };
 
@@ -2749,9 +2857,9 @@
     if (!riders || riders.length === 0) return;
 
     if (playerKey === 'p1' && currentStep === 1) {
-      state.p1Index = (state.p1Index + direction + riders.length) % riders.length;
+      state.p1Index = normalizeIndex(state.p1Index + direction, riders.length);
     } else if (playerKey === 'p2' && currentStep === 2) {
-      state.p2Index = (state.p2Index + direction + riders.length) % riders.length;
+      state.p2Index = normalizeIndex(state.p2Index + direction, riders.length);
     }
     window.updateSelectionUI();
   };
@@ -2788,9 +2896,8 @@
       return;
     }
 
-    const rider =
-      riders[state[playerKey + 'Index']] ||
-      riders[0];
+    const idx = normalizeIndex(state[playerKey + 'Index'], riders.length);
+    const rider = riders[idx] || riders[0];
 
     if (!rider) return;
 
@@ -2823,8 +2930,8 @@
 
     const currentStep = parseInt(state.step, 10) || 1;
 
-    if (state.p1Index >= riders.length) state.p1Index = 0;
-    if (state.p2Index >= riders.length) state.p2Index = 0;
+    state.p1Index = normalizeIndex(state.p1Index, riders.length);
+    state.p2Index = normalizeIndex(state.p2Index, riders.length);
 
     const p1 = riders[state.p1Index] || riders[0];
     const p2 = riders[state.p2Index] || riders[0];
@@ -2843,22 +2950,26 @@
     const p1Card = document.getElementById('p1-card');
     const p2Card = document.getElementById('p2-card');
     if (p1Card) {
-      const h2 = p1Card.querySelector('h2');
+      const h2 = p1Card.querySelector('h2, h3, .player-title');
       if (h2) h2.textContent = dict.player1Heading;
       const diffLbl = p1Card.querySelector('.diff-label');
       if (diffLbl) diffLbl.textContent = dict.difficultyLabel;
     }
     if (p2Card) {
-      const h2 = p2Card.querySelector('h2');
+      const h2 = p2Card.querySelector('h2, h3, .player-title');
       if (h2) h2.textContent = dict.player2Heading;
       const diffLbl = p2Card.querySelector('.diff-label');
       if (diffLbl) diffLbl.textContent = dict.difficultyLabel;
     }
 
-    // Error Banner
+    // Error Banner (automatically clear once at least one slot is CPU)
     const errorBanner = document.getElementById('vs-error-banner');
     if (errorBanner) {
       errorBanner.textContent = dict.errorCpuBanner;
+      if (state.p1IsCPU || state.p2IsCPU) {
+        errorBanner.hidden = true;
+        errorBanner.style.display = 'none';
+      }
     }
 
     // P1 Display updates
@@ -2870,7 +2981,10 @@
     updateRiderStatStrip('p1', p1);
 
     const p1TypeEl = document.getElementById('p1-type-display');
-    if (p1TypeEl) p1TypeEl.textContent = state.p1IsCPU ? dict.cpuLabel : dict.humanLabel;
+    if (p1TypeEl) {
+      p1TypeEl.textContent = state.p1IsCPU ? dict.cpuLabel : dict.humanLabel;
+      if ('disabled' in p1TypeEl) p1TypeEl.disabled = currentStep !== 1;
+    }
 
     const p1DiffDisplay = document.getElementById('p1-diff-display');
     if (p1DiffDisplay) {
@@ -2894,7 +3008,10 @@
     updateRiderStatStrip('p2', p2);
 
     const p2TypeEl = document.getElementById('p2-type-display');
-    if (p2TypeEl) p2TypeEl.textContent = state.p2IsCPU ? dict.cpuLabel : dict.humanLabel;
+    if (p2TypeEl) {
+      p2TypeEl.textContent = state.p2IsCPU ? dict.cpuLabel : dict.humanLabel;
+      if ('disabled' in p2TypeEl) p2TypeEl.disabled = currentStep !== 2;
+    }
 
     const p2DiffDisplay = document.getElementById('p2-diff-display');
     if (p2DiffDisplay) {
@@ -2995,6 +3112,26 @@
 
   /** Validates selection state and transitions to live battle mode via startBattle(). */
   window.validateAndStartMatch = function() {
+    const dict = t();
+    const state = window.vsSelectionState;
+
+    // Require at least one CPU opponent
+    if (!state.p1IsCPU && !state.p2IsCPU) {
+      const errorBanner = document.getElementById('vs-error-banner');
+      if (errorBanner) {
+        errorBanner.textContent = dict.errorCpuBanner;
+        errorBanner.hidden = false;
+        errorBanner.style.display = '';
+      }
+      return false;
+    }
+
+    const errorBanner = document.getElementById('vs-error-banner');
+    if (errorBanner) {
+      errorBanner.hidden = true;
+      errorBanner.style.display = 'none';
+    }
+
     disablePortraitOrientationOverlay();
     window.closeCreditsModal();
     window.closeHowToPlayModal();
@@ -3010,17 +3147,24 @@
     const selectScreen = document.getElementById('vs-select-screen');
     const battleScreen = document.getElementById('battle-screen');
 
-    if (selectScreen) selectScreen.hidden = true;
-    if (battleScreen) battleScreen.hidden = false;
+    if (selectScreen) {
+      selectScreen.hidden = true;
+      selectScreen.style.display = 'none';
+    }
+    if (battleScreen) {
+      battleScreen.hidden = false;
+      battleScreen.style.display = '';
+    }
 
     const riders = window.AVAILABLE_RIDERS;
-    const state = window.vsSelectionState;
+    const p1Idx = normalizeIndex(state.p1Index, riders.length);
+    const p2Idx = normalizeIndex(state.p2Index, riders.length);
 
     const matchConfig = {
-      p1Rider: riders[state.p1Index] || riders[0],
+      p1Rider: riders[p1Idx] || riders[0],
       p1IsCPU: state.p1IsCPU,
       p1Difficulty: state.p1IsCPU ? state.p1Difficulty : 'balanced',
-      p2Rider: riders[state.p2Index] || riders[0],
+      p2Rider: riders[p2Idx] || riders[0],
       p2IsCPU: state.p2IsCPU,
       p2Difficulty: state.p2IsCPU ? state.p2Difficulty : 'balanced',
       lang: window.gameLang
@@ -3029,9 +3173,10 @@
     if (typeof window.startBattle === 'function') {
       window.startBattle(matchConfig);
     }
+    return true;
   };
 
-  // Step confirm & difficulty badge click listener
+  // Delegated click listener for controls lacking inline onclick handlers
   document.addEventListener('click', (e) => {
     const p1Diff = e.target.closest('#p1-diff-display');
     if (p1Diff && !p1Diff.hasAttribute('onclick')) {
@@ -3045,18 +3190,45 @@
       return;
     }
 
+    const p1Type = e.target.closest('#p1-type-display');
+    if (p1Type && !p1Type.hasAttribute('onclick')) {
+      window.toggleControlType('p1');
+      return;
+    }
+
+    const p2Type = e.target.closest('#p2-type-display');
+    if (p2Type && !p2Type.hasAttribute('onclick')) {
+      window.toggleControlType('p2');
+      return;
+    }
+
     const p1Btn = e.target.closest('#confirm-p1-btn, #btn-confirm-p1');
-    if (p1Btn) {
-      window.vsSelectionState.step = 2;
-      window.updateSelectionUI();
+    if (p1Btn && !p1Btn.hasAttribute('onclick')) {
+      window.confirmP1(e);
       return;
     }
 
     const p2Btn = e.target.closest('#confirm-p2-btn, #btn-confirm-p2');
-    if (p2Btn) {
-      window.vsSelectionState.step = 3;
-      window.updateSelectionUI();
+    if (p2Btn && !p2Btn.hasAttribute('onclick')) {
+      window.confirmP2(e);
       return;
+    }
+
+    const sharedConfirm = e.target.closest('#confirm-btn');
+    if (sharedConfirm && !sharedConfirm.hasAttribute('onclick')) {
+      window.confirmStep(e);
+      return;
+    }
+
+    const backBtn = e.target.closest('#back-btn');
+    if (backBtn && !backBtn.hasAttribute('onclick')) {
+      window.goBackStep(e);
+      return;
+    }
+
+    const startBtn = e.target.closest('#start-game-btn');
+    if (startBtn && !startBtn.hasAttribute('onclick')) {
+      window.validateAndStartMatch();
     }
   });
 
@@ -3073,13 +3245,15 @@
       const res = await fetch('data/riders.json');
       if (res.ok) {
         const allRiders = await res.json();
-        const activeRiders = allRiders.filter(r => r.active === true);
+        const activeRiders = Array.isArray(allRiders)
+          ? allRiders.filter(r => r.active === true)
+          : [];
         if (activeRiders.length > 0) {
           window.AVAILABLE_RIDERS = activeRiders;
         }
       }
     } catch (err) {
-      console.warn("Could not load riders.json, defaulting to fallback roster.");
+      console.warn('Could not load riders.json, defaulting to fallback roster.');
     }
 
     loadRiderMovelist('ichigo');
@@ -3087,7 +3261,11 @@
     window.updateSelectionUI();
 
     const unlockAudio = () => {
-      window.playSelectionBGM();
+      const battleScreen = document.getElementById('battle-screen');
+      const inBattle = battleScreen && !battleScreen.hidden && battleScreen.style.display !== 'none';
+      if (!inBattle) {
+        window.playSelectionBGM();
+      }
       window.removeEventListener('click', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
@@ -3106,7 +3284,9 @@
     const movelistModal = document.getElementById('kf-movelist-modal');
     if (movelistModal && !movelistModal.hidden) {
       const activeTab = document.querySelector('#kf-movelist-switcher .kf-movelist-tab-btn.is-active');
-      const fallbackRider = (window.AVAILABLE_RIDERS && window.AVAILABLE_RIDERS[window.vsSelectionState.p1Index]) || { id: 'ichigo' };
+      const riders = window.AVAILABLE_RIDERS || [];
+      const fallbackIdx = normalizeIndex(window.vsSelectionState.p1Index, riders.length);
+      const fallbackRider = riders[fallbackIdx] || { id: 'ichigo' };
       const activeRiderId = activeTab ? activeTab.getAttribute('data-rider-id') : fallbackRider.id;
       renderMovelistModalContent(activeRiderId);
     }

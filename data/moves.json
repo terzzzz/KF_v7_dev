@@ -1026,7 +1026,7 @@
           { "name": "超電極螺旋踢", "cmd": "S+I", "chi": 10, "dmg": 1250, "remarks": "" }
         ],
         "utilities": [
-          { "name": "跳躍", "cmd": "W+I", "chi": 0, "effect": "提升攻擊力與迴避率", "remarks": "持續3回合" },
+          { "name": "騰空", "cmd": "W+I", "chi": 0, "effect": "提升攻擊力與迴避率", "remarks": "持續3回合" },
           { "name": "電磁力場", "cmd": "W+J", "chi": 0, "effect": "提升防禦力", "remarks": "持續4回合" },
           { "name": "電氣發電極", "cmd": "W+K", "chi": 2, "effect": "解放必殺技能", "remarks": "持續15回合、返還2點氣" },
           { "name": "戰吼", "cmd": "W+L", "chi": 0, "effect": "降低暈眩值", "remarks": "" }

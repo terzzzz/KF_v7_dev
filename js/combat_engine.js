@@ -89,10 +89,13 @@
     }
   });
 
-  function getLang() {
+function getLang() {
     const lang = String(
+      g.gameLang ||
       g.GAME_LANG ||
       g.currentLang ||
+      g.gameState?.matchConfig?.lang ||
+      g.gameState?.lang ||
       (typeof g.getGameLanguage === "function" ? g.getGameLanguage() : "") ||
       document.documentElement?.lang ||
       "en"

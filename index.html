@@ -55,7 +55,7 @@
     }
 
     .start-lang-caption {
-      font-family: 'Orbitron', 'Chakra Petch', 'Noto Sans JP', sans-serif;
+      font-family: 'Orbitron', 'Chakra Petch', 'Noto Sans JP', 'Noto Sans TC', sans-serif;
       font-size: clamp(0.75rem, 1.4vw, 0.9rem);
       font-weight: 700;
       letter-spacing: 0.14em;
@@ -75,7 +75,7 @@
     .start-lang-btn {
       cursor: pointer;
       min-width: 160px;
-      font-family: 'Orbitron', 'Chakra Petch', 'Noto Sans JP', sans-serif;
+      font-family: 'Orbitron', 'Chakra Petch', 'Noto Sans JP', 'Noto Sans TC', sans-serif;
       font-size: clamp(0.9rem, 1.7vw, 1.1rem);
       font-weight: 900;
       letter-spacing: 0.12em;
@@ -95,6 +95,12 @@
       box-shadow: 0 4px 18px rgba(0, 0, 0, 0.75), 0 0 14px rgba(255, 209, 102, 0.45);
     }
 
+    .start-lang-btn.lang-zh {
+      background: linear-gradient(180deg, #d1fae5 0%, #6ee7b7 100%) !important;
+      border-color: #00e676 !important;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.75), 0 0 14px rgba(0, 230, 118, 0.45);
+    }
+
     .start-lang-btn:hover,
     .start-lang-btn:focus-visible {
       color: #4a0012 !important;
@@ -108,6 +114,12 @@
     .start-lang-btn.lang-ja:focus-visible {
       background: linear-gradient(180deg, #ffffff 0%, #ffe082 100%) !important;
       box-shadow: 0 6px 22px rgba(0, 0, 0, 0.85), 0 0 22px rgba(255, 209, 102, 0.85);
+    }
+
+    .start-lang-btn.lang-zh:hover,
+    .start-lang-btn.lang-zh:focus-visible {
+      background: linear-gradient(180deg, #ffffff 0%, #a7f3d0 100%) !important;
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.85), 0 0 22px rgba(0, 230, 118, 0.85);
     }
 
     a.action-btn,
@@ -141,7 +153,7 @@
       <div id="start-prompt"
            class="start-prompt"
            hidden>
-        <div class="start-lang-caption">SELECT LANGUAGE / 言語を選択</div>
+        <div class="start-lang-caption">SELECT LANGUAGE / 言語を選択 / 選擇語言</div>
         <div class="start-lang-btn-row">
           <button id="start-btn-en"
                   type="button"
@@ -154,6 +166,12 @@
                   class="start-lang-btn lang-ja"
                   onclick="if(window.setGameLanguage) window.setGameLanguage('ja');">
             日本語
+          </button>
+          <button id="start-btn-zh"
+                  type="button"
+                  class="start-lang-btn lang-zh"
+                  onclick="if(window.setGameLanguage) window.setGameLanguage('zh');">
+            中文
           </button>
         </div>
       </div>

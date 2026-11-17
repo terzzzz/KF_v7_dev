@@ -335,17 +335,17 @@
     "W+I": {
       "name": "Wild Leap",
       "type": "UTILITY",
-      "chiCost": 1,
+      "chiCost": 2,
       "baseDamage": 0,
       "hitChance": 100,
       "video": "jump.mp4",
-      "grantsAirborne": 4,
+      "grantsAirborne": 3,
       "buff": {
         "id": "airborne_boost",
         "label": "AIR",
         "type": "speed",
-        "duration": 4,
-        "effects": { "attack": 1.33, "evasion": 0.30 }
+        "duration": 3,
+        "effects": { "attack": 1.2, "evasion": 0.25 }
       }
     },
     "W+J": {
@@ -366,7 +366,7 @@
     "W+K": {
       "name": "Gigi Focus",
       "type": "UTILITY",
-      "chiCost": 1,
+      "chiCost": 2,
       "baseDamage": 0,
       "hitChance": 100,
       "video": "gigi_focus.mp4",
@@ -475,7 +475,7 @@
     },
     "D+J": { "name": "Elec-Punch", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 52, "hitChance": 79, "video": "punch.mp4" },
     "D+K": { "name": "Elec-Kick", "type": "PHYSICAL", "chiCost": 0, "baseDamage": 56, "hitChance": 79, "video": "kick.mp4" },
-    "D+L": { "name": "Tackle", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 102, "hitChance": 77, "video": "tackle.mp4" },
+    "D+L": { "name": "Tackle", "type": "PHYSICAL", "chiCost": 1, "baseDamage": 102, "hitChance": 82, "video": "tackle.mp4" },
     "D+I": { "name": "Electro Kicks", "type": "PHYSICAL", "chiCost": 1, "chiRefundOnHit": 4, "baseDamage": 94, "hitChance": 76, "video": "electro_kicks.mp4" },
     "S+J": {
       "name": "Electro Fire",
@@ -901,9 +901,9 @@
           { "name": "Daisetsudan", "cmd": "S+I", "chi": 9, "dmg": 1020, "remarks": "" }
         ],
         "utilities": [
-          { "name": "Wild Leap", "cmd": "W+I", "chi": 1, "effect": "Buff attack and evasion", "remarks": "Last 4 rounds" },
+          { "name": "Wild Leap", "cmd": "W+I", "chi": 2, "effect": "Buff attack and evasion", "remarks": "Last 3 rounds" },
           { "name": "Inca Blessing", "cmd": "W+J", "chi": 4, "effect": "Regenerate LP", "remarks": "Last 3 rounds" },
-          { "name": "Gigi Focus", "cmd": "W+K", "chi": 1, "effect": "Buff evasion", "remarks": "Last 3 rounds" },
+          { "name": "Gigi Focus", "cmd": "W+K", "chi": 2, "effect": "Buff evasion", "remarks": "Last 3 rounds" },
           { "name": "Wild Instinct", "cmd": "W+L", "chi": 0, "effect": "Decrease faint", "remarks": "" }
         ],
         "defense": [

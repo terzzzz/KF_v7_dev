@@ -119,26 +119,15 @@
     return Array.isArray(raw) ? raw.join('\n') : String(raw);
   }
 
-  /** Permanently disables and removes any portrait-rotation blocker overlay (fixes PLiCy/browser iframe lock). */
-  function disablePortraitOrientationOverlay() {
-    const selectors = [
-      '#portrait-orientation-overlay',
-      '.portrait-orientation-overlay',
-      '#orientation-overlay',
-      '.orientation-overlay',
-      '#rotate-device-overlay',
-      '.rotate-device-overlay'
-    ];
-    document.querySelectorAll(selectors.join(', ')).forEach(el => {
-      el.hidden = true;
-      el.style.setProperty('display', 'none', 'important');
-      el.style.setProperty('pointer-events', 'none', 'important');
-      el.style.setProperty('visibility', 'hidden', 'important');
-      el.style.setProperty('z-index', '-1', 'important');
-      if (el.parentNode) {
-        el.parentNode.removeChild(el);
-      }
-    });
+/** Updates the mobile-landscape portrait prompt text to match the active language. */
+  function updatePortraitOverlayLanguage() {
+    const overlay = document.getElementById('portrait-orientation-overlay');
+    if (!overlay) return;
+    const dict = t();
+    const titleEl = overlay.querySelector('h2');
+    const subEl = overlay.querySelector('p');
+    if (titleEl) titleEl.textContent = dict.rotateTitle;
+    if (subEl) subEl.textContent = dict.rotateSub;
   }
 
   /*
@@ -579,11 +568,11 @@
   }
 
   /** Sets the active game language ('en', 'ja', or 'zh') and refreshes all VS Select UI & Modals. */
-  window.setGameLanguage = function (lang) {
+window.setGameLanguage = function (lang) {
     window.gameLang = normalizeLang(lang);
     document.documentElement.lang = window.gameLang;
 
-    disablePortraitOrientationOverlay();
+    updatePortraitOverlayLanguage();
 
     const dict = t();
 
@@ -767,19 +756,7 @@
         --kf-bg-deep: #070a12;
       }
 
-      /* --- Force-Disable Portrait Orientation Blocker in All Browser/Iframe Contexts --- */
-      #portrait-orientation-overlay,
-      .portrait-orientation-overlay,
-      #orientation-overlay,
-      .orientation-overlay,
-      #rotate-device-overlay,
-      .rotate-device-overlay {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        z-index: -1 !important;
-      }
+
 
       /* --- Screen Atmosphere & Cyber Grid --- */
       #vs-select-screen {
@@ -1975,9 +1952,8 @@
 
     (document.head || document.documentElement).appendChild(style);
   }
-
   installRiderBadgeStyles();
-  disablePortraitOrientationOverlay();
+  updatePortraitOverlayLanguage();
 
   /** Builds a single category card table inside the Movelist modal. */
   function buildMovelistCategoryHtml(title, sub, catClass, moves, isAttack) {
@@ -2917,8 +2893,8 @@
   };
 
   /** Synchronizes selection screen UI elements, controls, and card highlights with selection state & active language. */
-  window.updateSelectionUI = function() {
-    disablePortraitOrientationOverlay();
+window.updateSelectionUI = function() {
+    updatePortraitOverlayLanguage();
     ensureCreditsUI();
     ensureHowToPlayUI();
     ensureMovelistUI();
@@ -3132,7 +3108,7 @@
       errorBanner.style.display = 'none';
     }
 
-    disablePortraitOrientationOverlay();
+    updatePortraitOverlayLanguage();
     window.closeCreditsModal();
     window.closeHowToPlayModal();
     window.closeMovelistModal();
@@ -3231,10 +3207,9 @@
       window.validateAndStartMatch();
     }
   });
-
-  // DOM initialization and roster fetching
-  document.addEventListener('DOMContentLoaded', async () => {
-    disablePortraitOrientationOverlay();
+   // DOM initialization and roster fetching
+   document.addEventListener('DOMContentLoaded', async () => {
+    updatePortraitOverlayLanguage();
     protectStartPromptButtons();
 
     ensureCreditsUI();
@@ -3276,8 +3251,7 @@
     window.addEventListener('keydown', unlockAudio);
   });
 
-  window.addEventListener('resize', disablePortraitOrientationOverlay);
-  window.addEventListener('orientationchange', disablePortraitOrientationOverlay);
+
 
   window.refreshVsSelectLanguage = function () {
     window.updateSelectionUI();

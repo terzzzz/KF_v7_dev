@@ -129,12 +129,12 @@ input {
   100% { transform: scale(1.04); opacity: 1; text-shadow: 0 0 20px var(--text-yellow); }
 }
 
-/* PORTRAIT ORIENTATION LOCK OVERLAY */
+/* PORTRAIT ORIENTATION LOCK OVERLAY (CELL PHONE LANDSCAPE ONLY) */
 #portrait-orientation-overlay {
   display: none;
 }
 
-@media screen and (orientation: landscape) and (max-width: 1024px) {
+@media screen and (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
   #portrait-orientation-overlay {
     display: flex !important;
     position: fixed;

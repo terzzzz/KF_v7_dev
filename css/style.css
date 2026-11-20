@@ -28,11 +28,6 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  font-family: 'Courier New', Courier, monospace;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
 }
 
 html,
@@ -42,6 +37,7 @@ body {
   height: 100dvh;
   background-color: var(--bg-color);
   color: var(--text-main);
+  font-family: 'Courier New', Courier, monospace;
   overflow: hidden;
   margin: 0;
   padding: 0;
@@ -51,6 +47,15 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button,
+input {
+  font-family: inherit;
 }
 
 /* PRELOADER / LAUNCH LOADING SCREEN */
@@ -63,22 +68,6 @@ body {
   text-align: center;
   background: #08090d;
   overflow: hidden;
-}
-
-/* DULLED BACKGROUND IMAGE OVERLAY */
-#loading-screen::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image: url('../IMG_2309.jpeg');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  filter: brightness(0.32) contrast(0.85) grayscale(25%);
-  z-index: 0;
 }
 
 .loading-content {
@@ -835,8 +824,6 @@ body {
 .player-box {
   width: 30%;
   height: 100%;
-  min-width: 0;
-  min-height: 0;
   background: #000;
   border: 2px solid #222;
   position: relative;
@@ -854,14 +841,11 @@ body {
 .player-box img.rider-media {
   width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  min-width: 0;
-  min-height: 0;
   object-fit: contain;
   object-position: center;
   background: #000;
   flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* REAL-TIME DYNAMIC PLAYER CHARGE BARS */
@@ -937,8 +921,6 @@ body {
 .center-action-box img.rider-media {
   width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
   object-fit: contain;
   object-position: center;
   background: #000;
@@ -1374,239 +1356,6 @@ img.mirror-flip {
   }
 }
 
-/* ==========================================================================
-   MOBILE LANDSCAPE & SHORT-VIEWPORT COMPACT LAYOUT (height <= 520px)
-   Prevents HUD + controls from crushing #battle-viewport or clipping off-screen
-   ========================================================================== */
-@media screen and (max-height: 520px) {
-  /* Keep fixed screens locked to 100dvh with internal scrolling if needed */
-  #vs-select-screen,
-  #battle-screen {
-    height: 100dvh !important;
-    max-height: 100dvh !important;
-    overflow-y: auto !important;
-    padding: 4px 8px !important;
-  }
-
-  /* Compact Character Selection for Phone Landscape */
-  #vs-select-screen h1 {
-    font-size: 0.85rem !important;
-    margin: 1px 0 2px !important;
-  }
-
-  #vs-select-screen .kf-step-tracker {
-    margin: 1px auto 3px !important;
-    gap: 5px !important;
-  }
-
-  #vs-select-screen .kf-step-pill {
-    padding: 2px 8px !important;
-    font-size: 0.58rem !important;
-  }
-
-  #vs-select-screen .rider-card {
-    padding: 4px 8px !important;
-  }
-
-  #vs-select-screen .rider-card h2 {
-    font-size: 0.76rem !important;
-    margin-bottom: 1px !important;
-  }
-
-  #vs-select-screen .portrait-box {
-    min-height: 44px !important;
-    max-height: 22dvh !important;
-    margin: 2px 0 !important;
-  }
-
-  #vs-select-screen .rider-card h3 {
-    font-size: 0.74rem !important;
-    margin: 1px 0 !important;
-  }
-
-  #vs-select-screen .kf-stat-strip {
-    margin: 1px 0 2px !important;
-    font-size: 0.62rem !important;
-  }
-
-  #vs-select-screen .card-controls {
-    margin: 2px 0 !important;
-    gap: 4px !important;
-  }
-
-  #vs-select-screen .card-controls button {
-    width: 24px !important;
-    height: 24px !important;
-    font-size: 0.8rem !important;
-  }
-
-  #vs-select-screen .type-badge {
-    padding: 2px 6px !important;
-    font-size: 0.68rem !important;
-  }
-
-  #vs-select-screen .difficulty-control-group {
-    margin-top: 2px !important;
-    font-size: 0.64rem !important;
-  }
-
-  #vs-select-screen .vs-divider {
-    font-size: 1.4rem !important;
-    margin-top: 12px !important;
-  }
-
-  #vs-select-screen .kf-roster-dock {
-    margin: 3px auto 2px !important;
-    padding: 3px 10px !important;
-  }
-
-  #vs-select-screen .kf-roster-dock-title,
-  #vs-select-screen .kf-roster-tile-name {
-    display: none !important;
-  }
-
-  #vs-select-screen .kf-roster-tile {
-    width: 36px !important;
-    padding: 2px !important;
-  }
-
-  #vs-select-screen .selection-actions {
-    margin-top: 2px !important;
-    padding: 2px !important;
-    gap: 6px !important;
-  }
-
-  #vs-select-screen .nav-btn,
-  #vs-select-screen .action-btn {
-    padding: 4px 12px !important;
-    font-size: 0.72rem !important;
-  }
-
-  /* Compact Battle HUD & Controls for Phone Landscape */
-  #battle-screen .hud-bar {
-    padding: 2px 8px;
-  }
-
-  #battle-screen .player-hud {
-    gap: 1px;
-  }
-
-  #battle-screen .player-hud h2 {
-    font-size: 0.82rem;
-    margin-bottom: 0;
-  }
-
-  #battle-screen .rider-subtext {
-    font-size: 0.62rem;
-  }
-
-  #battle-screen .stat-line {
-    font-size: 0.72rem;
-    line-height: 1.1;
-  }
-
-  #battle-screen .stat-value-styled {
-    font-size: 0.9rem;
-  }
-
-  #battle-screen .lp-bar-wrapper,
-  #battle-screen .chi-bar-wrapper {
-    height: 5px;
-    margin: 1px 0;
-  }
-
-  #battle-screen .faint-bar-wrapper {
-    margin-top: 1px;
-    gap: 4px;
-  }
-
-  #battle-screen .faint-track {
-    width: 8px;
-    height: 15px;
-  }
-
-  #battle-screen .faint-label {
-    font-size: 0.6rem;
-  }
-
-  #battle-screen .status-tag {
-    font-size: 0.64rem;
-    margin-top: 1px;
-  }
-
-  #battle-screen .buff-tray {
-    margin-top: 1px;
-    gap: 3px;
-  }
-
-  #battle-screen .buff-tag {
-    font-size: 0.6rem;
-    padding: 1px 4px;
-  }
-
-  #battle-screen .round-title {
-    font-size: 0.78rem;
-  }
-
-  #battle-screen .timer-display {
-    font-size: 0.95rem;
-    margin-top: 0;
-  }
-
-  #battle-screen .battle-banner,
-  #battle-screen .action-sub-banner {
-    padding: 2px 6px;
-    margin: 1px 0;
-    font-size: 0.68rem;
-    line-height: 1.15;
-  }
-
-  #battle-screen #battle-viewport {
-    min-height: 145px;
-    flex: 1 1 auto;
-  }
-
-  #battle-screen .player-charge-container {
-    padding: 1px 3px 2px;
-  }
-
-  #battle-screen .player-charge-track {
-    height: 13px;
-  }
-
-  #battle-screen .player-charge-text {
-    font-size: 0.56rem;
-  }
-
-  #battle-screen .dual-controls-panel {
-    padding: 2px 6px;
-  }
-
-  #battle-screen .compact-pad-container {
-    padding: 2px 4px;
-    max-width: 210px;
-  }
-
-  #battle-screen .pad-label {
-    font-size: 0.55rem;
-    margin-bottom: 1px;
-  }
-
-  #battle-screen .charge-status {
-    font-size: 0.6rem;
-  }
-
-  #battle-screen .pad-grid-4x2 {
-    gap: 2px;
-  }
-
-  #battle-screen .pad-btn {
-    width: 32px;
-    height: 24px;
-    font-size: 0.72rem;
-  }
-}
-
 /* CHI THRESHOLD STATE STYLES */
 .chi-text-low {
   color: #ff2a5f !important;
@@ -1664,11 +1413,4 @@ img.mirror-flip {
 #human-control-panel > #p2-controls {
   margin-left: auto;
   margin-right: 0;
-}
-
-/* Prevent WebKit GPU crashes from CSS filters on <video> on mobile devices */
-@media (hover: none) and (pointer: coarse) {
-  .p2-mirror-palette {
-    filter: none !important;
-  }
 }

@@ -73,7 +73,7 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background-image: url('IMG_2309.jpeg');
+  background-image: url('../IMG_2309.jpeg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -426,12 +426,14 @@ body {
   background: #102418;
 }
 
+.diff-badge.balanced,
 .diff-badge.normal {
   border-color: var(--text-yellow);
   color: var(--text-yellow);
   background: #3a2e00;
 }
 
+.diff-badge.defensive,
 .diff-badge.hard {
   border-color: #ff8800;
   color: #ff8800;
@@ -602,10 +604,11 @@ body {
 }
 
 .player-hud {
-  width: 42%;
+  width: 40%;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .p2-hud {
@@ -617,6 +620,15 @@ body {
   font-size: clamp(0.9rem, 3vw, 1.25rem);
   color: var(--border-cyan);
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.rider-subtext {
+  display: inline-block;
+  white-space: nowrap;
 }
 
 .stat-line {
@@ -706,10 +718,14 @@ body {
 }
 
 .status-tag {
-  font-size: 0.85rem;
+  font-size: clamp(0.68rem, 1.4vw, 0.82rem);
   color: var(--border-cyan);
   font-weight: bold;
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .buff-tray {
@@ -737,13 +753,15 @@ body {
 
 .center-hud {
   text-align: center;
-  width: 16%;
+  width: 20%;
+  flex-shrink: 0;
 }
 
 .round-title {
   font-size: clamp(0.85rem, 2.8vw, 1.2rem);
   color: var(--text-yellow);
   font-weight: bold;
+  white-space: nowrap;
 }
 
 .timer-display {
@@ -751,6 +769,7 @@ body {
   color: var(--text-red);
   font-weight: 900;
   margin-top: 2px;
+  white-space: nowrap;
 }
 
 /* PRIMARY BANNERS */
@@ -816,6 +835,8 @@ body {
 .player-box {
   width: 30%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   background: #000;
   border: 2px solid #222;
   position: relative;
@@ -833,11 +854,14 @@ body {
 .player-box img.rider-media {
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
   object-fit: contain;
   object-position: center;
   background: #000;
   flex: 1 1 auto;
-  min-height: 0;
 }
 
 /* REAL-TIME DYNAMIC PLAYER CHARGE BARS */
@@ -913,6 +937,8 @@ body {
 .center-action-box img.rider-media {
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   object-position: center;
   background: #000;
@@ -1023,14 +1049,16 @@ img.mirror-flip {
 .charge-bar-wrapper {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
 }
 
 .charge-status {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: var(--border-cyan);
   font-weight: bold;
-  width: 180px;
+  width: auto;
+  white-space: nowrap;
 }
 
 .charge-track {
@@ -1346,6 +1374,19 @@ img.mirror-flip {
   }
 }
 
+/* SHORT-VIEWPORT / IFRAME SAFEGUARD */
+@media screen and (max-height: 580px) {
+  #battle-screen {
+    height: auto;
+    min-height: 100dvh;
+    overflow-y: auto;
+  }
+
+  #battle-viewport {
+    min-height: 220px;
+  }
+}
+
 /* CHI THRESHOLD STATE STYLES */
 .chi-text-low {
   color: #ff2a5f !important;
@@ -1395,7 +1436,6 @@ img.mirror-flip {
 
 /* Keep human controls on their player's side,
    including when the other player's controls are hidden. */
-
 #human-control-panel > #p1-controls {
   margin-left: 0;
   margin-right: auto;

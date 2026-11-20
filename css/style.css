@@ -1665,3 +1665,10 @@ img.mirror-flip {
   margin-left: auto;
   margin-right: 0;
 }
+
+/* Prevent WebKit GPU crashes from CSS filters on <video> on mobile devices */
+@media (hover: none) and (pointer: coarse) {
+  .p2-mirror-palette {
+    filter: none !important;
+  }
+}
